@@ -228,7 +228,18 @@ instance and the standalone — the plugin equivalent of RCRDR's `@AppStorage`
 theme. Theme is **not** stored in the DAW plugin state.
 
 Built-in "Start from" presets (in `Theme.cpp`): Midnight (the default look),
-Slate, Graphite, Amber, Paper. `ThemeEditor` (Tools ▾ → "Theme…", shown in a
+Slate, Graphite, Amber, Paper, Madrona (steel-blue chrome / dark waveform —
+see below).
+
+`Palette` has two text pairs: `text`/`textDim` for components with no fill of
+their own (HeaderBar, EditorToolbar, KnobRow, KnobLookAndFeel — they show
+through `windowBg`), and `screenText`/`screenTextDim` for the two components
+that paint their own background (`WaveformDisplay`, `TimeRuler` — both fill
+`panelBg`). Every preset before Madrona kept `windowBg`/`panelBg` close in
+lightness, so one text pair read fine on both; Madrona deliberately doesn't
+(a light steel `windowBg` around an untouched dark `panelBg`), which is why the
+split exists — without it the ruler ticks and the "No audio loaded" placeholder
+would render invisible dark-on-dark. `ThemeEditor` (Tools ▾ → "Theme…", shown in a
 CallOutBox) has the preset combo, a hex row per colour (type a code or click the
 swatch for an **in-panel** colour picker — deliberately not a nested call-out,
 which would dismiss the parent), a name field + Save for custom presets, and
