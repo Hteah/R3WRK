@@ -151,6 +151,14 @@ juce::Range<int64_t> AudioDocument::getEffectiveRange() const
     return { (int64_t) 0, getNumSamples() };
 }
 
+void AudioDocument::resetRecordingScope()
+{
+    std::fill(scopeMin, scopeMin + scopeSize, 0.0f);
+    std::fill(scopeMax, scopeMax + scopeSize, 0.0f);
+    scopeWritePos.store(0, std::memory_order_release);
+    recordedSamples.store(0, std::memory_order_relaxed);
+}
+
 void AudioDocument::beginChange()
 {
     jassert(! changeInProgress);

@@ -240,8 +240,60 @@ void WaveformDisplay::resized()
     rebuildWaveformPath();
 }
 
+void WaveformDisplay::paintRecordingScope(juce::Graphics& g)
+{
+    const auto& pal = theme->palette();
+    g.fillAll(pal.panelBg);
+
+    const float W = (float) getWidth();
+    const float H = (float) getHeight();
+    const float mid = std::floor(H * 0.5f) + 0.5f;
+    const float half = H * 0.46f;
+
+    g.setColour(pal.zeroLine);
+    g.drawHorizontalLine((int) mid, 0.0f, W);
+
+    const int n = AudioDocument::scopeSize;
+    const int wpos = document.scopeWritePos.load(std::memory_order_acquire);
+
+    juce::Path p;
+    p.startNewSubPath(0.0f, mid);
+    for (int i = 0; i < n; ++i)
+    {
+        const int idx = (wpos + i) % n;
+        const float x = W * (float) i / (float) (n - 1);
+        p.lineTo(x, mid - juce::jlimit(-1.0f, 1.0f, document.scopeMax[idx]) * half);
+    }
+    for (int i = n - 1; i >= 0; --i)
+    {
+        const int idx = (wpos + i) % n;
+        const float x = W * (float) i / (float) (n - 1);
+        p.lineTo(x, mid - juce::jlimit(-1.0f, 1.0f, document.scopeMin[idx]) * half);
+    }
+    p.closeSubPath();
+    g.setColour(pal.waveform);
+    g.fillPath(p);
+
+    const double sr  = document.getSampleRate() > 0.0 ? document.getSampleRate() : 44100.0;
+    const double sec = (double) document.recordedSamples.load(std::memory_order_relaxed) / sr;
+    const int    m   = (int) (sec / 60.0);
+    const juce::String clock = juce::String::formatted("%d:%05.2f", m, sec - m * 60.0);
+
+    g.setColour(pal.playhead);
+    g.fillEllipse(12.0f, 12.0f, 9.0f, 9.0f);
+    g.setColour(pal.text);
+    g.setFont(juce::FontOptions(13.0f, juce::Font::bold));
+    g.drawText("REC  " + clock, 28, 8, 220, 18, juce::Justification::centredLeft, false);
+}
+
 void WaveformDisplay::paint(juce::Graphics& g)
 {
+    if (document.isRecording.load(std::memory_order_relaxed))
+    {
+        paintRecordingScope(g);
+        return;
+    }
+
     const auto& pal = theme->palette();
 
     g.fillAll(pal.panelBg);

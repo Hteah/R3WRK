@@ -54,6 +54,7 @@ public:
 
 private:
     void timerCallback() override;
+    void paintRecordingScope(juce::Graphics&);
     void rebuildWaveformPath();
     void zoomBy(double factor, int64_t centerSample);
     void zoomToward(double spanFactor, float pointerX);   // wheel zoom (Sieve model)

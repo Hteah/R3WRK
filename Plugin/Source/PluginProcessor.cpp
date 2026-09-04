@@ -203,6 +203,26 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         for (int ch = 0; ch < numCh; ++ch)
             recordingAccumulator.copyFrom(ch, (int) recordingWritePos, buffer, ch, 0, numSamples);
         recordingWritePos += numSamples;
+
+        // Feed the live scope: one peak min/max per 256-sample hop of the incoming block.
+        constexpr int hop = 256;
+        for (int s = 0; s < numSamples; s += hop)
+        {
+            const int nn = juce::jmin(hop, numSamples - s);
+            float mn = 0.0f, mx = 0.0f;
+            for (int ch = 0; ch < numCh; ++ch)
+            {
+                const auto r = juce::FloatVectorOperations::findMinAndMax(buffer.getReadPointer(ch) + s, nn);
+                mn = juce::jmin(mn, r.getStart());
+                mx = juce::jmax(mx, r.getEnd());
+            }
+            const int wpos = document.scopeWritePos.load(std::memory_order_relaxed);
+            document.scopeMin[wpos] = mn;
+            document.scopeMax[wpos] = mx;
+            document.scopeWritePos.store((wpos + 1) % AudioDocument::scopeSize, std::memory_order_release);
+        }
+        document.recordedSamples.store(recordingWritePos, std::memory_order_relaxed);
+
         wasPlaying = false;
         return; // pass input through unchanged so the user can monitor while recording
     }
@@ -273,6 +293,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
 void R3WRKAudioProcessor::startRecording()
 {
     recordingWritePos = 0;
+    document.resetRecordingScope();
     int chans = getTotalNumInputChannels() > 0 ? getTotalNumInputChannels() : 2;
     recordingAccumulator.setSize(chans, (int) juce::jmax(1.0, currentSampleRate * 4.0), false, true, true);
     document.isPlaying = false;

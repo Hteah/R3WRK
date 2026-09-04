@@ -347,15 +347,21 @@ void EditorToolbar::timerCallback()
 {
     updateTransportButtonText();
 
-    double sr = document.getSampleRate() > 0 ? document.getSampleRate() : 44100.0;
-    double posSec = (double) document.playhead.load() / sr;
-    double lenSec = (double) document.getNumSamples() / sr;
-    timeLabel.setText(formatTime(posSec) + " / " + formatTime(lenSec), juce::dontSendNotification);
+    const double sr = document.getSampleRate() > 0 ? document.getSampleRate() : 44100.0;
 
-    recLabel.setText(document.isRecording.load()
-                         ? juce::String::fromUTF8("\xE2\x97\x8F REC  ") + mmss(posSec)
-                         : juce::String(),
-                     juce::dontSendNotification);
+    if (document.isRecording.load())
+    {
+        const double recSec = (double) document.recordedSamples.load() / sr;
+        timeLabel.setText(formatTime(recSec) + " / " + formatTime(recSec), juce::dontSendNotification);
+        recLabel.setText(juce::String::fromUTF8("\xE2\x97\x8F REC  ") + mmss(recSec), juce::dontSendNotification);
+    }
+    else
+    {
+        const double posSec = (double) document.playhead.load() / sr;
+        const double lenSec = (double) document.getNumSamples() / sr;
+        timeLabel.setText(formatTime(posSec) + " / " + formatTime(lenSec), juce::dontSendNotification);
+        recLabel.setText({}, juce::dontSendNotification);
+    }
 }
 
 void EditorToolbar::changeListenerCallback(juce::ChangeBroadcaster* source)

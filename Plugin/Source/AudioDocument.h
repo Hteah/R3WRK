@@ -58,6 +58,18 @@ public:
     std::atomic<bool> loopEnabled { false };
 
     //==============================================================================
+    // Live recording feedback, so the UI can show what's coming in before Stop.
+    // processBlock (audio thread) fills a ring of block peak min/max while isRecording;
+    // the waveform view reads it to draw a scrolling scope. Single producer / single
+    // consumer -- a torn float read is cosmetically harmless.
+    static constexpr int scopeSize = 1024;
+    float scopeMin[scopeSize] = {};
+    float scopeMax[scopeSize] = {};
+    std::atomic<int> scopeWritePos { 0 };
+    std::atomic<int64_t> recordedSamples { 0 };   // running length of the take
+    void resetRecordingScope();
+
+    //==============================================================================
     juce::UndoManager undoManager;
 
     // Snapshot-based change tracking. Callers copy getBuffer(), mutate the copy freely,
