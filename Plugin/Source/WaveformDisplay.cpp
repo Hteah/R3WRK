@@ -220,14 +220,6 @@ void WaveformDisplay::paint(juce::Graphics& g)
     int numCh = juce::jmax(1, document.getNumChannels());
     int laneHeight = getHeight() / numCh;
 
-    if (document.hasSelection())
-    {
-        float x0 = sampleToX(document.getSelectionStart());
-        float x1 = sampleToX(document.getSelectionEnd());
-        g.setColour(juce::Colours::deepskyblue.withAlpha(0.22f));
-        g.fillRect(juce::Rectangle<float>(x0, 0.0f, x1 - x0, (float) getHeight()));
-    }
-
     g.setColour(juce::Colours::white.withAlpha(0.10f));
     for (auto m : document.chopMarkers)
     {
@@ -244,6 +236,32 @@ void WaveformDisplay::paint(juce::Graphics& g)
     g.setColour(juce::Colours::black.withAlpha(0.5f));
     for (int ch = 1; ch < numCh; ++ch)
         g.drawHorizontalLine(ch * laneHeight, 0.0f, (float) getWidth());
+
+    // Selection: a wash, plus a bracket at each edge — a 2 px line with a small handle pill
+    // at top and bottom (same as Sieve's editor).
+    if (document.hasSelection())
+    {
+        const juce::Colour accent (0xff5ec2ff);
+        const float h  = (float) getHeight();
+        const float x0 = sampleToX(document.getSelectionStart());
+        const float x1 = sampleToX(document.getSelectionEnd());
+
+        g.setColour(accent.withAlpha(0.16f));
+        g.fillRect(juce::Rectangle<float>(x0, 0.0f, juce::jmax(1.0f, x1 - x0), h));
+
+        for (float x : { x0, x1 })
+        {
+            if (x < -2.0f || x > (float) getWidth() + 2.0f)
+                continue;
+            g.setColour(accent.withAlpha(0.9f));
+            g.fillRect(juce::Rectangle<float>(x - 1.0f, 0.0f, 2.0f, h));
+
+            constexpr float hw = 5.0f, hh = 14.0f;
+            g.setColour(accent);
+            for (float cy : { hh * 0.5f + 1.0f, h - hh * 0.5f - 1.0f })
+                g.fillRoundedRectangle(x - hw * 0.5f, cy - hh * 0.5f, hw, hh, 2.0f);
+        }
+    }
 
     if (document.loopEnabled && document.loopEnd > document.loopStart)
     {
