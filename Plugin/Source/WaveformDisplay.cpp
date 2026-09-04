@@ -258,6 +258,18 @@ void WaveformDisplay::paint(juce::Graphics& g)
     int numCh = juce::jmax(1, document.getNumChannels());
     int laneHeight = getHeight() / numCh;
 
+    // Zero-amplitude reference line through each channel lane (drawn behind the wave, so it
+    // shows through the quiet parts and the wave sits on it).
+    {
+        const float dashes[] = { 2.0f, 3.0f };
+        g.setColour(juce::Colours::white.withAlpha(0.16f));
+        for (int ch = 0; ch < numCh; ++ch)
+        {
+            const float y = std::floor((float) ch * (float) laneHeight + (float) laneHeight * 0.5f) + 0.5f;
+            g.drawDashedLine(juce::Line<float>(0.0f, y, (float) getWidth(), y), dashes, 2, 1.0f);
+        }
+    }
+
     g.setColour(kAccent);
     for (auto& p : channelPaths)
         g.fillPath(p);
