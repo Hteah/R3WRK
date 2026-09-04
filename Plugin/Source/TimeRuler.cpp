@@ -41,7 +41,7 @@ double TimeRuler::niceStepSeconds(double spanSeconds, double widthPx)
 void TimeRuler::paint(juce::Graphics& g)
 {
     const auto& pal = theme->palette();
-    const juce::Colour kInk = pal.text;
+    const juce::Colour kInk = pal.screenText;   // ruler sits on panelBg ("the screen"), not windowBg
 
     const float w = (float) getWidth();
     const float h = (float) getHeight();

@@ -372,7 +372,7 @@ void WaveformDisplay::paintRecordingScope(juce::Graphics& g)
 
     g.setColour(pal.playhead);
     g.fillEllipse(12.0f, 12.0f, 9.0f, 9.0f);
-    g.setColour(pal.text);
+    g.setColour(pal.screenText);
     g.setFont(juce::FontOptions(13.0f, juce::Font::bold));
     g.drawText("REC  " + clock, 28, 8, 220, 18, juce::Justification::centredLeft, false);
 }
@@ -391,7 +391,7 @@ void WaveformDisplay::paint(juce::Graphics& g)
 
     if (document.isEmpty())
     {
-        g.setColour(pal.textDim);
+        g.setColour(pal.screenTextDim);
         g.drawText("No audio loaded - press Record, or Open a file", getLocalBounds(), juce::Justification::centred);
         return;
     }

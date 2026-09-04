@@ -24,6 +24,15 @@ struct Palette
     juce::Colour text         { 0xffe0e0e0 };
     juce::Colour textDim      { 0xff888888 };
 
+    // Separate from text/textDim because they paint on a different surface: text/textDim
+    // sit on windowBg (the header, transport, knobs -- components with no fill of their
+    // own), while screenText/screenTextDim sit on panelBg (WaveformDisplay, TimeRuler --
+    // the "screen"). A theme where those two backgrounds are opposite in lightness (e.g. a
+    // light chrome around a dark waveform) needs two different text colours to stay legible
+    // on both; every theme before that one just set these equal to text/textDim.
+    juce::Colour screenText    { 0xffe0e0e0 };
+    juce::Colour screenTextDim { 0xff888888 };
+
     juce::String toString() const;                       // "key:aarrggbb;key:aarrggbb;..."
     static Palette fromString(const juce::String&);      // unknown keys ignored, missing keep default
 

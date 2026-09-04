@@ -14,6 +14,8 @@ const PaletteField kPaletteFields[] =
     { "recordButton", "record button",     &Palette::recordButton },
     { "text",         "text",              &Palette::text },
     { "textDim",      "dim text",          &Palette::textDim },
+    { "screenText",    "screen text",       &Palette::screenText },
+    { "screenTextDim", "screen dim text",   &Palette::screenTextDim },
 };
 const int kNumPaletteFields = (int) (sizeof(kPaletteFields) / sizeof(kPaletteFields[0]));
 
@@ -63,27 +65,42 @@ namespace
         { "Midnight",
           "windowBg:ff14161a;panelBg:ff17191e;waveform:ff5ec2ff;accent:ff5ec2ff;"
           "zeroLine:29ffffff;gridLine:80000000;playhead:ffff3b30;loopMarker:ffffa500;"
-          "recordButton:ff8b0000;text:ffe0e0e0;textDim:ff888888" },
+          "recordButton:ff8b0000;text:ffe0e0e0;textDim:ff888888;"
+          "screenText:ffe0e0e0;screenTextDim:ff888888" },
 
         { "Slate",
           "windowBg:ff2a2e35;panelBg:ff232830;waveform:ff9db8d0;accent:ff8aa9c8;"
           "zeroLine:22ffffff;gridLine:66000000;playhead:ffff5b52;loopMarker:ffe6a552;"
-          "recordButton:ff9e4444;text:ffdfe4ea;textDim:ff9aa3ad" },
+          "recordButton:ff9e4444;text:ffdfe4ea;textDim:ff9aa3ad;"
+          "screenText:ffdfe4ea;screenTextDim:ff9aa3ad" },
 
         { "Graphite",
           "windowBg:ff1b1b1d;panelBg:ff202022;waveform:ffbfc2c8;accent:ff9a9aa2;"
           "zeroLine:20ffffff;gridLine:70000000;playhead:ffff453a;loopMarker:ffd8a53a;"
-          "recordButton:ff8a3a3a;text:ffe6e6e8;textDim:ff8c8c92" },
+          "recordButton:ff8a3a3a;text:ffe6e6e8;textDim:ff8c8c92;"
+          "screenText:ffe6e6e8;screenTextDim:ff8c8c92" },
 
         { "Amber",
           "windowBg:ff15120d;panelBg:ff1b1712;waveform:ffe0a35a;accent:ffffb454;"
           "zeroLine:22ffffff;gridLine:66000000;playhead:ffff6a4d;loopMarker:ffffd24d;"
-          "recordButton:ff8a3d1f;text:ffece2d2;textDim:ff9a8f7d" },
+          "recordButton:ff8a3d1f;text:ffece2d2;textDim:ff9a8f7d;"
+          "screenText:ffece2d2;screenTextDim:ff9a8f7d" },
 
         { "Paper",
           "windowBg:fff4f2ec;panelBg:ffe9e6de;waveform:ff2f6ea5;accent:ff2f6ea5;"
           "zeroLine:18000000;gridLine:28000000;playhead:ffd0402c;loopMarker:ffc07f18;"
-          "recordButton:ffb23b3b;text:ff1f242b;textDim:ff6f7680" },
+          "recordButton:ffb23b3b;text:ff1f242b;textDim:ff6f7680;"
+          "screenText:ff1f242b;screenTextDim:ff6f7680" },
+
+        // Steel-blue instrument panel + warm amber accent, dark control band, rounded edges
+        // (LookAndFeel side of that is a separate pass) -- the waveform/ruler "screen" stays
+        // Midnight-dark on purpose, so screenText/screenTextDim reuse Midnight's text values
+        // while text/textDim (the light chrome) get their own dark-on-light pair.
+        { "Madrona",
+          "windowBg:ff8797ac;panelBg:ff17191e;waveform:ff5ec2ff;accent:ffd4a24a;"
+          "zeroLine:29ffffff;gridLine:80000000;playhead:ffff3b30;loopMarker:ffffa500;"
+          "recordButton:ffc1503a;text:ff1b2433;textDim:ff46536a;"
+          "screenText:ffe0e0e0;screenTextDim:ff888888" },
     };
     const int kNumBuiltIns = (int) (sizeof(kBuiltIns) / sizeof(kBuiltIns[0]));
 

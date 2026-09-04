@@ -50,7 +50,7 @@ ThemeEditor::ThemeEditor()
     refreshFromPalette();
 
     theme->addChangeListener(this);
-    setSize(340, 490);
+    setSize(340, 540);   // 2 rows taller than before: screenText / screenTextDim added
 }
 
 ThemeEditor::~ThemeEditor()
