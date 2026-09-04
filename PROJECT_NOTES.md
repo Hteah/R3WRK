@@ -155,6 +155,12 @@ don't collide.
 - **Tools ▾ → "Output Folder…"** → a directory chooser to change it.
 - **"Save As…"** is still a dialog (for one-offs / specific names); it now opens
   in the output folder.
+- **Drag out:** press inside the selection body (not near an edge) and drag —
+  `WaveformDisplay::beginSelectionDragExport()` writes the selection to
+  `<temp>/R3WRK/R3WRK selection <timestamp>.wav` and starts a native file drag
+  (`DragAndDropContainer::performExternalDragDropOfFiles`, `canMoveFiles=false`).
+  Drop it on an Ableton track / in Finder. Temp files >10 min old are swept each
+  drag.
 
 Feedback is a `HeaderBar::flashMessage()` — a ~3 s accent-coloured line in the
 readout area ("Saved …", "Exported …", "Output folder: …"), driven from
