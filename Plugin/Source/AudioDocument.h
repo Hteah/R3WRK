@@ -36,12 +36,16 @@ public:
     int getBufferVersion() const { return bufferVersion; }
 
     //==============================================================================
-    // Selection, in samples, half-open [selStart, selEnd). Atomic because processBlock()
-    // (audio thread) reads it to decide the playback region while the UI edits it.
+    // Selection, in samples, half-open [start, end). processBlock() (audio thread) reads
+    // this to decide the playback region while the UI edits it, so start+end are packed
+    // into one atomic (two separate atomics would let the audio thread read a new start
+    // paired with a stale end mid-update -- e.g. while dragging the start of a looping
+    // selection, a torn read could momentarily see a tiny/garbage region and buzz).
     void setSelection(int64_t start, int64_t end);
-    int64_t getSelectionStart() const { return selStart.load(std::memory_order_relaxed); }
-    int64_t getSelectionEnd() const { return selEnd.load(std::memory_order_relaxed); }
-    bool hasSelection() const { return getSelectionEnd() > getSelectionStart(); }
+    juce::Range<int64_t> getSelection() const;
+    int64_t getSelectionStart() const { return getSelection().getStart(); }
+    int64_t getSelectionEnd() const { return getSelection().getEnd(); }
+    bool hasSelection() const { const auto r = getSelection(); return r.getEnd() > r.getStart(); }
     void clearSelection() { setSelection(0, 0); }
 
     // returns the current selection, clamped to the buffer; if there is no
@@ -98,8 +102,7 @@ private:
     mutable juce::CriticalSection bufferLock;
     juce::AudioBuffer<float> buffer;
     double sampleRate = 44100.0;
-    std::atomic<int64_t> selStart { 0 };
-    std::atomic<int64_t> selEnd { 0 };
+    std::atomic<uint64_t> selPacked { 0 };   // (uint32 start << 32) | uint32 end -- see getSelection()
     int bufferVersion = 0;
 
     juce::AudioBuffer<float> preChangeBuffer;

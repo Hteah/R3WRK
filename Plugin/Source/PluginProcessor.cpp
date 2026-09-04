@@ -245,8 +245,11 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
 
             // Playback region: the selection if there is one (so Play plays the selected
             // range), otherwise the loop points, otherwise the whole clip. Loop loops it.
-            const int64_t selS = juce::jlimit((int64_t) 0, docLen, document.getSelectionStart());
-            const int64_t selE = juce::jlimit((int64_t) 0, docLen, document.getSelectionEnd());
+            // One getSelection() call so start+end always come from the same setSelection()
+            // (they're packed into a single atomic on AudioDocument for exactly this reason).
+            const auto sel  = document.getSelection();
+            const int64_t selS = juce::jlimit((int64_t) 0, docLen, sel.getStart());
+            const int64_t selE = juce::jlimit((int64_t) 0, docLen, sel.getEnd());
             const int64_t loopStartS = document.loopStart.load(std::memory_order_relaxed);
             const int64_t loopEndS   = document.loopEnd.load(std::memory_order_relaxed);
 
@@ -326,10 +329,10 @@ void R3WRKAudioProcessor::startPlayback()
 
     const int64_t n = document.getNumSamples();
     int64_t p = document.playhead.load();
-    if (document.hasSelection())
+    const auto sel = document.getSelection();
+    if (sel.getEnd() > sel.getStart())
     {
-        const int64_t s = document.getSelectionStart();
-        const int64_t e = document.getSelectionEnd();
+        const int64_t s = sel.getStart(), e = sel.getEnd();
         if (p < s || p >= e)          // start from the selection unless the cursor is inside it
             p = s;
     }

@@ -2,6 +2,11 @@
 
 namespace
 {
+    uint64_t packSelection(int64_t start, int64_t end)
+    {
+        return ((uint64_t) (uint32_t) start << 32) | (uint64_t) (uint32_t) end;
+    }
+
     class SnapshotAction : public juce::UndoableAction
     {
     public:
@@ -58,7 +63,7 @@ void AudioDocument::newEmptyDocument(int numChannels, double sr)
         buffer.setSize(numChannels, 0);
     }
     sampleRate = sr;
-    selStart = selEnd = 0;
+    selPacked.store(0, std::memory_order_relaxed);
     playhead = 0;
     loopStart = loopEnd = 0;
     loopEnabled = false;
@@ -102,7 +107,7 @@ bool AudioDocument::loadFromFile(const juce::File& file, double resampleToRate)
         buffer = std::move(newBuffer);
     }
     sampleRate = finalRate;
-    selStart = selEnd = 0;
+    selPacked.store(0, std::memory_order_relaxed);
     playhead = 0;
     loopStart = 0;
     loopEnd = getNumSamples();
@@ -139,15 +144,20 @@ void AudioDocument::setSelection(int64_t start, int64_t end)
     end   = juce::jlimit((int64_t) 0, n, end);
     if (end < start)
         std::swap(start, end);
-    selStart = start;
-    selEnd = end;
+    selPacked.store(packSelection(start, end), std::memory_order_relaxed);
     notifyChanged();
+}
+
+juce::Range<int64_t> AudioDocument::getSelection() const
+{
+    const uint64_t p = selPacked.load(std::memory_order_relaxed);
+    return { (int64_t) (int32_t) (p >> 32), (int64_t) (int32_t) (p & 0xffffffffu) };
 }
 
 juce::Range<int64_t> AudioDocument::getEffectiveRange() const
 {
     if (hasSelection())
-        return { getSelectionStart(), getSelectionEnd() };
+        return getSelection();
     return { (int64_t) 0, getNumSamples() };
 }
 
@@ -186,8 +196,7 @@ void AudioDocument::restoreSnapshot(const juce::AudioBuffer<float>& newBuffer, i
         const juce::ScopedLock sl(bufferLock);
         buffer.makeCopyOf(newBuffer);
     }
-    selStart = newSelStart;
-    selEnd = newSelEnd;
+    selPacked.store(packSelection(newSelStart, newSelEnd), std::memory_order_relaxed);
     playhead = juce::jlimit((int64_t) 0, getNumSamples(), playhead.load());
     loopStart = juce::jlimit((int64_t) 0, getNumSamples(), loopStart.load());
     loopEnd = juce::jlimit((int64_t) 0, getNumSamples(), loopEnd.load());
