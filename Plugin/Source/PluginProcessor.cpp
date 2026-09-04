@@ -76,26 +76,32 @@ void EdisonCloneAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
             auto& docBuf = document.getBuffer();
             const int64_t docLen = document.getNumSamples();
             const bool loop = document.loopEnabled.load(std::memory_order_relaxed);
+
+            // Playback region: the selection if there is one (so Play plays the selected
+            // range), otherwise the loop points, otherwise the whole clip. Loop loops it.
+            const int64_t selS = juce::jlimit((int64_t) 0, docLen, document.getSelectionStart());
+            const int64_t selE = juce::jlimit((int64_t) 0, docLen, document.getSelectionEnd());
             const int64_t loopStartS = document.loopStart.load(std::memory_order_relaxed);
             const int64_t loopEndS = document.loopEnd.load(std::memory_order_relaxed);
-            const int64_t stopAt = (loop && loopEndS > loopStartS) ? loopEndS : docLen;
+
+            int64_t regionStart = 0, regionEnd = docLen;
+            if (selE > selS)                              { regionStart = selS;       regionEnd = selE; }
+            else if (loop && loopEndS > loopStartS)       { regionStart = loopStartS; regionEnd = loopEndS; }
 
             int64_t pos = document.playhead.load(std::memory_order_relaxed);
-            int written = 0;
+            if (pos < regionStart || pos >= regionEnd)
+                pos = regionStart;                       // snap a stray playhead into the region
 
+            int written = 0;
             while (written < numSamples && docBuf.getNumChannels() > 0)
             {
-                if (pos >= stopAt)
+                if (pos >= regionEnd)
                 {
-                    if (loop && loopEndS > loopStartS)
-                    {
-                        pos = loopStartS;
-                        continue;
-                    }
+                    if (loop) { pos = regionStart; continue; }
                     break;
                 }
 
-                int chunk = (int) juce::jmin((int64_t) (numSamples - written), stopAt - pos);
+                int chunk = (int) juce::jmin((int64_t) (numSamples - written), regionEnd - pos);
                 for (int ch = 0; ch < numCh; ++ch)
                 {
                     int srcCh = juce::jmin(ch, docBuf.getNumChannels() - 1);
@@ -107,7 +113,7 @@ void EdisonCloneAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
 
             document.playhead.store(pos, std::memory_order_relaxed);
 
-            if (! loop && pos >= docLen)
+            if (! loop && pos >= regionEnd)
                 document.isPlaying.store(false, std::memory_order_relaxed);
         }
         return;
@@ -146,8 +152,21 @@ void EdisonCloneAudioProcessor::startPlayback()
     if (document.isEmpty())
         return;
     document.isRecording = false;
-    if (document.playhead.load() >= document.getNumSamples())
-        document.playhead = document.hasSelection() ? document.getSelectionStart() : 0;
+
+    const int64_t n = document.getNumSamples();
+    int64_t p = document.playhead.load();
+    if (document.hasSelection())
+    {
+        const int64_t s = document.getSelectionStart();
+        const int64_t e = document.getSelectionEnd();
+        if (p < s || p >= e)          // start from the selection unless the cursor is inside it
+            p = s;
+    }
+    else if (p >= n)
+    {
+        p = 0;
+    }
+    document.playhead = p;
     document.isPlaying = true;
 }
 
