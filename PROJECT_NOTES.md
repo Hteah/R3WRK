@@ -32,6 +32,10 @@ R3WRK/
                                 (Pitch, Speed, Stretch, Start, End; extensible)
       TimeRuler.h/.cpp          time ruler under the waveform; follows the
                                 waveform's view range, nice tick spacing
+      Theme.h/.cpp              Palette (11 editable colours) + ThemeManager
+                                (process-wide, persists to a settings file)
+      ThemeEditor.h/.cpp        the Tools -> Theme... panel: presets, hex rows,
+                                in-panel colour picker, save custom presets
       PluginProcessor.h/.cpp   audio thread: record / playback (direct or via a
                                 real-time RubberBand tape+pitch engine) / pass-
                                 through, plugin state save/load
@@ -124,6 +128,29 @@ once. The stored audio is never modified — Export Selection still writes the d
 clip. The red playhead tracks the doc read cursor, so it runs slightly ahead of
 what you hear by the stretcher latency when the knobs are engaged (more so at
 high Stretch).
+
+## Theming
+
+`Source/Theme.{h,cpp}` — `Palette` is 11 `juce::Colour`s (window/panel bg,
+waveform, accent, zero line, grid lines, playhead, loop/unsaved, record button,
+text, dim text); `kPaletteFields[]` is a `{key, label, member-pointer}` table
+that drives both the editor UI and the `"key:aarrggbb;..."` serialisation.
+
+`ThemeManager` is a process-wide singleton via `juce::SharedResourcePointer` —
+every painted component holds one, reads `theme->palette()` when it paints, and
+listens to the manager (a `ChangeBroadcaster`) so a colour change repaints the
+whole editor immediately. It persists the active palette and any user-saved
+presets to `~/Library/Application Support/R3WRK/R3WRK.settings`
+(`juce::PropertiesFile`, debounced writes), so the look is shared by every plugin
+instance and the standalone — the plugin equivalent of RCRDR's `@AppStorage`
+theme. Theme is **not** stored in the DAW plugin state.
+
+Built-in "Start from" presets (in `Theme.cpp`): Midnight (the default look),
+Slate, Graphite, Amber, Paper. `ThemeEditor` (Tools ▾ → "Theme…", shown in a
+CallOutBox) has the preset combo, a hex row per colour (type a code or click the
+swatch for an **in-panel** colour picker — deliberately not a nested call-out,
+which would dismiss the parent), a name field + Save for custom presets, and
+Delete / Reset.
 
 ## Sample-rate handling
 
