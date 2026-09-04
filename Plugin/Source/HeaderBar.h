@@ -17,6 +17,7 @@ public:
 
     void setSourceName(const juce::String& name);   // "" -> "Untitled"
     void markSaved();                               // call after a successful open / save
+    void flashMessage(const juce::String& text);   // brief status in the readout area (~3 s)
 
     void paint(juce::Graphics&) override;
     void resized() override;
@@ -33,6 +34,9 @@ private:
     juce::String sourceName;
     int savedAtVersion = 0;
     bool lastDirty = false;   // last isDirty() seen by the timer, so we only repaint on a change
+
+    juce::String flashText;
+    juce::uint32 flashUntil = 0;   // getMillisecondCounter() value; 0 = no flash
 
     juce::Label nameLabel, readoutLabel;
 

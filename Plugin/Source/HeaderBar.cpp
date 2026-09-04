@@ -48,6 +48,14 @@ void HeaderBar::markSaved()
     repaint();
 }
 
+void HeaderBar::flashMessage(const juce::String& text)
+{
+    flashText = text;
+    flashUntil = juce::Time::getMillisecondCounter() + 3000;
+    readoutLabel.setColour(juce::Label::textColourId, theme->palette().accent);
+    readoutLabel.setText(text, juce::dontSendNotification);
+}
+
 juce::String HeaderBar::buildReadout() const
 {
     const double sr = document.getSampleRate() > 0 ? document.getSampleRate() : 44100.0;
@@ -69,6 +77,14 @@ juce::String HeaderBar::buildReadout() const
 
 void HeaderBar::timerCallback()
 {
+    if (flashUntil != 0)
+    {
+        if (juce::Time::getMillisecondCounter() < flashUntil)
+            return;   // hold the flash message; skip the normal readout update
+        flashUntil = 0;
+        readoutLabel.setColour(juce::Label::textColourId, theme->palette().textDim);
+    }
+
     auto text = buildReadout();
     if (readoutLabel.getText() != text)
         readoutLabel.setText(text, juce::dontSendNotification);

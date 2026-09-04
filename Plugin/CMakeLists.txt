@@ -78,7 +78,8 @@ target_sources(R3WRK
         Source/KnobRow.cpp
         Source/TimeRuler.cpp
         Source/Theme.cpp
-        Source/ThemeEditor.cpp)
+        Source/ThemeEditor.cpp
+        Source/OutputSettings.cpp)
 
 target_compile_definitions(R3WRK
     PUBLIC

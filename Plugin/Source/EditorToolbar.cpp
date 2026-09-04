@@ -191,7 +191,7 @@ void EditorToolbar::doRedo()  { document.undoManager.redo(); document.notifyChan
 
 void EditorToolbar::toggleTransport()
 {
-    if (document.isRecording.load())      processor.stopRecording();
+    if (document.isRecording.load())      { processor.stopRecording(); autoSaveRecording(); }
     else if (document.isPlaying.load())   processor.stopPlayback();
     else                                { processor.startRecording();
                                           if (onSourceNameChanged) onSourceNameChanged({}); }
@@ -200,10 +200,28 @@ void EditorToolbar::toggleTransport()
 
 void EditorToolbar::togglePlay()
 {
-    if (document.isRecording.load())    processor.stopRecording();
+    if (document.isRecording.load())    { processor.stopRecording(); autoSaveRecording(); }
     else if (document.isPlaying.load()) processor.stopPlayback();
     else                               processor.startPlayback();
     updateTransportButtonText();
+}
+
+void EditorToolbar::autoSaveRecording()
+{
+    if (document.isEmpty())
+        return;
+
+    const auto file = outputSettings->makeWavFile(false);
+    if (document.saveToFile(file))
+    {
+        if (onSourceNameChanged) onSourceNameChanged(file.getFileName());
+        if (onSaved)             onSaved();
+        if (onStatusMessage)     onStatusMessage("Saved " + file.getFileName());
+    }
+    else if (onStatusMessage)
+    {
+        onStatusMessage("Couldn't save to " + file.getParentDirectory().getFileName());
+    }
 }
 
 void EditorToolbar::revertAll()
@@ -221,7 +239,7 @@ void EditorToolbar::showToolsMenu()
            idTrim, idDelete, idSilence,
            idNormalize, idAmplify, idFadeIn, idFadeOut, idReverse,
            idStretch, idExportSel,
-           idTheme,
+           idOutputFolder, idTheme,
            idUndo, idRedo };
 
     const bool empty   = document.isEmpty();
@@ -258,10 +276,11 @@ void EditorToolbar::showToolsMenu()
     m.addItem(idFadeOut,   "Fade Out",   ! empty);
     m.addItem(idReverse,   "Reverse",    ! empty);
     m.addSeparator();
-    m.addItem(idStretch,   juce::String::fromUTF8("Stretch / Pitch\xE2\x80\xA6"),  ! empty);
-    m.addItem(idExportSel, juce::String::fromUTF8("Export Selection\xE2\x80\xA6"), sel);
+    m.addItem(idStretch,   juce::String::fromUTF8("Stretch / Pitch\xE2\x80\xA6"), ! empty);
+    m.addItem(idExportSel, "Export Selection to Folder", sel);
     m.addSeparator();
-    m.addItem(idTheme, juce::String::fromUTF8("Theme\xE2\x80\xA6"));
+    m.addItem(idOutputFolder, juce::String::fromUTF8("Output Folder\xE2\x80\xA6"));
+    m.addItem(idTheme,        juce::String::fromUTF8("Theme\xE2\x80\xA6"));
     m.addSeparator();
     m.addItem(keyed("Undo", idUndo, canUndo, cmd + "Z"));
     m.addItem(keyed("Redo", idRedo, canRedo, shift + cmd + "Z"));
@@ -284,9 +303,10 @@ void EditorToolbar::showToolsMenu()
             case idFadeIn:    EditActions::fadeIn(document);  break;
             case idFadeOut:   EditActions::fadeOut(document); break;
             case idReverse:   EditActions::reverse(document); break;
-            case idStretch:   showStretchCallout();      break;
-            case idExportSel: exportSelectionToFile();   break;
-            case idTheme:     showThemeCallout();        break;
+            case idStretch:      showStretchCallout();      break;
+            case idExportSel:    exportSelectionToFolder(); break;
+            case idOutputFolder: chooseOutputFolder();      break;
+            case idTheme:        showThemeCallout();        break;
             case idUndo:      doUndo(); break;
             case idRedo:      doRedo(); break;
             default: break;
@@ -367,7 +387,8 @@ void EditorToolbar::openFile()
 
 void EditorToolbar::saveFile()
 {
-    fileChooser = std::make_unique<juce::FileChooser>("Save audio as WAV", juce::File(), "*.wav");
+    fileChooser = std::make_unique<juce::FileChooser>("Save audio as WAV",
+                                                     outputSettings->folder(), "*.wav");
     auto flags = juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
                | juce::FileBrowserComponent::warnAboutOverwriting;
     fileChooser->launchAsync(flags, [this](const juce::FileChooser& fc)
@@ -377,23 +398,40 @@ void EditorToolbar::saveFile()
         {
             if (onSourceNameChanged) onSourceNameChanged(file.getFileName());
             if (onSaved) onSaved();
+            if (onStatusMessage) onStatusMessage("Saved " + file.getFileName());
         }
     });
 }
 
-void EditorToolbar::exportSelectionToFile()
+void EditorToolbar::exportSelectionToFolder()
 {
     if (! document.hasSelection())
         return;
 
-    fileChooser = std::make_unique<juce::FileChooser>("Export selection as WAV", juce::File(), "*.wav");
-    auto flags = juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
-               | juce::FileBrowserComponent::warnAboutOverwriting;
+    const auto file = outputSettings->makeWavFile(true);
+    if (EditActions::exportSelection(document, file))
+    {
+        if (onStatusMessage) onStatusMessage("Exported " + file.getFileName());
+    }
+    else if (onStatusMessage)
+    {
+        onStatusMessage("Couldn't export to " + file.getParentDirectory().getFileName());
+    }
+}
+
+void EditorToolbar::chooseOutputFolder()
+{
+    fileChooser = std::make_unique<juce::FileChooser>("Choose the output folder for recordings and exports",
+                                                     outputSettings->folder());
+    auto flags = juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories;
     fileChooser->launchAsync(flags, [this](const juce::FileChooser& fc)
     {
-        auto file = fc.getResult();
-        if (file != juce::File())
-            EditActions::exportSelection(document, file);
+        auto dir = fc.getResult();
+        if (dir.isDirectory())
+        {
+            outputSettings->setFolder(dir);
+            if (onStatusMessage) onStatusMessage("Output folder: " + dir.getFileName());
+        }
     });
 }
 

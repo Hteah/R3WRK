@@ -4,6 +4,7 @@
 #include "EditActions.h"
 #include "PluginProcessor.h"
 #include "Theme.h"
+#include "OutputSettings.h"
 
 /**
     A single control strip below the waveform:
@@ -27,6 +28,7 @@ public:
 
     std::function<void(juce::String name)> onSourceNameChanged;   // "" for a fresh recording
     std::function<void()> onSaved;                                // after a successful open / save
+    std::function<void(juce::String message)> onStatusMessage;    // brief header status line
 
     // Called by the editor's keyPressed so ⌘X/C/V/Z and Space work from anywhere.
     void doCut();
@@ -48,11 +50,14 @@ private:
     void showAmplifyCallout();
     void showStretchCallout();
     void showThemeCallout();
-    void exportSelectionToFile();
+    void chooseOutputFolder();
+    void exportSelectionToFolder();
+    void autoSaveRecording();
 
     R3WRKAudioProcessor& processor;
     AudioDocument& document;
     juce::SharedResourcePointer<ThemeManager> theme;
+    juce::SharedResourcePointer<OutputSettings> outputSettings;
     Clipboard clipboard;
 
     juce::TextButton playButton   { "Play" };
