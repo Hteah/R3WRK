@@ -75,7 +75,8 @@ target_sources(R3WRK
         Source/TimeStretchEngine.cpp
         Source/HeaderBar.cpp
         Source/EditorToolbar.cpp
-        Source/KnobRow.cpp)
+        Source/KnobRow.cpp
+        Source/TimeRuler.cpp)
 
 target_compile_definitions(R3WRK
     PUBLIC

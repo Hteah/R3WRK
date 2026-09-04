@@ -3,11 +3,12 @@
 R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
     : AudioProcessorEditor(&p), processorRef(p),
       header(p.document), waveformDisplay(p.document), spectrogramDisplay(p.document),
-      toolbar(p, p.document), knobRow(p, p.document)
+      timeRuler(waveformDisplay, p.document), toolbar(p, p.document), knobRow(p, p.document)
 {
     addAndMakeVisible(header);
     addAndMakeVisible(waveformDisplay);
     addChildComponent(spectrogramDisplay); // built but not currently reachable from the UI
+    addAndMakeVisible(timeRuler);
     addAndMakeVisible(toolbar);
     addAndMakeVisible(knobRow);
 
@@ -33,7 +34,7 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
 
     setWantsKeyboardFocus(true);
     setResizable(true, true);
-    setResizeLimits(680, 430, 2200, 1300);
+    setResizeLimits(680, 454, 2200, 1300);
     setSize(1000, 620);
 }
 
@@ -55,6 +56,9 @@ void R3WRKAudioProcessorEditor::resized()
     area.removeFromBottom(4);
     toolbar.setBounds(area.removeFromBottom(28));   // transport control strip
     area.removeFromBottom(6);
+
+    timeRuler.setBounds(area.removeFromBottom(22)); // time ruler, hugging the waveform
+    area.removeFromBottom(2);
 
     waveformDisplay.setBounds(area);
     spectrogramDisplay.setBounds(area);

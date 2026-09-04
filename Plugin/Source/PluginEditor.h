@@ -6,6 +6,7 @@
 #include "KnobRow.h"
 #include "WaveformDisplay.h"
 #include "SpectrogramDisplay.h"
+#include "TimeRuler.h"
 
 class R3WRKAudioProcessorEditor : public juce::AudioProcessorEditor
 {
@@ -23,6 +24,7 @@ private:
     HeaderBar header;
     WaveformDisplay waveformDisplay;
     SpectrogramDisplay spectrogramDisplay;
+    TimeRuler timeRuler;
     EditorToolbar toolbar;
     KnobRow knobRow;
 
