@@ -47,6 +47,7 @@ private:
     void showStretchCallout();
     void showChopCallout();
     void exportSlices();
+    void exportSelectionToFile();
 
     EdisonCloneAudioProcessor& processor;
     AudioDocument& document;

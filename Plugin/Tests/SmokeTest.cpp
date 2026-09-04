@@ -181,6 +181,31 @@ int main()
         tempDir.deleteRecursively();
     }
 
+    // --- export selection --------------------------------------------------
+    {
+        std::cout << "-- export selection --" << std::endl;
+        AudioDocument doc;
+        setDocumentContent(doc, makeSineBuffer(2, (int) sr, sr, 440.0, 0.4f), sr); // 1 s stereo
+        doc.setSelection(10000, 25000);   // 15000 samples
+
+        auto out = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                       .getChildFile("edison_clone_export_selection.wav");
+        out.deleteFile();
+        bool ok = EditActions::exportSelection(doc, out);
+        check(ok && out.existsAsFile(), "exportSelection wrote a file");
+
+        juce::AudioFormatManager fm; fm.registerBasicFormats();
+        std::unique_ptr<juce::AudioFormatReader> r(fm.createReaderFor(out));
+        check(r != nullptr, "exported selection re-opens");
+        if (r != nullptr)
+        {
+            check((int64_t) r->lengthInSamples == 15000, "exported file is exactly the selection length");
+            check((int) r->numChannels == 2, "exported file kept the channel count");
+        }
+        check(doc.getNumSamples() == (int64_t) sr, "exportSelection did not modify the document");
+        out.deleteFile();
+    }
+
     // --- time-stretch / pitch-shift ------------------------------------------
     {
         std::cout << "-- time-stretch / pitch-shift (RubberBand) --" << std::endl;

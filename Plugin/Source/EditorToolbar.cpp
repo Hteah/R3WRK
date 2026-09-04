@@ -286,7 +286,7 @@ void EditorToolbar::showToolsMenu()
            idCut, idCopy, idPaste,
            idTrim, idDelete, idSilence,
            idNormalize, idAmplify, idFadeIn, idFadeOut, idReverse,
-           idStretch, idChop, idExport,
+           idStretch, idChop, idExportSel, idExport,
            idUndo, idRedo };
 
     const bool empty   = document.isEmpty();
@@ -323,9 +323,10 @@ void EditorToolbar::showToolsMenu()
     m.addItem(idFadeOut,   "Fade Out",   ! empty);
     m.addItem(idReverse,   "Reverse",    ! empty);
     m.addSeparator();
-    m.addItem(idStretch, juce::String::fromUTF8("Stretch / Pitch\xE2\x80\xA6"), ! empty);
-    m.addItem(idChop,    juce::String::fromUTF8("Chop to Grid\xE2\x80\xA6"),    ! empty);
-    m.addItem(idExport,  juce::String::fromUTF8("Export Slices\xE2\x80\xA6"),   ! empty);
+    m.addItem(idStretch,   juce::String::fromUTF8("Stretch / Pitch\xE2\x80\xA6"),  ! empty);
+    m.addItem(idChop,      juce::String::fromUTF8("Chop to Grid\xE2\x80\xA6"),     ! empty);
+    m.addItem(idExportSel, juce::String::fromUTF8("Export Selection\xE2\x80\xA6"), sel);
+    m.addItem(idExport,    juce::String::fromUTF8("Export Slices\xE2\x80\xA6"),    ! empty);
     m.addSeparator();
     m.addItem(keyed("Undo", idUndo, canUndo, cmd + "Z"));
     m.addItem(keyed("Redo", idRedo, canRedo, shift + cmd + "Z"));
@@ -348,9 +349,10 @@ void EditorToolbar::showToolsMenu()
             case idFadeIn:    EditActions::fadeIn(document);  break;
             case idFadeOut:   EditActions::fadeOut(document); break;
             case idReverse:   EditActions::reverse(document); break;
-            case idStretch:   showStretchCallout(); break;
-            case idChop:      showChopCallout();    break;
-            case idExport:    exportSlices();       break;
+            case idStretch:   showStretchCallout();      break;
+            case idChop:      showChopCallout();         break;
+            case idExportSel: exportSelectionToFile();   break;
+            case idExport:    exportSlices();            break;
             case idUndo:      doUndo(); break;
             case idRedo:      doRedo(); break;
             default: break;
@@ -438,6 +440,22 @@ void EditorToolbar::saveFile()
             if (onSourceNameChanged) onSourceNameChanged(file.getFileName());
             if (onSaved) onSaved();
         }
+    });
+}
+
+void EditorToolbar::exportSelectionToFile()
+{
+    if (! document.hasSelection())
+        return;
+
+    fileChooser = std::make_unique<juce::FileChooser>("Export selection as WAV", juce::File(), "*.wav");
+    auto flags = juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
+               | juce::FileBrowserComponent::warnAboutOverwriting;
+    fileChooser->launchAsync(flags, [this](const juce::FileChooser& fc)
+    {
+        auto file = fc.getResult();
+        if (file != juce::File())
+            EditActions::exportSelection(document, file);
     });
 }
 

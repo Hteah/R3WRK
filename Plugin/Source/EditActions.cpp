@@ -205,6 +205,33 @@ void replaceRangeWith(AudioDocument& doc, juce::Range<int64_t> range, const juce
     doc.commitChange(std::move(spliced), actionName);
 }
 
+bool exportSelection(const AudioDocument& doc, const juce::File& file)
+{
+    auto range = doc.getEffectiveRange();
+    if (range.getLength() <= 0)
+        return false;
+
+    auto region = extractRange(doc.getBuffer(), range.getStart(), range.getEnd());
+    if (region.getNumSamples() <= 0)
+        return false;
+
+    file.deleteFile();
+    std::unique_ptr<juce::FileOutputStream> stream(file.createOutputStream());
+    if (stream == nullptr)
+        return false;
+
+    juce::WavAudioFormat wavFormat;
+    std::unique_ptr<juce::AudioFormatWriter> writer(
+        wavFormat.createWriterFor(stream.get(), doc.getSampleRate(),
+                                  (unsigned int) region.getNumChannels(), 24, {}, 0));
+    if (writer == nullptr)
+        return false;
+
+    stream.release();   // writer owns the stream now
+    writer->writeFromAudioSampleBuffer(region, 0, region.getNumSamples());
+    return true;
+}
+
 bool exportChopSlices(const AudioDocument& doc, const juce::File& destFolder, const juce::String& baseName)
 {
     if (doc.getNumSamples() <= 0)
