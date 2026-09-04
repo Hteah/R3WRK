@@ -98,8 +98,10 @@ points, else the whole clip) straight from the buffer under a try-lock. The
   up, pitch riding along exactly like tape.
 - **Pitch** — an extra ± semitone shift layered on top of the tape speed, so you
   can detune without changing the playback rate.
-- **Start / End** — normalised (0–1) knobs that set the document selection edges;
-  they read out as `m:ss.mmm` and follow bracket drags on the waveform.
+- **Start / End** — normalised (0–1) knobs on the document selection edges,
+  reading out as `m:ss.mmm` and following bracket drags. Start slides the whole
+  window (End moves with it, length preserved, pegs at the buffer end); End
+  moves independently to change the length.
 
 Speed and Pitch are `std::atomic<double>` on the processor. When *both* are
 centred (`speed==1`, `pitch==0`) playback is a plain sample copy — zero latency,
