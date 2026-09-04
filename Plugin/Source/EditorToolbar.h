@@ -5,10 +5,12 @@
 #include "PluginProcessor.h"
 
 /**
-    The compact toolbar: transport + file + undo + a single view toggle + zoom-fit,
-    with everything else (clipboard, region processing, stretch/pitch, chop-to-grid,
-    loop) tucked behind the "Edit" menu button. Owns the clipboard and talks to the
-    AudioDocument / processor directly.
+    The control surface below the waveform, in the same shape as Sieve's audio editor:
+      row 1  transport   — Play / Loop / time  ....  record meter + Record
+      row 2  operations  — Trim Delete Silence Normalize Amplify… Reverse Fade In/Out │ Cut Copy Paste │ ↶ ↷
+      row 3  file        — Open… / Save As… / Revert  ·  Tools ▾ (Stretch/Pitch, Chop-to-Grid, Export Slices)
+
+    Owns the clipboard and talks to the AudioDocument / processor directly.
 */
 class EditorToolbar : public juce::Component,
                       public juce::ChangeListener,
@@ -21,8 +23,9 @@ public:
     void resized() override;
     void changeListenerCallback(juce::ChangeBroadcaster*) override;
 
-    std::function<void()> onZoomIn, onZoomOut, onZoomFit;
-    std::function<void(bool showSpectrogram)> onViewModeChanged;
+    std::function<void()> onZoomIn, onZoomOut;
+    std::function<void(juce::String name)> onSourceNameChanged;   // "" for a fresh recording
+    std::function<void()> onSaved;                                // after a successful open / save
 
     // Called by the editor's keyPressed so ⌘X/C/V/Z and Space work from anywhere.
     void doCut();
@@ -38,8 +41,9 @@ private:
     void updateTransportButtonText();
     void openFile();
     void saveFile();
-    void showEditMenu();
-    void showGainCallout();
+    void revertAll();
+    void showToolsMenu();
+    void showAmplifyCallout();
     void showStretchCallout();
     void showChopCallout();
     void exportSlices();
@@ -47,19 +51,34 @@ private:
     EdisonCloneAudioProcessor& processor;
     AudioDocument& document;
     Clipboard clipboard;
-    bool showingSpectrogram = false;
 
-    juce::TextButton recordButton  { "Record" };
-    juce::TextButton playButton    { "Play" };
-    juce::ToggleButton loopButton  { "Loop" };
-    juce::TextButton openButton    { "Open\xE2\x80\xA6" };
-    juce::TextButton saveButton    { "Save\xE2\x80\xA6" };
-    juce::TextButton undoButton    { "Undo" };
-    juce::TextButton redoButton    { "Redo" };
-    juce::TextButton viewButton    { "Spectrogram" };
-    juce::TextButton zoomFitButton { "Fit" };
-    juce::TextButton editMenuButton { "Edit \xE2\x96\xBE" };
-    juce::Label statusLabel;
+    // row 1 — transport
+    juce::TextButton recordButton { "Record" };
+    juce::TextButton playButton   { "Play" };
+    juce::ToggleButton loopButton { "Loop" };
+    juce::Label timeLabel;
+    juce::Label recLabel;   // "● 0:05" while recording, right-aligned
+
+    // row 2 — operations
+    juce::TextButton trimButton      { "Trim" };
+    juce::TextButton deleteButton    { "Delete" };
+    juce::TextButton silenceButton   { "Silence" };
+    juce::TextButton normalizeButton { "Normalize" };
+    juce::TextButton amplifyButton   { "Amplify..." };
+    juce::TextButton reverseButton   { "Reverse" };
+    juce::TextButton fadeInButton    { "Fade In" };
+    juce::TextButton fadeOutButton   { "Fade Out" };
+    juce::TextButton cutButton       { "Cut" };
+    juce::TextButton copyButton      { "Copy" };
+    juce::TextButton pasteButton     { "Paste" };
+    juce::TextButton undoButton      { "Undo" };
+    juce::TextButton redoButton      { "Redo" };
+
+    // row 3 — file
+    juce::TextButton openButton   { "Open..." };
+    juce::TextButton saveButton   { "Save As..." };
+    juce::TextButton revertButton { "Revert" };
+    juce::TextButton toolsButton  { "Tools" };
 
     std::unique_ptr<juce::FileChooser> fileChooser;
 

@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
+#include "HeaderBar.h"
 #include "EditorToolbar.h"
 #include "WaveformDisplay.h"
 #include "SpectrogramDisplay.h"
@@ -18,9 +19,10 @@ public:
 private:
     EdisonCloneAudioProcessor& processorRef;
 
-    EditorToolbar toolbar;
+    HeaderBar header;
     WaveformDisplay waveformDisplay;
     SpectrogramDisplay spectrogramDisplay;
+    EditorToolbar toolbar;
     bool showingSpectrogram = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(EdisonCloneAudioProcessorEditor)

@@ -73,6 +73,7 @@ target_sources(EdisonClone
         Source/WaveformDisplay.cpp
         Source/SpectrogramDisplay.cpp
         Source/TimeStretchEngine.cpp
+        Source/HeaderBar.cpp
         Source/EditorToolbar.cpp)
 
 target_compile_definitions(EdisonClone

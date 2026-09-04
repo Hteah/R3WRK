@@ -2,25 +2,28 @@
 
 EdisonCloneAudioProcessorEditor::EdisonCloneAudioProcessorEditor(EdisonCloneAudioProcessor& p)
     : AudioProcessorEditor(&p), processorRef(p),
-      toolbar(p, p.document), waveformDisplay(p.document), spectrogramDisplay(p.document)
+      header(p.document), waveformDisplay(p.document), spectrogramDisplay(p.document),
+      toolbar(p, p.document)
 {
-    addAndMakeVisible(toolbar);
+    addAndMakeVisible(header);
     addAndMakeVisible(waveformDisplay);
     addChildComponent(spectrogramDisplay); // hidden until the user switches views
+    addAndMakeVisible(toolbar);
 
-    toolbar.onZoomIn  = [this] { waveformDisplay.zoomIn(); };
-    toolbar.onZoomOut = [this] { waveformDisplay.zoomOut(); };
-    toolbar.onZoomFit = [this] { waveformDisplay.zoomToFit(); };
-    toolbar.onViewModeChanged = [this](bool spectrogram)
+    header.onZoomFit = [this] { waveformDisplay.zoomToFit(); };
+    header.onViewModeChanged = [this](bool spectrogram)
     {
         showingSpectrogram = spectrogram;
         waveformDisplay.setVisible(! spectrogram);
         spectrogramDisplay.setVisible(spectrogram);
     };
 
+    toolbar.onSourceNameChanged = [this](juce::String name) { header.setSourceName(name); };
+    toolbar.onSaved             = [this] { header.markSaved(); };
+
     setWantsKeyboardFocus(true);
     setResizable(true, true);
-    setResizeLimits(620, 320, 2200, 1300);
+    setResizeLimits(680, 340, 2200, 1300);
     setSize(1000, 560);
 }
 
@@ -33,8 +36,15 @@ void EdisonCloneAudioProcessorEditor::paint(juce::Graphics& g)
 
 void EdisonCloneAudioProcessorEditor::resized()
 {
-    auto area = getLocalBounds();
-    toolbar.setBounds(area.removeFromTop(36));
+    auto area = getLocalBounds().reduced(8);
+
+    header.setBounds(area.removeFromTop(30));
+    area.removeFromTop(6);
+
+    // three control rows (26 px each) + gaps, pinned to the bottom
+    toolbar.setBounds(area.removeFromBottom(3 * 26 + 2 * 4));
+    area.removeFromBottom(6);
+
     waveformDisplay.setBounds(area);
     spectrogramDisplay.setBounds(area);
 }
@@ -45,11 +55,11 @@ bool EdisonCloneAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
     const auto cmd = juce::ModifierKeys::commandModifier;
     const auto cmdShift = cmd | juce::ModifierKeys::shiftModifier;
 
-    if (key == KP(juce::KeyPress::spaceKey))          { toolbar.togglePlay(); return true; }
-    if (key == KP('z', cmd, 0))                       { toolbar.doUndo();     return true; }
-    if (key == KP('z', cmdShift, 0))                  { toolbar.doRedo();     return true; }
-    if (key == KP('x', cmd, 0))                       { toolbar.doCut();      return true; }
-    if (key == KP('c', cmd, 0))                       { toolbar.doCopy();     return true; }
-    if (key == KP('v', cmd, 0))                       { toolbar.doPaste();    return true; }
+    if (key == KP(juce::KeyPress::spaceKey))  { toolbar.togglePlay(); return true; }
+    if (key == KP('z', cmd, 0))               { toolbar.doUndo();     return true; }
+    if (key == KP('z', cmdShift, 0))          { toolbar.doRedo();     return true; }
+    if (key == KP('x', cmd, 0))               { toolbar.doCut();      return true; }
+    if (key == KP('c', cmd, 0))               { toolbar.doCopy();     return true; }
+    if (key == KP('v', cmd, 0))               { toolbar.doPaste();    return true; }
     return false;
 }

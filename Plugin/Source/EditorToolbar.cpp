@@ -10,6 +10,12 @@ namespace
         return juce::String::formatted("%02d:%06.3f", mins, secs);
     }
 
+    juce::String mmss(double seconds)
+    {
+        int s = (int) std::round(seconds);
+        return juce::String::formatted("%d:%02d", s / 60, s % 60);
+    }
+
     void dismissEnclosingCallout(juce::Component& c)
     {
         if (auto* box = c.findParentComponentOfClass<juce::CallOutBox>())
@@ -17,17 +23,17 @@ namespace
     }
 
     //==============================================================================
-    struct GainPanel : juce::Component
+    struct AmplifyPanel : juce::Component
     {
-        explicit GainPanel(AudioDocument& doc) : document(doc)
+        explicit AmplifyPanel(AudioDocument& doc) : document(doc)
         {
-            title.setText("Gain", juce::dontSendNotification);
+            title.setText("Amplify", juce::dontSendNotification);
             title.setFont(juce::FontOptions(14.0f, juce::Font::bold));
-            gain.setRange(-24.0, 24.0, 0.1);
+            gain.setRange(-48.0, 24.0, 0.1);
             gain.setValue(0.0);
             gain.setTextValueSuffix(" dB");
             gain.setSliderStyle(juce::Slider::LinearHorizontal);
-            gain.setTextBoxStyle(juce::Slider::TextBoxRight, false, 56, 22);
+            gain.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 22);
             apply.onClick = [this]
             {
                 EditActions::applyGainDb(document, (float) gain.getValue());
@@ -36,13 +42,13 @@ namespace
             addAndMakeVisible(title);
             addAndMakeVisible(gain);
             addAndMakeVisible(apply);
-            setSize(260, 84);
+            setSize(280, 86);
         }
         void resized() override
         {
             auto r = getLocalBounds().reduced(10);
             title.setBounds(r.removeFromTop(18));
-            r.removeFromTop(4);
+            r.removeFromTop(6);
             apply.setBounds(r.removeFromRight(64).reduced(0, 2));
             r.removeFromRight(6);
             gain.setBounds(r);
@@ -61,20 +67,20 @@ namespace
             title.setText("Stretch / Pitch", juce::dontSendNotification);
             title.setFont(juce::FontOptions(14.0f, juce::Font::bold));
 
-            stretchLabel.setText("Length", juce::dontSendNotification);
+            lengthLabel.setText("Length", juce::dontSendNotification);
             stretch.setRange(0.25, 4.0, 0.01);
             stretch.setValue(1.0);
             stretch.setSkewFactorFromMidPoint(1.0);
             stretch.setTextValueSuffix(" x");
             stretch.setSliderStyle(juce::Slider::LinearHorizontal);
-            stretch.setTextBoxStyle(juce::Slider::TextBoxRight, false, 56, 22);
+            stretch.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 22);
 
             pitchLabel.setText("Pitch", juce::dontSendNotification);
             pitch.setRange(-24.0, 24.0, 0.1);
             pitch.setValue(0.0);
             pitch.setTextValueSuffix(" st");
             pitch.setSliderStyle(juce::Slider::LinearHorizontal);
-            pitch.setTextBoxStyle(juce::Slider::TextBoxRight, false, 56, 22);
+            pitch.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 22);
 
             hint.setText("Applies to the selection, or the whole clip if nothing is selected.",
                          juce::dontSendNotification);
@@ -84,13 +90,13 @@ namespace
             apply.onClick = [this] { run(); dismissEnclosingCallout(*this); };
 
             addAndMakeVisible(title);
-            addAndMakeVisible(stretchLabel);
+            addAndMakeVisible(lengthLabel);
             addAndMakeVisible(stretch);
             addAndMakeVisible(pitchLabel);
             addAndMakeVisible(pitch);
             addAndMakeVisible(hint);
             addAndMakeVisible(apply);
-            setSize(320, 150);
+            setSize(330, 150);
         }
 
         void run()
@@ -114,11 +120,11 @@ namespace
             title.setBounds(r.removeFromTop(18));
             r.removeFromTop(6);
             auto row = r.removeFromTop(24);
-            stretchLabel.setBounds(row.removeFromLeft(46));
+            lengthLabel.setBounds(row.removeFromLeft(48));
             stretch.setBounds(row);
             r.removeFromTop(6);
             row = r.removeFromTop(24);
-            pitchLabel.setBounds(row.removeFromLeft(46));
+            pitchLabel.setBounds(row.removeFromLeft(48));
             pitch.setBounds(row);
             r.removeFromTop(8);
             apply.setBounds(r.removeFromTop(24).removeFromRight(72));
@@ -127,7 +133,7 @@ namespace
         }
 
         AudioDocument& document;
-        juce::Label title, stretchLabel, pitchLabel, hint;
+        juce::Label title, lengthLabel, pitchLabel, hint;
         juce::Slider stretch, pitch;
         juce::TextButton apply { "Apply" };
     };
@@ -145,7 +151,7 @@ namespace
             bpm.setRange(40.0, 240.0, 0.1);
             bpm.setValue(document.chopBpm);
             bpm.setSliderStyle(juce::Slider::LinearHorizontal);
-            bpm.setTextBoxStyle(juce::Slider::TextBoxRight, false, 56, 22);
+            bpm.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 22);
             bpm.onValueChange = [this] { push(); };
 
             divLabel.setText("Grid", juce::dontSendNotification);
@@ -213,35 +219,49 @@ namespace
 EditorToolbar::EditorToolbar(EdisonCloneAudioProcessor& proc, AudioDocument& doc)
     : processor(proc), document(doc)
 {
-    for (auto* b : { &recordButton, &playButton, &openButton, &saveButton, &undoButton, &redoButton,
-                     &viewButton, &zoomFitButton, &editMenuButton })
+    for (auto* b : { &recordButton, &playButton,
+                     &trimButton, &deleteButton, &silenceButton, &normalizeButton, &amplifyButton,
+                     &reverseButton, &fadeInButton, &fadeOutButton,
+                     &cutButton, &copyButton, &pasteButton, &undoButton, &redoButton,
+                     &openButton, &saveButton, &revertButton, &toolsButton })
         addAndMakeVisible(b);
     addAndMakeVisible(loopButton);
-    addAndMakeVisible(statusLabel);
+    addAndMakeVisible(timeLabel);
+    addAndMakeVisible(recLabel);
 
     recordButton.setColour(juce::TextButton::buttonColourId, juce::Colours::darkred);
-    statusLabel.setJustificationType(juce::Justification::centredRight);
-    statusLabel.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
-    viewButton.setTooltip("Switch between the waveform and spectrogram view");
+    timeLabel.setFont(juce::Font(juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::plain));
+    timeLabel.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
+    recLabel.setJustificationType(juce::Justification::centredRight);
+    recLabel.setColour(juce::Label::textColourId, juce::Colours::red);
+    undoButton.setButtonText(juce::String::fromUTF8("\xe2\x86\xb6"));   // ↶
+    redoButton.setButtonText(juce::String::fromUTF8("\xe2\x86\xb7"));   // ↷
+    undoButton.setTooltip("Undo");
+    redoButton.setTooltip("Redo");
+    toolsButton.setButtonText(juce::String::fromUTF8("Tools \xe2\x96\xbe"));   // Tools ▾
 
     recordButton.onClick = [this] { toggleTransport(); };
     playButton.onClick   = [this] { togglePlay(); };
-    loopButton.onClick = [this] { document.loopEnabled = loopButton.getToggleState(); };
+    loopButton.onClick   = [this] { document.loopEnabled = loopButton.getToggleState(); };
 
-    openButton.onClick = [this] { openFile(); };
-    saveButton.onClick = [this] { saveFile(); };
-    undoButton.onClick = [this] { doUndo(); };
-    redoButton.onClick = [this] { doRedo(); };
+    trimButton.onClick      = [this] { EditActions::trimToSelection(document); };
+    deleteButton.onClick    = [this] { EditActions::deleteSelection(document); };
+    silenceButton.onClick   = [this] { EditActions::silence(document); };
+    normalizeButton.onClick = [this] { EditActions::normalize(document); };
+    amplifyButton.onClick   = [this] { showAmplifyCallout(); };
+    reverseButton.onClick   = [this] { EditActions::reverse(document); };
+    fadeInButton.onClick    = [this] { EditActions::fadeIn(document); };
+    fadeOutButton.onClick   = [this] { EditActions::fadeOut(document); };
+    cutButton.onClick       = [this] { doCut(); };
+    copyButton.onClick      = [this] { doCopy(); };
+    pasteButton.onClick     = [this] { doPaste(); };
+    undoButton.onClick      = [this] { doUndo(); };
+    redoButton.onClick      = [this] { doRedo(); };
 
-    viewButton.onClick = [this]
-    {
-        showingSpectrogram = ! showingSpectrogram;
-        viewButton.setButtonText(showingSpectrogram ? "Waveform" : "Spectrogram");
-        if (onViewModeChanged) onViewModeChanged(showingSpectrogram);
-    };
-    zoomFitButton.onClick = [this] { if (onZoomFit) onZoomFit(); };
-
-    editMenuButton.onClick = [this] { showEditMenu(); };
+    openButton.onClick   = [this] { openFile(); };
+    saveButton.onClick   = [this] { saveFile(); };
+    revertButton.onClick = [this] { revertAll(); };
+    toolsButton.onClick  = [this] { showToolsMenu(); };
 
     document.changeBroadcaster.addChangeListener(this);
     updateTransportButtonText();
@@ -264,7 +284,8 @@ void EditorToolbar::toggleTransport()
 {
     if (document.isRecording.load())      processor.stopRecording();
     else if (document.isPlaying.load())   processor.stopPlayback();
-    else                                  processor.startRecording();
+    else                                { processor.startRecording();
+                                          if (onSourceNameChanged) onSourceNameChanged({}); }
     updateTransportButtonText();
 }
 
@@ -276,107 +297,75 @@ void EditorToolbar::togglePlay()
     updateTransportButtonText();
 }
 
-//==============================================================================
-void EditorToolbar::showEditMenu()
+void EditorToolbar::revertAll()
 {
-    enum
-    {
-        idCut = 1, idCopy, idPaste,
-        idTrim, idDelete, idSilence,
-        idNormalize, idGain, idFadeIn, idFadeOut, idReverse,
-        idStretch, idChop,
-        idLoopToSel,
-        idZoomIn, idZoomOut
-    };
+    while (document.undoManager.canUndo())
+        document.undoManager.undo();
+    document.notifyChanged();
+}
 
+//==============================================================================
+void EditorToolbar::showToolsMenu()
+{
+    enum { idStretch = 1, idChop, idExport };
     const bool empty = document.isEmpty();
-    const bool haveClip = clipboard.hasContent();
-
-    const juce::String cmdSym = juce::String::fromUTF8("\xe2\x8c\x98");   // ⌘
 
     juce::PopupMenu m;
-    juce::PopupMenu::Item cut ("Cut");     cut.itemID = idCut;     cut.isEnabled = ! empty;   cut.shortcutKeyDescription = cmdSym + "X";
-    juce::PopupMenu::Item copy ("Copy");   copy.itemID = idCopy;   copy.isEnabled = ! empty;  copy.shortcutKeyDescription = cmdSym + "C";
-    juce::PopupMenu::Item paste ("Paste"); paste.itemID = idPaste; paste.isEnabled = haveClip; paste.shortcutKeyDescription = cmdSym + "V";
-    m.addItem(cut); m.addItem(copy); m.addItem(paste);
-    m.addSeparator();
-    m.addItem(idTrim,      "Trim to Selection", ! empty);
-    m.addItem(idDelete,    "Delete Selection",  ! empty);
-    m.addItem(idSilence,   "Silence Selection", ! empty);
-    m.addSeparator();
-    m.addItem(idNormalize, "Normalize",         ! empty);
-    m.addItem(idGain,      juce::String::fromUTF8("Gain\xE2\x80\xA6"), ! empty);
-    m.addItem(idFadeIn,    "Fade In",           ! empty);
-    m.addItem(idFadeOut,   "Fade Out",          ! empty);
-    m.addItem(idReverse,   "Reverse",           ! empty);
-    m.addSeparator();
-    m.addItem(idStretch,   juce::String::fromUTF8("Stretch / Pitch\xE2\x80\xA6"), ! empty);
-    m.addItem(idChop,      juce::String::fromUTF8("Chop to Grid\xE2\x80\xA6"),    ! empty);
-    m.addSeparator();
-    m.addItem(idLoopToSel, "Set Loop to Selection", ! empty);
-    m.addSeparator();
-    m.addItem(idZoomIn,  "Zoom In");
-    m.addItem(idZoomOut, "Zoom Out");
-
-    m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(editMenuButton),
-                    [this](int r)
+    m.addItem(idStretch, juce::String::fromUTF8("Stretch / Pitch\xE2\x80\xA6"), ! empty);
+    m.addItem(idChop,    juce::String::fromUTF8("Chop to Grid\xE2\x80\xA6"),    ! empty);
+    m.addItem(idExport,  juce::String::fromUTF8("Export Slices\xE2\x80\xA6"),   ! empty);
+    m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(toolsButton), [this](int r)
     {
         switch (r)
         {
-            case idCut:       doCut(); break;
-            case idCopy:      doCopy(); break;
-            case idPaste:     doPaste(); break;
-            case idTrim:      EditActions::trimToSelection(document); break;
-            case idDelete:    EditActions::deleteSelection(document); break;
-            case idSilence:   EditActions::silence(document); break;
-            case idNormalize: EditActions::normalize(document); break;
-            case idGain:      showGainCallout(); break;
-            case idFadeIn:    EditActions::fadeIn(document); break;
-            case idFadeOut:   EditActions::fadeOut(document); break;
-            case idReverse:   EditActions::reverse(document); break;
-            case idStretch:   showStretchCallout(); break;
-            case idChop:      showChopCallout(); break;
-            case idLoopToSel:
-                if (document.hasSelection())
-                {
-                    document.loopStart = document.getSelectionStart();
-                    document.loopEnd   = document.getSelectionEnd();
-                    document.notifyChanged();
-                }
-                break;
-            case idZoomIn:    if (onZoomIn)  onZoomIn();  break;
-            case idZoomOut:   if (onZoomOut) onZoomOut(); break;
+            case idStretch: showStretchCallout(); break;
+            case idChop:    showChopCallout();    break;
+            case idExport:  exportSlices();       break;
             default: break;
         }
     });
 }
 
-void EditorToolbar::showGainCallout()
+void EditorToolbar::showAmplifyCallout()
 {
-    juce::CallOutBox::launchAsynchronously(std::make_unique<GainPanel>(document),
-                                           editMenuButton.getScreenBounds(), nullptr);
+    juce::CallOutBox::launchAsynchronously(std::make_unique<AmplifyPanel>(document),
+                                           amplifyButton.getScreenBounds(), nullptr);
 }
 
 void EditorToolbar::showStretchCallout()
 {
     juce::CallOutBox::launchAsynchronously(std::make_unique<StretchPanel>(document),
-                                           editMenuButton.getScreenBounds(), nullptr);
+                                           toolsButton.getScreenBounds(), nullptr);
 }
 
 void EditorToolbar::showChopCallout()
 {
     juce::CallOutBox::launchAsynchronously(
         std::make_unique<ChopPanel>(document, [this] { exportSlices(); }),
-        editMenuButton.getScreenBounds(), nullptr);
+        toolsButton.getScreenBounds(), nullptr);
 }
 
 //==============================================================================
 void EditorToolbar::updateTransportButtonText()
 {
-    recordButton.setButtonText(document.isRecording.load() ? "Stop Rec" : "Record");
-    playButton.setButtonText(document.isPlaying.load() ? "Stop" : "Play");
+    const bool rec = document.isRecording.load();
+    const bool playing = document.isPlaying.load();
+    recordButton.setButtonText(rec ? "Stop Rec" : "Record");
+    playButton.setButtonText(playing ? "Stop" : "Play");
     loopButton.setToggleState(document.loopEnabled.load(), juce::dontSendNotification);
-    recordButton.setEnabled(! document.isPlaying.load() || document.isRecording.load());
+    recordButton.setEnabled(! playing || rec);
+
+    const bool canUndo = document.undoManager.canUndo();
+    undoButton.setEnabled(canUndo);
+    redoButton.setEnabled(document.undoManager.canRedo());
+    revertButton.setEnabled(canUndo);
+
+    const bool sel = document.hasSelection();
+    trimButton.setEnabled(sel);
+    deleteButton.setEnabled(sel);
+    cutButton.setEnabled(sel);
+    copyButton.setEnabled(sel);
+    pasteButton.setEnabled(clipboard.hasContent());
 }
 
 void EditorToolbar::timerCallback()
@@ -386,15 +375,12 @@ void EditorToolbar::timerCallback()
     double sr = document.getSampleRate() > 0 ? document.getSampleRate() : 44100.0;
     double posSec = (double) document.playhead.load() / sr;
     double lenSec = (double) document.getNumSamples() / sr;
-    juce::String status = formatTime(posSec) + " / " + formatTime(lenSec) + "   (" + juce::String((int) sr) + " Hz)";
-    if (document.hasSelection())
-    {
-        double selSec = (double) (document.getSelectionEnd() - document.getSelectionStart()) / sr;
-        status << "   Sel: " << juce::String(selSec, 3) << "s";
-    }
-    if (document.isRecording.load())
-        status = "RECORDING   " + status;
-    statusLabel.setText(status, juce::dontSendNotification);
+    timeLabel.setText(formatTime(posSec) + " / " + formatTime(lenSec), juce::dontSendNotification);
+
+    recLabel.setText(document.isRecording.load()
+                         ? juce::String::fromUTF8("\xE2\x97\x8F REC  ") + mmss(posSec)
+                         : juce::String(),
+                     juce::dontSendNotification);
 }
 
 void EditorToolbar::changeListenerCallback(juce::ChangeBroadcaster*)
@@ -411,8 +397,11 @@ void EditorToolbar::openFile()
     fileChooser->launchAsync(flags, [this](const juce::FileChooser& fc)
     {
         auto file = fc.getResult();
-        if (file.existsAsFile())
-            document.loadFromFile(file, processor.getSampleRate());
+        if (file.existsAsFile() && document.loadFromFile(file, processor.getSampleRate()))
+        {
+            if (onSourceNameChanged) onSourceNameChanged(file.getFileName());
+            if (onSaved) onSaved();
+        }
     });
 }
 
@@ -424,8 +413,11 @@ void EditorToolbar::saveFile()
     fileChooser->launchAsync(flags, [this](const juce::FileChooser& fc)
     {
         auto file = fc.getResult();
-        if (file != juce::File())
-            document.saveToFile(file);
+        if (file != juce::File() && document.saveToFile(file))
+        {
+            if (onSourceNameChanged) onSourceNameChanged(file.getFileName());
+            if (onSaved) onSaved();
+        }
     });
 }
 
@@ -447,35 +439,47 @@ void EditorToolbar::exportSlices()
 //==============================================================================
 void EditorToolbar::resized()
 {
-    auto area = getLocalBounds().reduced(4);
+    auto area = getLocalBounds();
+    const int rowH = 26;
     const int gap = 4;
 
-    juce::FlexBox fb;
-    fb.flexDirection = juce::FlexBox::Direction::row;
-    fb.alignItems = juce::FlexBox::AlignItems::stretch;
-
-    auto add = [&](juce::Component& c, int w)
+    // width < 0  -> flexible spacer; comp == nullptr with width >= 0 -> fixed spacer.
+    auto flexRow = [&](juce::Rectangle<int> row,
+                       std::initializer_list<std::pair<juce::Component*, int>> items)
     {
-        fb.items.add(juce::FlexItem(c).withWidth((float) w)
-                        .withMargin(juce::FlexItem::Margin(0, gap, 0, 0)));
+        juce::FlexBox fb;
+        fb.flexDirection = juce::FlexBox::Direction::row;
+        for (auto& [comp, w] : items)
+        {
+            if (comp == nullptr)
+                fb.items.add(w < 0 ? juce::FlexItem().withFlex(1.0f)
+                                   : juce::FlexItem().withWidth((float) w));
+            else
+                fb.items.add(juce::FlexItem(*comp).withWidth((float) w).withMinWidth(22.0f)
+                                 .withMargin(juce::FlexItem::Margin(0, (float) gap, 0, 0)));
+        }
+        fb.performLayout(row);
     };
-    auto spacer = [&](int w) { fb.items.add(juce::FlexItem().withWidth((float) w)); };
 
-    add(recordButton, 76);
-    add(playButton, 58);
-    add(loopButton, 58);
-    spacer(8);
-    add(openButton, 62);
-    add(saveButton, 62);
-    spacer(8);
-    add(undoButton, 56);
-    add(redoButton, 56);
-    spacer(8);
-    add(viewButton, 100);
-    add(zoomFitButton, 46);
-    spacer(8);
-    add(editMenuButton, 72);
-    fb.items.add(juce::FlexItem(statusLabel).withFlex(1.0f));
+    flexRow(area.removeFromTop(rowH),
+            { { &playButton, 58 }, { &loopButton, 56 }, { &timeLabel, 150 },
+              { nullptr, -1 },
+              { &recLabel, 118 }, { &recordButton, 80 } });
 
-    fb.performLayout(area.removeFromTop(28));
+    area.removeFromTop(gap);
+    flexRow(area.removeFromTop(rowH),
+            { { &trimButton, 50 }, { &deleteButton, 58 }, { &silenceButton, 62 },
+              { &normalizeButton, 76 }, { &amplifyButton, 74 }, { &reverseButton, 64 },
+              { &fadeInButton, 62 }, { &fadeOutButton, 66 },
+              { nullptr, 10 },
+              { &cutButton, 46 }, { &copyButton, 50 }, { &pasteButton, 52 },
+              { nullptr, 10 },
+              { &undoButton, 34 }, { &redoButton, 34 },
+              { nullptr, -1 } });
+
+    area.removeFromTop(gap);
+    flexRow(area.removeFromTop(rowH),
+            { { &openButton, 62 }, { &saveButton, 76 }, { &revertButton, 62 },
+              { nullptr, 10 }, { &toolsButton, 74 },
+              { nullptr, -1 } });
 }
