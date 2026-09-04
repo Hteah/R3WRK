@@ -98,6 +98,13 @@ the document (as a normal undoable "Record" edit) when you stop. Recording
 currently always replaces the whole document — there's no overdub/punch-in
 yet.
 
+While recording, `processBlock` also feeds a lock-free scope ring on
+`AudioDocument` (block peak min/max per 256-sample hop) and a `recordedSamples`
+counter. `WaveformDisplay::paint` swaps to a scrolling scope of the incoming
+audio + a `REC m:ss.ss` tag while `isRecording`, and the toolbar's time / REC
+labels count up from `recordedSamples` — otherwise there's no visual sign a
+take is in progress (the playhead only moves during playback).
+
 ## Playback & the knob row
 
 `processBlock` plays the document region (the selection if any, else the loop
