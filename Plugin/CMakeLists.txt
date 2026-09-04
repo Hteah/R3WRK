@@ -76,7 +76,9 @@ target_sources(R3WRK
         Source/HeaderBar.cpp
         Source/EditorToolbar.cpp
         Source/KnobRow.cpp
-        Source/TimeRuler.cpp)
+        Source/TimeRuler.cpp
+        Source/Theme.cpp
+        Source/ThemeEditor.cpp)
 
 target_compile_definitions(R3WRK
     PUBLIC

@@ -3,9 +3,6 @@
 
 namespace
 {
-    const juce::Colour kBackground { 0xff17191e };
-    const juce::Colour kInk        { 0xffffffff };
-
     juce::String formatTick(double seconds, bool subSecond)
     {
         seconds = juce::jmax(0.0, seconds);
@@ -43,10 +40,13 @@ double TimeRuler::niceStepSeconds(double spanSeconds, double widthPx)
 
 void TimeRuler::paint(juce::Graphics& g)
 {
+    const auto& pal = theme->palette();
+    const juce::Colour kInk = pal.text;
+
     const float w = (float) getWidth();
     const float h = (float) getHeight();
-    g.fillAll(kBackground);
-    g.setColour(juce::Colours::black.withAlpha(0.35f));
+    g.fillAll(pal.panelBg);
+    g.setColour(pal.gridLine);
     g.drawHorizontalLine(0, 0.0f, w);
 
     if (w <= 1.0f || h <= 2.0f)
@@ -103,7 +103,7 @@ void TimeRuler::paint(juce::Graphics& g)
         const float x = (float) ((phSec - startSec) * pxPerSec);
         juce::Path tri;
         tri.addTriangle(x - 4.0f, 0.0f, x + 4.0f, 0.0f, x, 7.0f);
-        g.setColour(juce::Colours::red);
+        g.setColour(pal.playhead);
         g.fillPath(tri);
     }
 }

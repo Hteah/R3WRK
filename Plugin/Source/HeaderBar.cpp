@@ -9,12 +9,31 @@ HeaderBar::HeaderBar(AudioDocument& doc) : document(doc)
     nameLabel.setMinimumHorizontalScale(1.0f);
 
     readoutLabel.setFont(juce::FontOptions(11.0f));
-    readoutLabel.setColour(juce::Label::textColourId, juce::Colours::grey);
 
     addAndMakeVisible(nameLabel);
     addAndMakeVisible(readoutLabel);
 
+    applyTheme();
+    theme->addChangeListener(this);
     startTimerHz(10);
+}
+
+HeaderBar::~HeaderBar()
+{
+    theme->removeChangeListener(this);
+}
+
+void HeaderBar::applyTheme()
+{
+    const auto& pal = theme->palette();
+    nameLabel.setColour(juce::Label::textColourId, pal.text);
+    readoutLabel.setColour(juce::Label::textColourId, pal.textDim);
+}
+
+void HeaderBar::changeListenerCallback(juce::ChangeBroadcaster*)
+{
+    applyTheme();
+    repaint();
 }
 
 void HeaderBar::setSourceName(const juce::String& name)
@@ -62,7 +81,7 @@ void HeaderBar::paint(juce::Graphics& g)
 {
     if (isDirty())
     {
-        g.setColour(juce::Colours::orange);
+        g.setColour(theme->palette().loopMarker);
         g.fillEllipse(4.0f, 6.0f, 8.0f, 8.0f);
     }
 }

@@ -3,6 +3,7 @@
 #include "AudioDocument.h"
 #include "EditActions.h"
 #include "PluginProcessor.h"
+#include "Theme.h"
 
 /**
     A single control strip below the waveform:
@@ -38,6 +39,7 @@ public:
 
 private:
     void timerCallback() override;
+    void applyTheme();
     void updateTransportButtonText();
     void openFile();
     void saveFile();
@@ -45,10 +47,12 @@ private:
     void showToolsMenu();
     void showAmplifyCallout();
     void showStretchCallout();
+    void showThemeCallout();
     void exportSelectionToFile();
 
     R3WRKAudioProcessor& processor;
     AudioDocument& document;
+    juce::SharedResourcePointer<ThemeManager> theme;
     Clipboard clipboard;
 
     juce::TextButton playButton   { "Play" };

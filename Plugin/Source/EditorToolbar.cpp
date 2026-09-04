@@ -1,5 +1,6 @@
 #include "EditorToolbar.h"
 #include "TimeStretchEngine.h"
+#include "ThemeEditor.h"
 
 namespace
 {
@@ -150,11 +151,8 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     addAndMakeVisible(recordButton);
     addAndMakeVisible(toolsButton);
 
-    recordButton.setColour(juce::TextButton::buttonColourId, juce::Colours::darkred);
     timeLabel.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::plain));
-    timeLabel.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
     recLabel.setJustificationType(juce::Justification::centredRight);
-    recLabel.setColour(juce::Label::textColourId, juce::Colours::red);
     toolsButton.setButtonText(juce::String::fromUTF8("Tools \xe2\x96\xbe"));   // Tools ▾
 
     recordButton.onClick = [this] { toggleTransport(); };
@@ -162,14 +160,26 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     loopButton.onClick   = [this] { document.loopEnabled = loopButton.getToggleState(); };
     toolsButton.onClick  = [this] { showToolsMenu(); };
 
+    applyTheme();
     document.changeBroadcaster.addChangeListener(this);
+    theme->addChangeListener(this);
     updateTransportButtonText();
     startTimerHz(15);
 }
 
 EditorToolbar::~EditorToolbar()
 {
+    theme->removeChangeListener(this);
     document.changeBroadcaster.removeChangeListener(this);
+}
+
+void EditorToolbar::applyTheme()
+{
+    const auto& pal = theme->palette();
+    recordButton.setColour(juce::TextButton::buttonColourId, pal.recordButton);
+    timeLabel.setColour(juce::Label::textColourId, pal.textDim);
+    recLabel.setColour(juce::Label::textColourId, pal.playhead);
+    repaint();
 }
 
 //==============================================================================
@@ -211,6 +221,7 @@ void EditorToolbar::showToolsMenu()
            idTrim, idDelete, idSilence,
            idNormalize, idAmplify, idFadeIn, idFadeOut, idReverse,
            idStretch, idExportSel,
+           idTheme,
            idUndo, idRedo };
 
     const bool empty   = document.isEmpty();
@@ -250,6 +261,8 @@ void EditorToolbar::showToolsMenu()
     m.addItem(idStretch,   juce::String::fromUTF8("Stretch / Pitch\xE2\x80\xA6"),  ! empty);
     m.addItem(idExportSel, juce::String::fromUTF8("Export Selection\xE2\x80\xA6"), sel);
     m.addSeparator();
+    m.addItem(idTheme, juce::String::fromUTF8("Theme\xE2\x80\xA6"));
+    m.addSeparator();
     m.addItem(keyed("Undo", idUndo, canUndo, cmd + "Z"));
     m.addItem(keyed("Redo", idRedo, canRedo, shift + cmd + "Z"));
 
@@ -273,6 +286,7 @@ void EditorToolbar::showToolsMenu()
             case idReverse:   EditActions::reverse(document); break;
             case idStretch:   showStretchCallout();      break;
             case idExportSel: exportSelectionToFile();   break;
+            case idTheme:     showThemeCallout();        break;
             case idUndo:      doUndo(); break;
             case idRedo:      doRedo(); break;
             default: break;
@@ -289,6 +303,12 @@ void EditorToolbar::showAmplifyCallout()
 void EditorToolbar::showStretchCallout()
 {
     juce::CallOutBox::launchAsynchronously(std::make_unique<StretchPanel>(document),
+                                           toolsButton.getScreenBounds(), nullptr);
+}
+
+void EditorToolbar::showThemeCallout()
+{
+    juce::CallOutBox::launchAsynchronously(std::make_unique<ThemeEditor>(),
                                            toolsButton.getScreenBounds(), nullptr);
 }
 
@@ -318,8 +338,13 @@ void EditorToolbar::timerCallback()
                      juce::dontSendNotification);
 }
 
-void EditorToolbar::changeListenerCallback(juce::ChangeBroadcaster*)
+void EditorToolbar::changeListenerCallback(juce::ChangeBroadcaster* source)
 {
+    if (source == &theme.get())
+    {
+        applyTheme();
+        return;
+    }
     loopButton.setToggleState(document.loopEnabled.load(), juce::dontSendNotification);
 }
 

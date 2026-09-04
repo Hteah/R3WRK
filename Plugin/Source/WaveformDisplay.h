@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "AudioDocument.h"
+#include "Theme.h"
 
 /**
     Draws the waveform for the document (one lane per channel), plus a per-lane
@@ -61,6 +62,7 @@ private:
     float sampleToX(int64_t sample) const;
 
     AudioDocument& document;
+    juce::SharedResourcePointer<ThemeManager> theme;
     int64_t viewStart = 0, viewEnd = 0;
     std::vector<juce::Path> channelPaths;
     int lastBufferVersion = -1;      // rebuild the paths when the audio content changes

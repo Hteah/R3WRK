@@ -2,8 +2,6 @@
 
 namespace
 {
-    const juce::Colour kAccent { 0xff5ec2ff };
-
     int64_t fracToSample(double frac, int64_t numSamples)
     {
         return (int64_t) (juce::jlimit(0.0, 1.0, frac) * (double) juce::jmax((int64_t) 1, numSamples));
@@ -118,10 +116,34 @@ KnobRow::KnobRow(R3WRKAudioProcessor& proc, AudioDocument& doc)
         };
     }
 
+    applyTheme();
+    theme->addChangeListener(this);
     startTimerHz(15);
 }
 
-KnobRow::~KnobRow() = default;
+KnobRow::~KnobRow()
+{
+    theme->removeChangeListener(this);
+}
+
+void KnobRow::applyTheme()
+{
+    const auto& pal = theme->palette();
+    for (auto* k : knobs)
+    {
+        k->caption.setColour(juce::Label::textColourId, pal.textDim);
+        k->slider.setColour(juce::Slider::rotarySliderFillColourId, pal.accent);
+        k->slider.setColour(juce::Slider::textBoxTextColourId, pal.text);
+        k->slider.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+        k->caption.repaint();
+        k->slider.repaint();
+    }
+}
+
+void KnobRow::changeListenerCallback(juce::ChangeBroadcaster*)
+{
+    applyTheme();
+}
 
 KnobRow::Knob& KnobRow::addKnob(const juce::String& name)
 {
@@ -130,13 +152,9 @@ KnobRow::Knob& KnobRow::addKnob(const juce::String& name)
     k->caption.setText(name, juce::dontSendNotification);
     k->caption.setJustificationType(juce::Justification::centred);
     k->caption.setFont(juce::FontOptions(11.0f));
-    k->caption.setColour(juce::Label::textColourId, juce::Colours::grey);
 
     k->slider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
     k->slider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 68, 14);
-    k->slider.setColour(juce::Slider::rotarySliderFillColourId, kAccent);
-    k->slider.setColour(juce::Slider::textBoxTextColourId, juce::Colours::lightgrey);
-    k->slider.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
 
     Knob* kp = k;
     k->slider.onValueChange = [kp] { if (kp->apply) kp->apply(kp->slider.getValue()); };

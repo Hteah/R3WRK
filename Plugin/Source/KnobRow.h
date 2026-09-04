@@ -3,6 +3,7 @@
 #include <limits>
 #include "AudioDocument.h"
 #include "PluginProcessor.h"
+#include "Theme.h"
 
 /**
     A horizontal strip of small rotary knobs beneath the transport bar.
@@ -15,7 +16,8 @@
     Talks to the AudioDocument / processor directly, the same way EditorToolbar does.
 */
 class KnobRow : public juce::Component,
-                private juce::Timer
+                private juce::Timer,
+                private juce::ChangeListener
 {
 public:
     KnobRow(R3WRKAudioProcessor& processor, AudioDocument& document);
@@ -25,6 +27,8 @@ public:
 
 private:
     void timerCallback() override;
+    void changeListenerCallback(juce::ChangeBroadcaster*) override;   // theme changed
+    void applyTheme();
 
     struct Knob
     {
@@ -40,6 +44,7 @@ private:
 
     R3WRKAudioProcessor& processor;
     AudioDocument& document;
+    juce::SharedResourcePointer<ThemeManager> theme;
 
     juce::OwnedArray<Knob> knobs;
     Knob* startKnob = nullptr;

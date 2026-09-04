@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "AudioDocument.h"
 #include "WaveformDisplay.h"
+#include "Theme.h"
 
 /**
     A thin time ruler drawn under the waveform. It reads the waveform's current
@@ -23,6 +24,7 @@ private:
 
     const WaveformDisplay& waveform;
     const AudioDocument& document;
+    juce::SharedResourcePointer<ThemeManager> theme;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TimeRuler)
 };

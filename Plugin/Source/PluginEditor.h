@@ -7,8 +7,10 @@
 #include "WaveformDisplay.h"
 #include "SpectrogramDisplay.h"
 #include "TimeRuler.h"
+#include "Theme.h"
 
-class R3WRKAudioProcessorEditor : public juce::AudioProcessorEditor
+class R3WRKAudioProcessorEditor : public juce::AudioProcessorEditor,
+                                  private juce::ChangeListener
 {
 public:
     explicit R3WRKAudioProcessorEditor(R3WRKAudioProcessor&);
@@ -19,7 +21,10 @@ public:
     bool keyPressed(const juce::KeyPress&) override;
 
 private:
+    void changeListenerCallback(juce::ChangeBroadcaster*) override { repaint(); }
+
     R3WRKAudioProcessor& processorRef;
+    juce::SharedResourcePointer<ThemeManager> theme;
 
     HeaderBar header;
     WaveformDisplay waveformDisplay;

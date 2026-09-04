@@ -32,17 +32,22 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
         }
     };
 
+    theme->addChangeListener(this);
+
     setWantsKeyboardFocus(true);
     setResizable(true, true);
     setResizeLimits(680, 454, 2200, 1300);
     setSize(1000, 620);
 }
 
-R3WRKAudioProcessorEditor::~R3WRKAudioProcessorEditor() = default;
+R3WRKAudioProcessorEditor::~R3WRKAudioProcessorEditor()
+{
+    theme->removeChangeListener(this);
+}
 
 void R3WRKAudioProcessorEditor::paint(juce::Graphics& g)
 {
-    g.fillAll(juce::Colour(0xff14161a));
+    g.fillAll(theme->palette().windowBg);
 }
 
 void R3WRKAudioProcessorEditor::resized()

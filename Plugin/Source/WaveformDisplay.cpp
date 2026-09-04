@@ -1,15 +1,10 @@
 #include "WaveformDisplay.h"
 #include <cmath>
 
-namespace
-{
-    const juce::Colour kBackground { 0xff1b1e23 };
-    const juce::Colour kAccent     { 0xff5ec2ff };   // waveform fill + selection brackets
-}
-
 WaveformDisplay::WaveformDisplay(AudioDocument& doc) : document(doc)
 {
     document.changeBroadcaster.addChangeListener(this);
+    theme->addChangeListener(this);
     viewEnd = document.getNumSamples();
     setWantsKeyboardFocus(true);
     startTimerHz(30);
@@ -17,6 +12,7 @@ WaveformDisplay::WaveformDisplay(AudioDocument& doc) : document(doc)
 
 WaveformDisplay::~WaveformDisplay()
 {
+    theme->removeChangeListener(this);
     document.changeBroadcaster.removeChangeListener(this);
 }
 
@@ -246,11 +242,13 @@ void WaveformDisplay::resized()
 
 void WaveformDisplay::paint(juce::Graphics& g)
 {
-    g.fillAll(kBackground);
+    const auto& pal = theme->palette();
+
+    g.fillAll(pal.panelBg);
 
     if (document.isEmpty())
     {
-        g.setColour(juce::Colours::grey);
+        g.setColour(pal.textDim);
         g.drawText("No audio loaded - press Record, or Open a file", getLocalBounds(), juce::Justification::centred);
         return;
     }
@@ -262,7 +260,7 @@ void WaveformDisplay::paint(juce::Graphics& g)
     // shows through the quiet parts and the wave sits on it).
     {
         const float dashes[] = { 2.0f, 3.0f };
-        g.setColour(juce::Colours::white.withAlpha(0.16f));
+        g.setColour(pal.zeroLine);
         for (int ch = 0; ch < numCh; ++ch)
         {
             const float y = std::floor((float) ch * (float) laneHeight + (float) laneHeight * 0.5f) + 0.5f;
@@ -270,11 +268,11 @@ void WaveformDisplay::paint(juce::Graphics& g)
         }
     }
 
-    g.setColour(kAccent);
+    g.setColour(pal.waveform);
     for (auto& p : channelPaths)
         g.fillPath(p);
 
-    g.setColour(juce::Colours::black.withAlpha(0.5f));
+    g.setColour(pal.gridLine);
     for (int ch = 1; ch < numCh; ++ch)
         g.drawHorizontalLine(ch * laneHeight, 0.0f, (float) getWidth());
 
@@ -282,7 +280,7 @@ void WaveformDisplay::paint(juce::Graphics& g)
     // at top and bottom (same as Sieve's editor).
     if (document.hasSelection())
     {
-        const juce::Colour accent = kAccent;
+        const juce::Colour accent = pal.accent;
         const float h  = (float) getHeight();
         const float x0 = sampleToX(document.getSelectionStart());
         const float x1 = sampleToX(document.getSelectionEnd());
@@ -306,12 +304,12 @@ void WaveformDisplay::paint(juce::Graphics& g)
 
     if (document.loopEnabled && document.loopEnd > document.loopStart)
     {
-        g.setColour(juce::Colours::orange.withAlpha(0.9f));
+        g.setColour(pal.loopMarker.withAlpha(0.9f));
         g.drawVerticalLine((int) sampleToX(document.loopStart), 0.0f, (float) getHeight());
         g.drawVerticalLine((int) sampleToX(document.loopEnd), 0.0f, (float) getHeight());
     }
 
-    g.setColour(juce::Colours::red);
+    g.setColour(pal.playhead);
     g.drawVerticalLine((int) sampleToX(document.playhead.load()), 0.0f, (float) getHeight());
 }
 
