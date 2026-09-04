@@ -74,7 +74,8 @@ target_sources(R3WRK
         Source/SpectrogramDisplay.cpp
         Source/TimeStretchEngine.cpp
         Source/HeaderBar.cpp
-        Source/EditorToolbar.cpp)
+        Source/EditorToolbar.cpp
+        Source/KnobRow.cpp)
 
 target_compile_definitions(R3WRK
     PUBLIC

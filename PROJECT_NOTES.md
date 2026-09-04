@@ -3,7 +3,9 @@
 An Edison-style pop-out audio recorder/editor, built as a JUCE plugin
 (VST3 + AU + standalone app): waveform + spectrogram views, record/play/loop,
 cut/copy/paste/trim/delete/undo, normalize/gain/fade/reverse/silence,
-RubberBand-powered time-stretch & pitch-shift, and export-selection to WAV.
+RubberBand-powered time-stretch & pitch-shift, export-selection to WAV, and a
+live knob row (tape Speed + Pitch that re-pitch playback in real time; Start/End
+that drive the selection edges).
 
 Builds natively on macOS (VST3 + AU + Standalone); see `BUILD_ON_MACOS.md`.
 
@@ -23,12 +25,15 @@ R3WRK/
       TimeStretchEngine.h/.cpp offline time-stretch/pitch-shift via librubberband
       WaveformDisplay.h/.cpp   waveform view: draw, select, zoom, scroll
       SpectrogramDisplay.h/.cpp FFT spectrogram view of the whole document
-      EditorToolbar.h/.cpp     every button/slider; owns the clipboard, talks
-                                directly to AudioDocument/EditActions
-      PluginProcessor.h/.cpp   audio thread: record/playback/pass-through,
-                                plugin state save/load
-      PluginEditor.h/.cpp      wires EditorToolbar + WaveformDisplay +
-                                SpectrogramDisplay together
+      EditorToolbar.h/.cpp     transport strip + Tools menu; owns the clipboard,
+                                talks directly to AudioDocument/EditActions
+      KnobRow.h/.cpp           rotary knob strip under the transport bar
+                                (Pitch, Speed, Start, End; extensible)
+      PluginProcessor.h/.cpp   audio thread: record / playback (direct or via a
+                                real-time RubberBand tape+pitch engine) / pass-
+                                through, plugin state save/load
+      PluginEditor.h/.cpp      wires HeaderBar + WaveformDisplay/SpectrogramDisplay
+                                + EditorToolbar + KnobRow together
     Tests/
       SmokeTest.cpp            headless correctness tests for the engine
                                 (no GUI/audio device needed) — see below
@@ -83,6 +88,32 @@ the document (as a normal undoable "Record" edit) when you stop. Recording
 currently always replaces the whole document — there's no overdub/punch-in
 yet.
 
+## Playback & the knob row
+
+`processBlock` plays the document region (the selection if any, else the loop
+points, else the whole clip) straight from the buffer under a try-lock. The
+`KnobRow` under the transport bar adds:
+
+- **Speed** — tape rate. 1.0 = normal; 2.0 plays twice as fast *and* an octave
+  up, pitch riding along exactly like tape.
+- **Pitch** — an extra ± semitone shift layered on top of the tape speed, so you
+  can detune without changing the playback rate.
+- **Start / End** — normalised (0–1) knobs that set the document selection edges;
+  they read out as `m:ss.mmm` and follow bracket drags on the waveform.
+
+Speed and Pitch are `std::atomic<double>` on the processor. When *both* are
+centred (`speed==1`, `pitch==0`) playback is a plain sample copy — zero latency,
+zero cost. As soon as either is off-centre, playback routes through a **real-time
+RubberBand stretcher** (`OptionProcessRealTime | OptionPitchHighConsistency`),
+built per `prepareToPlay`: `timeRatio = 1/speed`, `pitchScale =
+speed * 2^(pitch/12)`. The stretcher is fed doc-region samples in
+`getSamplesRequired()`-sized blocks from preallocated scratch buffers and drained
+via `available()`/`retrieve()`; it's `reset()` at the start of each play pass and
+whenever the knobs cross the bypass/engaged line. The stored audio is never
+modified — Export Selection still writes the dry clip. The red playhead tracks
+the doc read cursor, so it runs slightly ahead of what you hear by the stretcher
+latency when the knobs are engaged.
+
 ## Sample-rate handling
 
 The document stores audio at whatever rate it was recorded or loaded at.
@@ -97,9 +128,12 @@ current sample rate if they differ, so pitch/speed is correct in your DAW.
   incremental/windowed computation for very long recordings.
 - Keyboard shortcuts are limited to the editor essentials (Space, ⌘Z/⌘⇧Z,
   ⌘X/⌘C/⌘V); no user-configurable key map.
-- The time-stretch/pitch-shift preview is "commit only" (no live audition
-  before applying) — you set the sliders and hit Apply.
+- The offline Stretch/Pitch edit (Tools menu) is "commit only" — no live
+  audition before Apply. The knob-row Speed/Pitch *are* live but non-destructive
+  (playback only); there's no "bake the knob settings into the clip" action yet.
 - Restored plugin state is not resampled to the host rate (only file loads
   are), so loading a 44.1k session into a 48k project plays back pitched.
+- The playhead runs ahead of the audible output by the real-time RubberBand
+  latency while Speed/Pitch are engaged (no latency compensation on the marker).
 - No AAX/LV2 build target configured (VST3 + AU + Standalone only), since
   those weren't asked for; JUCE supports adding them if you want them later.

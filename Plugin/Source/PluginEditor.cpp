@@ -3,12 +3,13 @@
 R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
     : AudioProcessorEditor(&p), processorRef(p),
       header(p.document), waveformDisplay(p.document), spectrogramDisplay(p.document),
-      toolbar(p, p.document)
+      toolbar(p, p.document), knobRow(p, p.document)
 {
     addAndMakeVisible(header);
     addAndMakeVisible(waveformDisplay);
     addChildComponent(spectrogramDisplay); // hidden until the user switches views
     addAndMakeVisible(toolbar);
+    addAndMakeVisible(knobRow);
 
     header.onZoomFit = [this] { waveformDisplay.zoomToFit(); };
     header.onViewModeChanged = [this](bool spectrogram)
@@ -40,8 +41,8 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
 
     setWantsKeyboardFocus(true);
     setResizable(true, true);
-    setResizeLimits(680, 340, 2200, 1300);
-    setSize(1000, 560);
+    setResizeLimits(680, 430, 2200, 1300);
+    setSize(1000, 620);
 }
 
 R3WRKAudioProcessorEditor::~R3WRKAudioProcessorEditor() = default;
@@ -58,7 +59,9 @@ void R3WRKAudioProcessorEditor::resized()
     header.setBounds(area.removeFromTop(30));
     area.removeFromTop(6);
 
-    toolbar.setBounds(area.removeFromBottom(28));   // single control strip
+    knobRow.setBounds(area.removeFromBottom(74));   // knob strip, under the transport bar
+    area.removeFromBottom(4);
+    toolbar.setBounds(area.removeFromBottom(28));   // transport control strip
     area.removeFromBottom(6);
 
     waveformDisplay.setBounds(area);

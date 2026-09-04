@@ -1,9 +1,11 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include <rubberband/RubberBandStretcher.h>
+#include <cmath>
 
 namespace
 {
-    constexpr int kStateMagic = 0x52335731;   // 'R3W1' - session-state format tag
+    constexpr int kStateMagic = 0x52335732;   // 'R3W2' - session-state format tag
     constexpr int kMaxStateChannels = 32;
 }
 
@@ -17,15 +19,37 @@ R3WRKAudioProcessor::R3WRKAudioProcessor()
 
 R3WRKAudioProcessor::~R3WRKAudioProcessor() = default;
 
-void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int /*samplesPerBlock*/)
+bool R3WRKAudioProcessor::knobsEngaged(double speed, double pitch)
+{
+    return std::abs(speed - 1.0) > 1.0e-4 || std::abs(pitch) > 1.0e-4;
+}
+
+void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
     currentSampleRate = sampleRate;
     if (document.isEmpty())
         document.setSampleRate(sampleRate);
+
+    rtChannels = juce::jlimit(1, 2, juce::jmax(1, getMainBusNumOutputChannels()));
+
+    using RB = RubberBand::RubberBandStretcher;
+    rtStretcher = std::make_unique<RB>((size_t) sampleRate, (size_t) rtChannels,
+                                       RB::OptionProcessRealTime | RB::OptionPitchHighConsistency);
+
+    const int inScratch = juce::jmax(8192, juce::jmax(0, samplesPerBlock) * 8);
+    rtScratchIn.setSize(rtChannels, inScratch);
+    rtScratchOut.setSize(rtChannels, juce::jmax(8192, juce::jmax(0, samplesPerBlock) * 2));
+    rtStretcher->setMaxProcessSize((size_t) inScratch);
+
+    wasPlaying = false;
+    stretcherPrimed = false;
 }
 
 void R3WRKAudioProcessor::releaseResources()
 {
+    rtStretcher.reset();
+    wasPlaying = false;
+    stretcherPrimed = false;
 }
 
 bool R3WRKAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
@@ -52,6 +76,117 @@ void R3WRKAudioProcessor::ensureRecordingCapacity(int numChannels, int64_t addit
     }
 }
 
+//==============================================================================
+void R3WRKAudioProcessor::renderPlaybackDirect(juce::AudioBuffer<float>& out, int numCh, int numSamples,
+                                               const juce::AudioBuffer<float>& docBuf,
+                                               int64_t& pos, int64_t regionStart, int64_t regionEnd, bool loop)
+{
+    int written = 0;
+    while (written < numSamples && docBuf.getNumChannels() > 0)
+    {
+        if (pos >= regionEnd)
+        {
+            if (loop && regionEnd > regionStart) { pos = regionStart; continue; }
+            break;
+        }
+
+        int chunk = (int) juce::jmin((int64_t) (numSamples - written), regionEnd - pos);
+        for (int ch = 0; ch < numCh; ++ch)
+        {
+            int srcCh = juce::jmin(ch, docBuf.getNumChannels() - 1);
+            out.copyFrom(ch, written, docBuf, srcCh, (int) pos, chunk);
+        }
+        pos += chunk;
+        written += chunk;
+    }
+
+    document.playhead.store(pos, std::memory_order_relaxed);
+    if (! loop && pos >= regionEnd)
+        document.isPlaying.store(false, std::memory_order_relaxed);
+}
+
+// Real-time tape/pitch path. `speed` is the tape rate (pitch rides along); `pitch` is an
+// extra semitone offset. RubberBand does both: timeRatio = 1/speed consumes the source
+// faster/slower, pitchScale = speed * 2^(pitch/12) so the pitch tracks the tape and then
+// gets the extra shift.
+void R3WRKAudioProcessor::renderPlaybackStretched(juce::AudioBuffer<float>& out, int numCh, int numSamples,
+                                                  const juce::AudioBuffer<float>& docBuf,
+                                                  int64_t& pos, int64_t regionStart, int64_t regionEnd,
+                                                  bool loop, double speed, double pitch)
+{
+    if (rtStretcher == nullptr || docBuf.getNumChannels() <= 0 || regionEnd <= regionStart)
+        return;
+
+    speed = juce::jlimit(kMinSpeed, kMaxSpeed, speed);
+    pitch = juce::jlimit(kMinPitch, kMaxPitch, pitch);
+    rtStretcher->setTimeRatio(1.0 / speed);
+    rtStretcher->setPitchScale(speed * std::pow(2.0, pitch / 12.0));
+
+    const int rc = rtChannels;
+    const int inCap  = rtScratchIn.getNumSamples();
+    const int outCap = rtScratchOut.getNumSamples();
+
+    int produced = 0;
+    bool sentFinal = false;
+    int guard = numSamples * 4 + 64;   // hard cap on iterations, just in case
+
+    while (produced < numSamples && --guard > 0)
+    {
+        const int avail = (int) rtStretcher->available();
+        if (avail > 0)
+        {
+            const int n = juce::jmin(avail, numSamples - produced, outCap);
+            float* op[2] = { rtScratchOut.getWritePointer(0),
+                             rtScratchOut.getWritePointer(rc > 1 ? 1 : 0) };
+            rtStretcher->retrieve(op, (size_t) n);
+            for (int ch = 0; ch < numCh; ++ch)
+                out.copyFrom(ch, produced, rtScratchOut, juce::jmin(ch, rc - 1), 0, n);
+            produced += n;
+            continue;
+        }
+
+        if (sentFinal)   // stream drained after the final block -> the source is done
+        {
+            document.isPlaying.store(false, std::memory_order_relaxed);
+            break;
+        }
+
+        int req = (int) rtStretcher->getSamplesRequired();
+        req = juce::jlimit(1, inCap, req > 0 ? req : 256);
+
+        int gathered = 0;
+        bool regionEnded = false;
+        while (gathered < req)
+        {
+            if (pos >= regionEnd)
+            {
+                if (loop) { pos = regionStart; }
+                else      { regionEnded = true; break; }
+            }
+            int chunk = (int) juce::jmin((int64_t) (req - gathered), regionEnd - pos);
+            for (int ch = 0; ch < rc; ++ch)
+            {
+                int srcCh = juce::jmin(ch, docBuf.getNumChannels() - 1);
+                rtScratchIn.copyFrom(ch, gathered, docBuf, srcCh, (int) pos, chunk);
+            }
+            pos += chunk;
+            gathered += chunk;
+        }
+        for (int ch = 0; ch < rc; ++ch)
+            if (gathered < req)
+                rtScratchIn.clear(ch, gathered, req - gathered);
+
+        const float* ip[2] = { rtScratchIn.getReadPointer(0),
+                               rtScratchIn.getReadPointer(rc > 1 ? 1 : 0) };
+        const bool finalNow = regionEnded && ! loop;
+        rtStretcher->process(ip, (size_t) req, finalNow);
+        if (finalNow)
+            sentFinal = true;
+    }
+
+    document.playhead.store(pos, std::memory_order_relaxed);
+}
+
 void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
     juce::ScopedNoDenormals noDenormals;
@@ -64,12 +199,17 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         for (int ch = 0; ch < numCh; ++ch)
             recordingAccumulator.copyFrom(ch, (int) recordingWritePos, buffer, ch, 0, numSamples);
         recordingWritePos += numSamples;
+        wasPlaying = false;
         return; // pass input through unchanged so the user can monitor while recording
     }
 
     if (document.isPlaying.load(std::memory_order_relaxed))
     {
         buffer.clear();
+
+        const double speed = playbackSpeed.load(std::memory_order_relaxed);
+        const double pitch = playbackPitch.load(std::memory_order_relaxed);
+        const bool engaged = knobsEngaged(speed, pitch);
 
         const juce::CriticalSection::ScopedTryLockType stl(document.getLock());
         if (stl.isLocked())
@@ -83,7 +223,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             const int64_t selS = juce::jlimit((int64_t) 0, docLen, document.getSelectionStart());
             const int64_t selE = juce::jlimit((int64_t) 0, docLen, document.getSelectionEnd());
             const int64_t loopStartS = document.loopStart.load(std::memory_order_relaxed);
-            const int64_t loopEndS = document.loopEnd.load(std::memory_order_relaxed);
+            const int64_t loopEndS   = document.loopEnd.load(std::memory_order_relaxed);
 
             int64_t regionStart = 0, regionEnd = docLen;
             if (selE > selS)                              { regionStart = selS;       regionEnd = selE; }
@@ -93,32 +233,31 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             if (pos < regionStart || pos >= regionEnd)
                 pos = regionStart;                       // snap a stray playhead into the region
 
-            int written = 0;
-            while (written < numSamples && docBuf.getNumChannels() > 0)
+            // Reset the stretcher at the start of a play pass, or when the knobs cross the
+            // bypass/engaged line, so no stale tail leaks in.
+            if (engaged)
             {
-                if (pos >= regionEnd)
+                if (rtStretcher != nullptr && (! wasPlaying || ! stretcherPrimed))
                 {
-                    if (loop) { pos = regionStart; continue; }
-                    break;
+                    rtStretcher->reset();
+                    stretcherPrimed = true;
                 }
-
-                int chunk = (int) juce::jmin((int64_t) (numSamples - written), regionEnd - pos);
-                for (int ch = 0; ch < numCh; ++ch)
-                {
-                    int srcCh = juce::jmin(ch, docBuf.getNumChannels() - 1);
-                    buffer.copyFrom(ch, written, docBuf, srcCh, (int) pos, chunk);
-                }
-                pos += chunk;
-                written += chunk;
+                renderPlaybackStretched(buffer, numCh, numSamples, docBuf, pos,
+                                        regionStart, regionEnd, loop, speed, pitch);
             }
-
-            document.playhead.store(pos, std::memory_order_relaxed);
-
-            if (! loop && pos >= regionEnd)
-                document.isPlaying.store(false, std::memory_order_relaxed);
+            else
+            {
+                stretcherPrimed = false;
+                renderPlaybackDirect(buffer, numCh, numSamples, docBuf, pos,
+                                     regionStart, regionEnd, loop);
+            }
         }
+
+        wasPlaying = true;
         return;
     }
+
+    wasPlaying = false;
 
     // Neither recording nor playing back: leave `buffer` untouched so the host's input
     // passes straight through.
@@ -194,6 +333,10 @@ void R3WRKAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     out.writeInt64(document.loopStart.load());
     out.writeInt64(document.loopEnd.load());
     out.writeBool(document.loopEnabled.load());
+    out.writeInt64(document.getSelectionStart());
+    out.writeInt64(document.getSelectionEnd());
+    out.writeDouble(playbackSpeed.load());
+    out.writeDouble(playbackPitch.load());
 
     auto& buf = document.getBuffer();
     for (int ch = 0; ch < buf.getNumChannels(); ++ch)
@@ -212,6 +355,10 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     int64_t lStart = in.readInt64();
     int64_t lEnd = in.readInt64();
     bool lEnabled = in.readBool();
+    int64_t selStartS = in.readInt64();
+    int64_t selEndS = in.readInt64();
+    double spd = in.readDouble();
+    double pch = in.readDouble();
 
     if (numCh <= 0 || numCh > kMaxStateChannels || numSamples < 0 || numSamples > 0x7fffffff)
         return;
@@ -230,6 +377,10 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     document.loopStart = lStart;
     document.loopEnd = lEnd;
     document.loopEnabled = lEnabled;
+    document.setSelection(selStartS, selEndS);   // clamps to the loaded length
+
+    playbackSpeed.store(juce::jlimit(kMinSpeed, kMaxSpeed, spd > 0.0 ? spd : 1.0));
+    playbackPitch.store(juce::jlimit(kMinPitch, kMaxPitch, pch));
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
