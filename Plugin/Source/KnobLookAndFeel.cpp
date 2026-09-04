@@ -25,10 +25,11 @@ void KnobLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int widt
     g.setColour(outline);
     g.drawEllipse(discBounds.reduced(0.75f), 1.5f);
 
+    // A short tick near the rim, not a long line through the middle.
     juce::Path pointerPath;
-    const float pointerLen       = radius * 0.72f;
-    const float pointerThickness = juce::jmax(1.6f, radius * 0.14f);
-    pointerPath.addRoundedRectangle(-pointerThickness * 0.5f, -radius * 0.86f,
+    const float pointerLen       = radius * 0.30f;
+    const float pointerThickness = juce::jmax(1.6f, radius * 0.16f);
+    pointerPath.addRoundedRectangle(-pointerThickness * 0.5f, -radius * 0.88f,
                                     pointerThickness, pointerLen, pointerThickness * 0.5f);
     pointerPath.applyTransform(juce::AffineTransform::rotation(angle).translated(centre));
     g.setColour(pointer);
