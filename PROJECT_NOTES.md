@@ -78,6 +78,28 @@ so it drops the oldest steps rather than growing without bound. For typical
 Edison-style use — chopping/editing individual samples/loops rather than
 hour-long recordings — that's a fine trade.
 
+## Visual time-stretch
+
+The waveform visually reshapes to match Speed/Pitch/Stretch, like a hardware
+sampler: `AudioDocument::getTimeScale()` returns `stretch/speed` (pitch doesn't
+affect duration, so it's excluded) — how much longer (>1) or shorter (<1)
+playback is than the stored audio. `WaveformDisplay::xToSample()`/`sampleToX()`
+(public — `TimeRuler` uses `sampleToX()` for the playhead marker) and
+`rebuildWaveformPath()` divide raw samples-per-pixel by this factor, so the same
+raw audio is drawn spread across more pixels (visually "zoomed in", looks
+longer) or fewer (leaves blank space, looks shorter) than the raw view span
+alone would produce. `zoomToward()`/`panByPixels()` convert pointer/drag pixels
+through the same timeScale-aware density so zoom/pan stay correct; the
+`WaveformDisplay` timer rebuilds the path whenever the knobs move, live, even
+while stopped.
+
+This is **purely a drawing thing** — `viewStart`/`viewEnd`, the selection, loop
+points, and everything Export/Save write out are still in raw-sample terms,
+completely unaffected. The time ruler's tick *labels* don't need any of this:
+they're generated as output-time values first, which come out
+timescale-invariant for a given raw view window (worked out algebraically —
+`x = outputTime · sr · width / rangeLen`, independent of `timeScale`).
+
 ## Waveform peak cache
 
 `WaveformDisplay` keeps a peak cache — one min/max per 64 source samples per
@@ -142,8 +164,9 @@ points, else the whole clip) straight from the buffer under a try-lock. The
   window (End moves with it, length preserved, pegs at the buffer end); End
   moves independently to change the length.
 
-Speed / Pitch / Stretch are `std::atomic<double>` on the processor. When *all
-three* are centred (`speed==1`, `pitch==0`, `stretch==1`) playback is a plain
+Speed / Pitch / Stretch live as `std::atomic<double>` on `AudioDocument` (not the
+processor — so views can read them too, see "Visual time-stretch" below). When
+*all three* are centred (`speed==1`, `pitch==0`, `stretch==1`) playback is a plain
 sample copy — zero latency, zero cost. As soon as any is off-centre, playback
 routes through a **real-time RubberBand stretcher** (`OptionProcessRealTime |
 OptionPitchHighConsistency`), built per `prepareToPlay`:
