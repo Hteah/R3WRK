@@ -1,4 +1,5 @@
 #include "WaveformDisplay.h"
+#include <cmath>
 
 WaveformDisplay::WaveformDisplay(AudioDocument& doc) : document(doc)
 {
@@ -82,6 +83,61 @@ void WaveformDisplay::zoomBy(double factor, int64_t centerSample)
 
 void WaveformDisplay::zoomIn()  { zoomBy(0.5, (viewStart + viewEnd) / 2); }
 void WaveformDisplay::zoomOut() { zoomBy(2.0, (viewStart + viewEnd) / 2); }
+
+// Sieve's editor zoom: `spanFactor` multiplies the visible span (<1 = zoom in). Keeps the
+// sample under `pointerX` fixed — but while zooming in with a selection that's still narrower
+// than the view, it frames the selection instead so the wheel pulls you into it.
+void WaveformDisplay::zoomToward(double spanFactor, float pointerX)
+{
+    const int64_t total = document.getNumSamples();
+    if (total <= 0)
+        return;
+
+    spanFactor = juce::jlimit(0.5, 2.0, spanFactor);
+    const int64_t curLen = juce::jmax((int64_t) 1, viewEnd - viewStart);
+    int64_t newLen = (int64_t) juce::jlimit(16.0, (double) total, (double) curLen * spanFactor);
+
+    if (spanFactor < 1.0 && document.hasSelection())
+    {
+        const int64_t selLen = document.getSelectionEnd() - document.getSelectionStart();
+        if (selLen > 0 && curLen > selLen)
+        {
+            newLen = juce::jmax((int64_t) 16, juce::jmin(newLen, selLen + selLen / 5));   // stop ~1.2× the selection
+            const int64_t mid = (document.getSelectionStart() + document.getSelectionEnd()) / 2;
+            int64_t newStart = juce::jlimit((int64_t) 0, juce::jmax((int64_t) 0, total - newLen), mid - newLen / 2);
+            viewStart = newStart;
+            viewEnd = newStart + newLen;
+            rebuildWaveformPath();
+            repaint();
+            return;
+        }
+    }
+
+    const double frac = juce::jlimit(0.0, 1.0, (double) pointerX / (double) juce::jmax(1, getWidth()));
+    const int64_t anchor = viewStart + (int64_t) (frac * (double) curLen);
+    int64_t newStart = anchor - (int64_t) (frac * (double) newLen);
+    newStart = juce::jlimit((int64_t) 0, juce::jmax((int64_t) 0, total - newLen), newStart);
+    viewStart = newStart;
+    viewEnd = newStart + newLen;
+    rebuildWaveformPath();
+    repaint();
+}
+
+void WaveformDisplay::panByPixels(float dxPixels)
+{
+    const int64_t total = document.getNumSamples();
+    const int64_t len = viewEnd - viewStart;
+    if (len <= 0 || len >= total)
+        return;
+
+    const double framesPerPixel = (double) len / (double) juce::jmax(1, getWidth());
+    int64_t newStart = viewStart - (int64_t) (dxPixels * framesPerPixel);
+    newStart = juce::jlimit((int64_t) 0, total - len, newStart);
+    viewStart = newStart;
+    viewEnd = newStart + len;
+    rebuildWaveformPath();
+    repaint();
+}
 
 void WaveformDisplay::rebuildWaveformPath()
 {
@@ -300,20 +356,22 @@ void WaveformDisplay::mouseDoubleClick(const juce::MouseEvent&)
 
 void WaveformDisplay::mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
 {
-    if (e.mods.isCommandDown() || e.mods.isCtrlDown())
+    if (document.getNumSamples() <= 0)
+        return;
+
+    float dx = wheel.deltaX, dy = wheel.deltaY;
+    if (wheel.isReversed) { dx = -dx; dy = -dy; }
+
+    // Horizontal swipe / Shift-wheel → pan. Vertical wheel → zoom toward the pointer
+    // (Sieve's editor: no modifier needed; Cmd/Ctrl still zooms too).
+    if (juce::jmax(dx, -dx) > juce::jmax(dy, -dy))
     {
-        zoomBy(wheel.deltaY > 0 ? 0.8 : 1.25, xToSample((float) e.x));
+        panByPixels(dx * (float) juce::jmax(1, getWidth()) * 0.5f);
+        return;
     }
-    else
-    {
-        int64_t len = viewEnd - viewStart;
-        int64_t shift = (int64_t) ((double) len * 0.15 * (wheel.deltaY > 0 ? -1.0 : 1.0));
-        int64_t newStart = juce::jlimit((int64_t) 0, juce::jmax((int64_t) 0, document.getNumSamples() - len), viewStart + shift);
-        viewEnd = newStart + len;
-        viewStart = newStart;
-        rebuildWaveformPath();
-        repaint();
-    }
+
+    const double factor = juce::jlimit(0.5, 2.0, std::exp(-dy * 1.4));   // dy>0 (wheel up) => zoom in
+    zoomToward(factor, (float) e.x);
 }
 
 void WaveformDisplay::changeListenerCallback(juce::ChangeBroadcaster*)

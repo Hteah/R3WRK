@@ -12,7 +12,8 @@
         the opposite edge; the pointer shows a left/right-resize cursor near an edge;
       - a click (no real drag) clears the selection and moves the playhead there;
       - double-click selects all.
-    Mouse wheel scrolls; Ctrl/Cmd + wheel zooms.
+    Mouse wheel zooms toward the pointer (or into the selection if there is one);
+    horizontal swipe / Shift+wheel pans; the header's Fit button resets the view.
 */
 class WaveformDisplay : public juce::Component,
                          public juce::ChangeListener,
@@ -54,6 +55,8 @@ private:
     void timerCallback() override;
     void rebuildWaveformPath();
     void zoomBy(double factor, int64_t centerSample);
+    void zoomToward(double spanFactor, float pointerX);   // wheel zoom (Sieve model)
+    void panByPixels(float dxPixels);
     int64_t xToSample(float x) const;
     float sampleToX(int64_t sample) const;
 
