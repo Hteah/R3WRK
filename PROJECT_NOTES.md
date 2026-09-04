@@ -36,6 +36,8 @@ R3WRK/
                                 (process-wide, persists to a settings file)
       ThemeEditor.h/.cpp        the Tools -> Theme... panel: presets, hex rows,
                                 in-panel colour picker, save custom presets
+      OutputSettings.h/.cpp     the auto-save output folder (process-wide, own
+                                settings file) + timestamped WAV name minting
       PluginProcessor.h/.cpp   audio thread: record / playback (direct or via a
                                 real-time RubberBand tape+pitch engine) / pass-
                                 through, plugin state save/load
@@ -128,6 +130,28 @@ once. The stored audio is never modified — Export Selection still writes the d
 clip. The red playhead tracks the doc read cursor, so it runs slightly ahead of
 what you hear by the stretcher latency when the knobs are engaged (more so at
 high Stretch).
+
+## Saving / output folder
+
+`Source/OutputSettings.{h,cpp}` is a process-wide `juce::SharedResourcePointer`
+singleton with its own `~/Library/Application Support/R3WRK/output.settings`.
+It holds the **output folder** (default `~/Music/R3WRK`, created on demand) and
+mints timestamped WAV filenames — `R3WRK 2026-09-04 14.22.03.wav` for recordings,
+`… selection.wav` for exports, via `getNonexistentSibling()` so same-second saves
+don't collide.
+
+- **Stop recording** → `EditorToolbar::autoSaveRecording()` writes the take to the
+  folder right away, no dialog; the header name becomes the file and the dirty
+  dot clears.
+- **Tools ▾ → "Export Selection to Folder"** → the selection is written to the
+  folder immediately (was a save dialog).
+- **Tools ▾ → "Output Folder…"** → a directory chooser to change it.
+- **"Save As…"** is still a dialog (for one-offs / specific names); it now opens
+  in the output folder.
+
+Feedback is a `HeaderBar::flashMessage()` — a ~3 s accent-coloured line in the
+readout area ("Saved …", "Exported …", "Output folder: …"), driven from
+`EditorToolbar` through its `onStatusMessage` callback.
 
 ## Theming
 
