@@ -25,7 +25,6 @@ private:
     SpectrogramDisplay spectrogramDisplay;
     EditorToolbar toolbar;
     KnobRow knobRow;
-    bool showingSpectrogram = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(R3WRKAudioProcessorEditor)
 };

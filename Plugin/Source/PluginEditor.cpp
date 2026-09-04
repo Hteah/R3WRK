@@ -7,17 +7,9 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
 {
     addAndMakeVisible(header);
     addAndMakeVisible(waveformDisplay);
-    addChildComponent(spectrogramDisplay); // hidden until the user switches views
+    addChildComponent(spectrogramDisplay); // built but not currently reachable from the UI
     addAndMakeVisible(toolbar);
     addAndMakeVisible(knobRow);
-
-    header.onZoomFit = [this] { waveformDisplay.zoomToFit(); };
-    header.onViewModeChanged = [this](bool spectrogram)
-    {
-        showingSpectrogram = spectrogram;
-        waveformDisplay.setVisible(! spectrogram);
-        spectrogramDisplay.setVisible(spectrogram);
-    };
 
     toolbar.onSourceNameChanged = [this](juce::String name)
     {

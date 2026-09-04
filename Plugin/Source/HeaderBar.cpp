@@ -11,19 +11,8 @@ HeaderBar::HeaderBar(AudioDocument& doc) : document(doc)
     readoutLabel.setFont(juce::FontOptions(11.0f));
     readoutLabel.setColour(juce::Label::textColourId, juce::Colours::grey);
 
-    viewButton.setTooltip("Switch between the waveform and spectrogram view");
-    viewButton.onClick = [this]
-    {
-        showingSpectrogram = ! showingSpectrogram;
-        viewButton.setButtonText(showingSpectrogram ? "Waveform" : "Spectrogram");
-        if (onViewModeChanged) onViewModeChanged(showingSpectrogram);
-    };
-    zoomFitButton.onClick = [this] { if (onZoomFit) onZoomFit(); };
-
     addAndMakeVisible(nameLabel);
     addAndMakeVisible(readoutLabel);
-    addAndMakeVisible(zoomFitButton);
-    addAndMakeVisible(viewButton);
 
     startTimerHz(10);
 }
@@ -81,13 +70,6 @@ void HeaderBar::paint(juce::Graphics& g)
 void HeaderBar::resized()
 {
     auto r = getLocalBounds();
-
-    auto right = r.removeFromRight(160);
-    right = right.withSizeKeepingCentre(right.getWidth(), 24);
-    viewButton.setBounds(right.removeFromRight(104));
-    right.removeFromRight(4);
-    zoomFitButton.setBounds(right.removeFromRight(48));
-
     r.removeFromLeft(16);   // room for the dirty dot
     nameLabel.setBounds(r.removeFromTop(r.getHeight() / 2));
     readoutLabel.setBounds(r);
