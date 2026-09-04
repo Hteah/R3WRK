@@ -50,7 +50,7 @@ ThemeEditor::ThemeEditor()
     refreshFromPalette();
 
     theme->addChangeListener(this);
-    setSize(340, 446);
+    setSize(340, 490);
 }
 
 ThemeEditor::~ThemeEditor()
