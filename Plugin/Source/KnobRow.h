@@ -2,7 +2,6 @@
 #include <JuceHeader.h>
 #include <limits>
 #include "AudioDocument.h"
-#include "PluginProcessor.h"
 #include "Theme.h"
 
 /**
@@ -13,14 +12,16 @@
     apply (slider -> model) and, optionally, a pull (model -> slider, so the knob
     follows changes made elsewhere, e.g. dragging the selection brackets).
 
-    Talks to the AudioDocument / processor directly, the same way EditorToolbar does.
+    Talks to the AudioDocument directly, the same way EditorToolbar does (the playback
+    knobs live on AudioDocument -- see its "Live playback knobs" section -- so the views
+    can read them too, not just the audio thread).
 */
 class KnobRow : public juce::Component,
                 private juce::Timer,
                 private juce::ChangeListener
 {
 public:
-    KnobRow(R3WRKAudioProcessor& processor, AudioDocument& document);
+    explicit KnobRow(AudioDocument& document);
     ~KnobRow() override;
 
     void resized() override;
@@ -42,7 +43,6 @@ private:
     Knob& addKnob(const juce::String& name);
     juce::String timeString(double seconds) const;
 
-    R3WRKAudioProcessor& processor;
     AudioDocument& document;
     juce::SharedResourcePointer<ThemeManager> theme;
 

@@ -62,6 +62,35 @@ public:
     std::atomic<bool> loopEnabled { false };
 
     //==============================================================================
+    // Live playback knobs (KnobRow writes these; the audio thread reads them every block
+    // to drive a real-time RubberBand stretcher -- see PluginProcessor). Live here, not on
+    // the processor, so the views (WaveformDisplay, TimeRuler) can read them too, for the
+    // visual time-stretch below.
+    //   playbackSpeed   : tape-style rate. 1.0 = normal; 2.0 plays twice as fast AND an
+    //                     octave up. Pitch rides along, exactly like tape.
+    //   playbackPitch   : extra pitch shift in semitones, layered on top of the tape
+    //                     speed, so you can detune without changing playback rate.
+    //   playbackStretch : pure time-stretch, pitch preserved. 1.0 = off; 8.0 makes
+    //                     playback eight times longer at the same pitch.
+    std::atomic<double> playbackSpeed   { 1.0 };
+    std::atomic<double> playbackPitch   { 0.0 };
+    std::atomic<double> playbackStretch { 1.0 };
+
+    static constexpr double kMinSpeed = 0.25, kMaxSpeed = 4.0;
+    static constexpr double kMinPitch = -12.0, kMaxPitch = 12.0;
+    static constexpr double kMinStretch = 0.25, kMaxStretch = 50.0;
+
+    // How much longer (>1) or shorter (<1) played-back audio is than stored audio, given
+    // the current Speed/Pitch/Stretch knobs -- pitch doesn't affect duration, only the
+    // other two do. WaveformDisplay uses this to visually stretch the waveform to match,
+    // the same way most samplers show a slowed-down sample as visually longer.
+    double getTimeScale() const
+    {
+        return playbackStretch.load(std::memory_order_relaxed)
+             / juce::jmax(0.0001, playbackSpeed.load(std::memory_order_relaxed));
+    }
+
+    //==============================================================================
     // Live recording feedback, so the UI can show what's coming in before Stop.
     // processBlock (audio thread) fills a ring of block peak min/max while isRecording;
     // the waveform view reads it to draw a scrolling scope. Single producer / single

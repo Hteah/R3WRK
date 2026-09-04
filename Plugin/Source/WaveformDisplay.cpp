@@ -25,11 +25,14 @@ void WaveformDisplay::timerCallback()
     const int version = document.getBufferVersion();
     const int64_t total = document.getNumSamples();
     const bool viewBad = viewEnd <= viewStart || viewEnd > total || viewStart >= juce::jmax((int64_t) 1, total);
+    const double timeScale = document.getTimeScale();
 
     if (version != lastBufferVersion || viewBad
-        || getWidth() != lastPathWidth || getHeight() != lastPathHeight)
+        || getWidth() != lastPathWidth || getHeight() != lastPathHeight
+        || std::abs(timeScale - lastTimeScale) > 1.0e-9)
     {
         lastBufferVersion = version;
+        lastTimeScale = timeScale;
         if (viewBad)
         {
             viewStart = 0;
@@ -40,17 +43,28 @@ void WaveformDisplay::timerCallback()
     repaint();
 }
 
+// Sample <-> pixel mapping. `viewStart/viewEnd` are always the raw (stored-audio) sample
+// bounds of the current zoom -- unaffected by the playback knobs, same as always. What
+// changes is how many of those raw samples actually fit across the component's pixel
+// width: at getTimeScale() > 1 (stretched longer), fewer of them do, so the same raw span
+// is spread across more horizontal space than the viewport shows -- visually "zoomed in",
+// exactly like a slowed-down sample looking longer on a hardware sampler. At < 1 (sped up)
+// more of them fit, leaving blank space -- the sample looks shorter.
 int64_t WaveformDisplay::xToSample(float x) const
 {
-    int64_t rangeLen = juce::jmax((int64_t) 1, viewEnd - viewStart);
-    double frac = (double) x / (double) juce::jmax(1, getWidth());
-    return juce::jlimit((int64_t) 0, document.getNumSamples(), viewStart + (int64_t) (frac * (double) rangeLen));
+    const int64_t rangeLen = juce::jmax((int64_t) 1, viewEnd - viewStart);
+    const double samplesPerPixel = (double) rangeLen / (double) juce::jmax(1, getWidth())
+                                  / juce::jmax(0.0001, document.getTimeScale());
+    return juce::jlimit((int64_t) 0, document.getNumSamples(),
+                        viewStart + (int64_t) ((double) x * samplesPerPixel));
 }
 
 float WaveformDisplay::sampleToX(int64_t sample) const
 {
-    int64_t rangeLen = juce::jmax((int64_t) 1, viewEnd - viewStart);
-    return (float) getWidth() * (float) ((double) (sample - viewStart) / (double) rangeLen);
+    const int64_t rangeLen = juce::jmax((int64_t) 1, viewEnd - viewStart);
+    const double samplesPerPixel = (double) rangeLen / (double) juce::jmax(1, getWidth())
+                                  / juce::jmax(0.0001, document.getTimeScale());
+    return (float) ((double) (sample - viewStart) / samplesPerPixel);
 }
 
 void WaveformDisplay::zoomToFit()
@@ -102,10 +116,14 @@ void WaveformDisplay::zoomToward(double spanFactor, float pointerX)
     spanFactor = juce::jlimit(0.5, 2.0, spanFactor);
     const int64_t curLen = juce::jmax((int64_t) 1, viewEnd - viewStart);
     const int64_t newLen = (int64_t) juce::jlimit(16.0, (double) total, (double) curLen * spanFactor);
+    const double timeScale = juce::jmax(0.0001, document.getTimeScale());
 
+    // anchorFrac is a fraction of the pixel width; convert it to a raw-sample offset via
+    // the same timeScale-aware density xToSample()/sampleToX() use, so the anchor sample
+    // stays pinned under the pointer even when the waveform is visually stretched.
     auto applyView = [&](int64_t anchorSample, double anchorFrac)
     {
-        int64_t newStart = anchorSample - (int64_t) (anchorFrac * (double) newLen);
+        int64_t newStart = anchorSample - (int64_t) (anchorFrac * (double) newLen / timeScale);
         newStart = juce::jlimit((int64_t) 0, juce::jmax((int64_t) 0, total - newLen), newStart);
         viewStart = newStart;
         viewEnd = newStart + newLen;
@@ -155,7 +173,7 @@ void WaveformDisplay::zoomToward(double spanFactor, float pointerX)
     }
 
     const double frac = juce::jlimit(0.0, 1.0, (double) pointerX / (double) juce::jmax(1, getWidth()));
-    applyView(viewStart + (int64_t) (frac * (double) curLen), frac);
+    applyView(xToSample(pointerX), frac);
 }
 
 void WaveformDisplay::panByPixels(float dxPixels)
@@ -165,7 +183,8 @@ void WaveformDisplay::panByPixels(float dxPixels)
     if (len <= 0 || len >= total)
         return;
 
-    const double framesPerPixel = (double) len / (double) juce::jmax(1, getWidth());
+    const double framesPerPixel = (double) len / (double) juce::jmax(1, getWidth())
+                                 / juce::jmax(0.0001, document.getTimeScale());
     int64_t newStart = viewStart - (int64_t) (dxPixels * framesPerPixel);
     newStart = juce::jlimit((int64_t) 0, total - len, newStart);
     viewStart = newStart;
@@ -226,17 +245,21 @@ void WaveformDisplay::rebuildWaveformPath()
 
     const int laneHeight = h / numCh;
     const int64_t rangeLen = juce::jmax((int64_t) 1, viewEnd - viewStart);
-    const double samplesPerPixel = (double) rangeLen / (double) w;
+    // Raw samples per pixel, folding in the visual time-stretch: at getTimeScale() > 1 the
+    // waveform is drawn "spread out" (fewer raw samples per pixel), at < 1 "squeezed in".
+    const double samplesPerPixel = (double) rangeLen / (double) w
+                                  / juce::jmax(0.0001, document.getTimeScale());
 
-    // Deep zoom (fewer than one peak bin per pixel): copy the small visible span out from
-    // under the lock once, then read it per-sample below. rawStart is its offset in `total`.
+    // Deep zoom (fewer than one peak bin per pixel): copy just the actually-visible span
+    // (w * samplesPerPixel raw samples -- bounded even at extreme Stretch, unlike the full
+    // [viewStart,viewEnd) range) out from under the lock once, then read it per-sample below.
     juce::AudioBuffer<float> raw;
     int64_t rawStart = 0;
     if (samplesPerPixel < (double) peakBinSize)
     {
         rawStart = juce::jlimit((int64_t) 0, total, viewStart);
-        const int rawLen = (int) juce::jlimit((int64_t) 0, total - rawStart,
-                                              juce::jmax((int64_t) 1, viewEnd) - rawStart);
+        const int64_t visibleSamples = (int64_t) (samplesPerPixel * (double) w) + 2;
+        const int rawLen = (int) juce::jlimit((int64_t) 0, total - rawStart, visibleSamples);
         const juce::ScopedLock sl(document.getLock());
         auto& src = document.getBuffer();
         const int copyLen = juce::jmin(rawLen, src.getNumSamples() - (int) rawStart);

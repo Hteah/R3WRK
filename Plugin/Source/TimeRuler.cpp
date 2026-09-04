@@ -96,11 +96,13 @@ void TimeRuler::paint(juce::Graphics& g)
                    juce::Justification::centredLeft, false);
     }
 
-    // playhead marker
-    const double phSec = (double) document.playhead.load() / sr;
-    if (phSec >= startSec && phSec <= endSec)
+    // Playhead marker. Placed via WaveformDisplay::sampleToX() (not this ruler's own
+    // seconds-based math above) because the playhead is a raw sample position, and with
+    // Speed/Stretch off-centre the raw-sample-to-pixel density differs from the
+    // output-time-to-pixel density the tick labels use -- see WaveformDisplay::xToSample().
+    const float x = waveform.sampleToX(document.playhead.load());
+    if (x >= -4.0f && x <= w + 4.0f)
     {
-        const float x = (float) ((phSec - startSec) * pxPerSec);
         juce::Path tri;
         tri.addTriangle(x - 4.0f, 0.0f, x + 4.0f, 0.0f, x, 7.0f);
         g.setColour(pal.playhead);

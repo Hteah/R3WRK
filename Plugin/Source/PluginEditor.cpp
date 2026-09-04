@@ -3,7 +3,7 @@
 R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
     : AudioProcessorEditor(&p), processorRef(p),
       header(p.document), waveformDisplay(p.document), spectrogramDisplay(p.document),
-      timeRuler(waveformDisplay, p.document), toolbar(p, p.document), knobRow(p, p.document)
+      timeRuler(waveformDisplay, p.document), toolbar(p, p.document), knobRow(p.document)
 {
     addAndMakeVisible(header);
     addAndMakeVisible(waveformDisplay);

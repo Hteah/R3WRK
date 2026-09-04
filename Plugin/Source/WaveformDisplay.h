@@ -45,6 +45,13 @@ public:
     int64_t getViewStart() const { return viewStart; }
     int64_t getViewEnd() const { return viewEnd; }
 
+    // Sample <-> pixel mapping, accounting for the live Speed/Pitch/Stretch knobs (see
+    // AudioDocument::getTimeScale()) -- so the waveform visually stretches/compresses to
+    // show how long the clip will actually play, sampler-style. Public so TimeRuler can
+    // place its playhead marker through the same mapping.
+    int64_t xToSample(float x) const;
+    float sampleToX(int64_t sample) const;
+
     /// Called after a real drag-selection or an edge-resize finishes (selection already updated).
     std::function<void()> onSelectionCommitted;
 
@@ -63,8 +70,6 @@ private:
     void zoomBy(double factor, int64_t centerSample);
     void zoomToward(double spanFactor, float pointerX);   // wheel zoom (Sieve model)
     void panByPixels(float dxPixels);
-    int64_t xToSample(float x) const;
-    float sampleToX(int64_t sample) const;
 
     AudioDocument& document;
     juce::SharedResourcePointer<ThemeManager> theme;
@@ -72,6 +77,7 @@ private:
     std::vector<juce::Path> channelPaths;
     int lastBufferVersion = -1;      // rebuild the paths when the audio content changes
     int lastPathWidth = 0, lastPathHeight = 0;
+    double lastTimeScale = 1.0;      // rebuild the path when Speed/Pitch/Stretch move the knobs
 
     // Peak cache: one min/max per `peakBinSize` source samples, per channel. Rebuilt only
     // when the audio content changes -- so zoom/pan build the path from this with no lock,

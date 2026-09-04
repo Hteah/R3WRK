@@ -121,9 +121,9 @@ void R3WRKAudioProcessor::renderPlaybackStretched(juce::AudioBuffer<float>& out,
     if (rtStretcher == nullptr || docBuf.getNumChannels() <= 0 || regionEnd <= regionStart)
         return;
 
-    speed   = juce::jlimit(kMinSpeed,   kMaxSpeed,   speed);
-    pitch   = juce::jlimit(kMinPitch,   kMaxPitch,   pitch);
-    stretch = juce::jlimit(kMinStretch, kMaxStretch, stretch);
+    speed   = juce::jlimit(AudioDocument::kMinSpeed,   AudioDocument::kMaxSpeed,   speed);
+    pitch   = juce::jlimit(AudioDocument::kMinPitch,   AudioDocument::kMaxPitch,   pitch);
+    stretch = juce::jlimit(AudioDocument::kMinStretch, AudioDocument::kMaxStretch, stretch);
     rtStretcher->setTimeRatio(stretch / speed);
     rtStretcher->setPitchScale(speed * std::pow(2.0, pitch / 12.0));
 
@@ -231,9 +231,9 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     {
         buffer.clear();
 
-        const double speed   = playbackSpeed.load(std::memory_order_relaxed);
-        const double pitch   = playbackPitch.load(std::memory_order_relaxed);
-        const double stretch = playbackStretch.load(std::memory_order_relaxed);
+        const double speed   = document.playbackSpeed.load(std::memory_order_relaxed);
+        const double pitch   = document.playbackPitch.load(std::memory_order_relaxed);
+        const double stretch = document.playbackStretch.load(std::memory_order_relaxed);
         const bool engaged = knobsEngaged(speed, pitch, stretch);
 
         const juce::CriticalSection::ScopedTryLockType stl(document.getLock());
@@ -366,9 +366,9 @@ void R3WRKAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     out.writeBool(document.loopEnabled.load());
     out.writeInt64(document.getSelectionStart());
     out.writeInt64(document.getSelectionEnd());
-    out.writeDouble(playbackSpeed.load());
-    out.writeDouble(playbackPitch.load());
-    out.writeDouble(playbackStretch.load());
+    out.writeDouble(document.playbackSpeed.load());
+    out.writeDouble(document.playbackPitch.load());
+    out.writeDouble(document.playbackStretch.load());
 
     auto& buf = document.getBuffer();
     for (int ch = 0; ch < buf.getNumChannels(); ++ch)
@@ -412,9 +412,9 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     document.loopEnabled = lEnabled;
     document.setSelection(selStartS, selEndS);   // clamps to the loaded length
 
-    playbackSpeed.store(juce::jlimit(kMinSpeed, kMaxSpeed, spd > 0.0 ? spd : 1.0));
-    playbackPitch.store(juce::jlimit(kMinPitch, kMaxPitch, pch));
-    playbackStretch.store(juce::jlimit(kMinStretch, kMaxStretch, str > 0.0 ? str : 1.0));
+    document.playbackSpeed.store(juce::jlimit(AudioDocument::kMinSpeed, AudioDocument::kMaxSpeed, spd > 0.0 ? spd : 1.0));
+    document.playbackPitch.store(juce::jlimit(AudioDocument::kMinPitch, AudioDocument::kMaxPitch, pch));
+    document.playbackStretch.store(juce::jlimit(AudioDocument::kMinStretch, AudioDocument::kMaxStretch, str > 0.0 ? str : 1.0));
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

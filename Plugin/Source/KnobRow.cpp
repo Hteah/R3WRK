@@ -8,51 +8,51 @@ namespace
     }
 }
 
-KnobRow::KnobRow(R3WRKAudioProcessor& proc, AudioDocument& doc)
-    : processor(proc), document(doc)
+KnobRow::KnobRow(AudioDocument& doc)
+    : document(doc)
 {
     //== Pitch =================================================================
     {
         auto& k = addKnob("Pitch");
-        k.slider.setRange(R3WRKAudioProcessor::kMinPitch, R3WRKAudioProcessor::kMaxPitch, 0.0);
+        k.slider.setRange(AudioDocument::kMinPitch, AudioDocument::kMaxPitch, 0.0);
         k.slider.setDoubleClickReturnValue(true, 0.0);
         k.slider.textFromValueFunction = [](double v)
         {
             return (v > 0.0 ? "+" : "") + juce::String(v, 2) + " st";
         };
-        k.slider.setValue(processor.playbackPitch.load(), juce::dontSendNotification);
+        k.slider.setValue(document.playbackPitch.load(), juce::dontSendNotification);
         k.slider.updateText();
-        k.apply = [this](double v) { processor.playbackPitch.store(v); };
-        k.pull  = [this] { return processor.playbackPitch.load(); };
+        k.apply = [this](double v) { document.playbackPitch.store(v); };
+        k.pull  = [this] { return document.playbackPitch.load(); };
     }
 
     //== Speed (tape) =========================================================
     {
         auto& k = addKnob("Speed");
-        k.slider.setRange(R3WRKAudioProcessor::kMinSpeed, R3WRKAudioProcessor::kMaxSpeed, 0.0);
+        k.slider.setRange(AudioDocument::kMinSpeed, AudioDocument::kMaxSpeed, 0.0);
         k.slider.setSkewFactorFromMidPoint(1.0);
         k.slider.setDoubleClickReturnValue(true, 1.0);
         k.slider.textFromValueFunction = [](double v) { return juce::String(v, 2) + juce::String::fromUTF8(" \xc3\x97"); }; // "×"
-        k.slider.setValue(processor.playbackSpeed.load(), juce::dontSendNotification);
+        k.slider.setValue(document.playbackSpeed.load(), juce::dontSendNotification);
         k.slider.updateText();
-        k.apply = [this](double v) { processor.playbackSpeed.store(v); };
-        k.pull  = [this] { return processor.playbackSpeed.load(); };
+        k.apply = [this](double v) { document.playbackSpeed.store(v); };
+        k.pull  = [this] { return document.playbackSpeed.load(); };
     }
 
     //== Stretch (pure time-stretch, pitch kept) ==============================
     {
         auto& k = addKnob("Stretch");
-        k.slider.setRange(R3WRKAudioProcessor::kMinStretch, R3WRKAudioProcessor::kMaxStretch, 0.0);
+        k.slider.setRange(AudioDocument::kMinStretch, AudioDocument::kMaxStretch, 0.0);
         k.slider.setSkewFactorFromMidPoint(1.0);   // fine control near 1x, room to crank to 50x
         k.slider.setDoubleClickReturnValue(true, 1.0);
         k.slider.textFromValueFunction = [](double v)
         {
             return juce::String(v, v < 10.0 ? 2 : 1) + juce::String::fromUTF8(" \xc3\x97");
         };
-        k.slider.setValue(processor.playbackStretch.load(), juce::dontSendNotification);
+        k.slider.setValue(document.playbackStretch.load(), juce::dontSendNotification);
         k.slider.updateText();
-        k.apply = [this](double v) { processor.playbackStretch.store(v); };
-        k.pull  = [this] { return processor.playbackStretch.load(); };
+        k.apply = [this](double v) { document.playbackStretch.store(v); };
+        k.pull  = [this] { return document.playbackStretch.load(); };
     }
 
     //== Start / End (selection edges) ========================================
