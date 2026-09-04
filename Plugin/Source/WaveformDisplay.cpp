@@ -90,9 +90,12 @@ void WaveformDisplay::zoomBy(double factor, int64_t centerSample)
 void WaveformDisplay::zoomIn()  { zoomBy(0.5, (viewStart + viewEnd) / 2); }
 void WaveformDisplay::zoomOut() { zoomBy(2.0, (viewStart + viewEnd) / 2); }
 
-// Sieve's editor zoom: `spanFactor` multiplies the visible span (<1 = zoom in). Keeps the
-// sample under `pointerX` fixed — but while zooming in with a selection that's still narrower
-// than the view, it frames the selection instead so the wheel pulls you into it.
+// Sieve-style editor zoom: `spanFactor` multiplies the visible span (<1 = zoom in).
+//   - pointer near a selection bracket -> pin that bracket and zoom into it (no span limit),
+//     so the edge you're pointing at becomes the focus;
+//   - pointer elsewhere, zooming in, selection still narrower than the view -> frame the
+//     whole selection so the wheel pulls you into it;
+//   - otherwise -> keep the sample under the pointer fixed.
 void WaveformDisplay::zoomToward(double spanFactor, float pointerX)
 {
     const int64_t total = document.getNumSamples();
@@ -101,32 +104,61 @@ void WaveformDisplay::zoomToward(double spanFactor, float pointerX)
 
     spanFactor = juce::jlimit(0.5, 2.0, spanFactor);
     const int64_t curLen = juce::jmax((int64_t) 1, viewEnd - viewStart);
-    int64_t newLen = (int64_t) juce::jlimit(16.0, (double) total, (double) curLen * spanFactor);
+    const int64_t newLen = (int64_t) juce::jlimit(16.0, (double) total, (double) curLen * spanFactor);
 
-    if (spanFactor < 1.0 && document.hasSelection())
+    auto applyView = [&](int64_t anchorSample, double anchorFrac)
     {
-        const int64_t selLen = document.getSelectionEnd() - document.getSelectionStart();
-        if (selLen > 0 && curLen > selLen)
+        int64_t newStart = anchorSample - (int64_t) (anchorFrac * (double) newLen);
+        newStart = juce::jlimit((int64_t) 0, juce::jmax((int64_t) 0, total - newLen), newStart);
+        viewStart = newStart;
+        viewEnd = newStart + newLen;
+        rebuildWaveformPath();
+        repaint();
+    };
+
+    if (document.hasSelection())
+    {
+        const float sx = sampleToX(document.getSelectionStart());
+        const float ex = sampleToX(document.getSelectionEnd());
+        const float dStart = std::abs(pointerX - sx);
+        const float dEnd   = std::abs(pointerX - ex);
+        constexpr float bracketGrabPx = 12.0f;
+
+        // Near a bracket: lock onto that edge and zoom into it, keeping it comfortably in
+        // view (nudged off the very edges of the component). No selection-span clamp here,
+        // so the wheel can take you right down onto the sample.
+        if (juce::jmin(dStart, dEnd) <= bracketGrabPx)
         {
-            newLen = juce::jmax((int64_t) 16, juce::jmin(newLen, selLen + selLen / 5));   // stop ~1.2× the selection
-            const int64_t mid = (document.getSelectionStart() + document.getSelectionEnd()) / 2;
-            int64_t newStart = juce::jlimit((int64_t) 0, juce::jmax((int64_t) 0, total - newLen), mid - newLen / 2);
-            viewStart = newStart;
-            viewEnd = newStart + newLen;
-            rebuildWaveformPath();
-            repaint();
+            const int64_t edge = (dStart <= dEnd) ? document.getSelectionStart()
+                                                  : document.getSelectionEnd();
+            const double frac = juce::jlimit(0.15, 0.85,
+                                             (double) pointerX / (double) juce::jmax(1, getWidth()));
+            applyView(edge, frac);
             return;
+        }
+
+        // Not near an edge: on zoom-in, frame the whole selection while it's still narrower
+        // than the view.
+        if (spanFactor < 1.0)
+        {
+            const int64_t selLen = document.getSelectionEnd() - document.getSelectionStart();
+            if (selLen > 0 && curLen > selLen)
+            {
+                const int64_t framedLen = juce::jmax((int64_t) 16, juce::jmin(newLen, selLen + selLen / 5));
+                const int64_t mid = (document.getSelectionStart() + document.getSelectionEnd()) / 2;
+                int64_t newStart = juce::jlimit((int64_t) 0, juce::jmax((int64_t) 0, total - framedLen),
+                                                mid - framedLen / 2);
+                viewStart = newStart;
+                viewEnd = newStart + framedLen;
+                rebuildWaveformPath();
+                repaint();
+                return;
+            }
         }
     }
 
     const double frac = juce::jlimit(0.0, 1.0, (double) pointerX / (double) juce::jmax(1, getWidth()));
-    const int64_t anchor = viewStart + (int64_t) (frac * (double) curLen);
-    int64_t newStart = anchor - (int64_t) (frac * (double) newLen);
-    newStart = juce::jlimit((int64_t) 0, juce::jmax((int64_t) 0, total - newLen), newStart);
-    viewStart = newStart;
-    viewEnd = newStart + newLen;
-    rebuildWaveformPath();
-    repaint();
+    applyView(viewStart + (int64_t) (frac * (double) curLen), frac);
 }
 
 void WaveformDisplay::panByPixels(float dxPixels)
