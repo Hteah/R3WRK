@@ -103,6 +103,13 @@ buffer for playback. This is a plain-critical-section design, not a
 lock-free double-buffer — reasonable for an editing/sampling tool, not
 recommended if you extend this into an ultra-low-latency mastering insert.
 
+The selection (start+end) is packed into one `std::atomic<uint64_t>`
+(`AudioDocument::selPacked`, unpacked by `getSelection()`) rather than two
+separate atomics — with two atomics, `processBlock` could read a new start
+paired with a stale end while `setSelection()` was mid-update (e.g. dragging a
+selection's start edge, or the KnobRow Start knob), momentarily computing a
+tiny/wrong loop region and producing an audible micro-loop buzz for one block.
+
 ## Recording model
 
 Recording captures into a separate growable accumulator buffer on the audio
