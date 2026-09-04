@@ -78,6 +78,19 @@ so it drops the oldest steps rather than growing without bound. For typical
 Edison-style use — chopping/editing individual samples/loops rather than
 hour-long recordings — that's a fine trade.
 
+## Waveform peak cache
+
+`WaveformDisplay` keeps a peak cache — one min/max per 64 source samples per
+channel — rebuilt (`rebuildPeakCache()`) only when the audio content changes.
+Zoom / pan / resize call `rebuildWaveformPath()`, which builds the display
+`juce::Path` from that cache with **no lock and no `document.getBuffer()`
+access**. This matters because `processBlock` guards playback with a try-lock on
+`document.getLock()` and emits a silent block when it fails — so the old
+"scan the buffer under the lock on every wheel event" made playback click while
+zooming in a DAW. Deep zoom (< 64 samples/pixel) copies just the small visible
+span out under a brief `ScopedLock` for per-sample detail; `rebuildPeakCache()`
+holds the lock only for one `makeCopyOf`.
+
 ## Thread safety
 
 The GUI/message thread can resize or replace the document's buffer at any
