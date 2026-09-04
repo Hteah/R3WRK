@@ -15,6 +15,24 @@ WaveformDisplay::~WaveformDisplay()
 
 void WaveformDisplay::timerCallback()
 {
+    // Rebuild whenever the audio content changed, or the view range is stale / degenerate,
+    // or the component was resized before the buffer existed. Cheaper than trusting only the
+    // async ChangeBroadcaster, and self-heals any ordering race on first load.
+    const int version = document.getBufferVersion();
+    const int64_t total = document.getNumSamples();
+    const bool viewBad = viewEnd <= viewStart || viewEnd > total || viewStart >= juce::jmax((int64_t) 1, total);
+
+    if (version != lastBufferVersion || viewBad
+        || getWidth() != lastPathWidth || getHeight() != lastPathHeight)
+    {
+        lastBufferVersion = version;
+        if (viewBad)
+        {
+            viewStart = 0;
+            viewEnd = juce::jmax((int64_t) 1, total);
+        }
+        rebuildWaveformPath();
+    }
     repaint();
 }
 
@@ -68,11 +86,14 @@ void WaveformDisplay::zoomOut() { zoomBy(2.0, (viewStart + viewEnd) / 2); }
 void WaveformDisplay::rebuildWaveformPath()
 {
     channelPaths.clear();
+    const juce::ScopedLock sl(document.getLock());
     auto& buf = document.getBuffer();
     int numCh = buf.getNumChannels();
     int w = getWidth();
     int h = getHeight();
-    if (numCh <= 0 || document.getNumSamples() <= 0 || w <= 0 || h <= 0)
+    lastPathWidth = w;
+    lastPathHeight = h;
+    if (numCh <= 0 || buf.getNumSamples() <= 0 || w <= 0 || h <= 0)
         return;
 
     int laneHeight = h / numCh;

@@ -43,6 +43,8 @@ private:
     AudioDocument& document;
     int64_t viewStart = 0, viewEnd = 0;
     std::vector<juce::Path> channelPaths;
+    int lastBufferVersion = -1;      // rebuild the paths when the audio content changes
+    int lastPathWidth = 0, lastPathHeight = 0;
 
     int64_t dragStartSample = 0;
 

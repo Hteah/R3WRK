@@ -18,8 +18,13 @@ EdisonCloneAudioProcessorEditor::EdisonCloneAudioProcessorEditor(EdisonCloneAudi
         spectrogramDisplay.setVisible(spectrogram);
     };
 
-    toolbar.onSourceNameChanged = [this](juce::String name) { header.setSourceName(name); };
-    toolbar.onSaved             = [this] { header.markSaved(); };
+    toolbar.onSourceNameChanged = [this](juce::String name)
+    {
+        header.setSourceName(name);
+        if (! name.isEmpty())            // a file was opened/saved — frame the whole thing
+            waveformDisplay.zoomToFit();
+    };
+    toolbar.onSaved = [this] { header.markSaved(); };
 
     setWantsKeyboardFocus(true);
     setResizable(true, true);
