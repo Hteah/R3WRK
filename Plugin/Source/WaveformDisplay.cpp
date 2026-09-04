@@ -1,4 +1,5 @@
 #include "WaveformDisplay.h"
+#include "EditActions.h"
 #include <cmath>
 
 WaveformDisplay::WaveformDisplay(AudioDocument& doc) : document(doc)
@@ -377,6 +378,7 @@ WaveformDisplay::EdgeHit WaveformDisplay::hitEdge(float pressX, float startX, fl
 void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
 {
     const int64_t f = xToSample((float) e.x);
+    dragOutStarted = false;
 
     if (document.hasSelection())
     {
@@ -391,6 +393,14 @@ void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
             case EdgeHit::newSelection:
                 break;
         }
+
+        // Press inside the selection body -> a drag from here drags the audio out as a file.
+        if ((float) e.x > sx + edgeTolerancePx && (float) e.x < ex - edgeTolerancePx)
+        {
+            dragKind = DragKind::dragOut;
+            dragAnchor = f;
+            return;
+        }
     }
 
     // The playhead move / selection clear waits for mouseUp, so we can tell a click from a drag.
@@ -402,6 +412,16 @@ void WaveformDisplay::mouseDrag(const juce::MouseEvent& e)
 {
     if (dragKind == DragKind::none)
         return;
+
+    if (dragKind == DragKind::dragOut)
+    {
+        if (! dragOutStarted && e.getDistanceFromDragStart() > 6)
+        {
+            dragOutStarted = true;
+            beginSelectionDragExport();
+        }
+        return;
+    }
 
     const int64_t f  = xToSample((float) e.x);
     const int64_t lo = juce::jmin(dragAnchor, f);
@@ -421,6 +441,17 @@ void WaveformDisplay::mouseUp(const juce::MouseEvent& e)
         return;
 
     const int64_t f = xToSample((float) e.x);
+
+    if (kind == DragKind::dragOut)
+    {
+        if (! dragOutStarted)     // a click inside the selection, not a drag -> deselect + seek
+        {
+            document.clearSelection();
+            document.playhead = f;
+            document.notifyChanged();
+        }
+        return;
+    }
 
     if (kind == DragKind::newSelection)
     {
@@ -444,16 +475,19 @@ void WaveformDisplay::mouseUp(const juce::MouseEvent& e)
 
 void WaveformDisplay::mouseMove(const juce::MouseEvent& e)
 {
-    bool nearEdge = false;
+    auto cursor = juce::MouseCursor::NormalCursor;
     if (document.hasSelection())
     {
         const float sx = sampleToX(document.getSelectionStart());
         const float ex = sampleToX(document.getSelectionEnd());
-        nearEdge = juce::jmax((float) e.x - sx, sx - (float) e.x) <= edgeTolerancePx
-                || juce::jmax((float) e.x - ex, ex - (float) e.x) <= edgeTolerancePx;
+        const bool nearEdge = juce::jmax((float) e.x - sx, sx - (float) e.x) <= edgeTolerancePx
+                           || juce::jmax((float) e.x - ex, ex - (float) e.x) <= edgeTolerancePx;
+        if (nearEdge)
+            cursor = juce::MouseCursor::LeftRightResizeCursor;
+        else if ((float) e.x > sx && (float) e.x < ex)
+            cursor = juce::MouseCursor::DraggingHandCursor;   // drag the selection out
     }
-    setMouseCursor(nearEdge ? juce::MouseCursor::LeftRightResizeCursor
-                            : juce::MouseCursor::NormalCursor);
+    setMouseCursor(cursor);
 }
 
 void WaveformDisplay::mouseDoubleClick(const juce::MouseEvent&)
@@ -461,6 +495,31 @@ void WaveformDisplay::mouseDoubleClick(const juce::MouseEvent&)
     document.setSelection(0, document.getNumSamples());
     if (onSelectionCommitted)
         onSelectionCommitted();
+}
+
+void WaveformDisplay::beginSelectionDragExport()
+{
+    if (! document.hasSelection())
+        return;
+
+    auto dir = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("R3WRK");
+    dir.createDirectory();
+
+    // Tidy: drop drag temp files older than 10 minutes.
+    const auto nowMs = juce::Time::getCurrentTime().toMilliseconds();
+    for (auto& old : dir.findChildFiles(juce::File::findFiles, false, "*.wav"))
+        if (nowMs - old.getLastModificationTime().toMilliseconds() > 10 * 60 * 1000)
+            old.deleteFile();
+
+    const auto stamp = juce::Time::getCurrentTime().formatted("%Y-%m-%d %H.%M.%S");
+    const auto file = dir.getChildFile("R3WRK selection " + stamp + ".wav").getNonexistentSibling();
+
+    if (! EditActions::exportSelection(document, file))
+        return;
+
+    // canMoveFiles = false: the receiver copies it, so our temp file stays valid.
+    juce::DragAndDropContainer::performExternalDragDropOfFiles({ file.getFullPathName() },
+                                                              false, this, nullptr);
 }
 
 void WaveformDisplay::mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)

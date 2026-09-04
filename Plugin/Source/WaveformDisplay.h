@@ -12,7 +12,9 @@
       - grab a selection edge (within 8 px) and drag to resize it, anchored to
         the opposite edge; the pointer shows a left/right-resize cursor near an edge;
       - a click (no real drag) clears the selection and moves the playhead there;
-      - double-click selects all.
+      - double-click selects all;
+      - drag from inside the selection body to drag the audio out as a WAV file
+        (onto an Ableton track, Finder, ...).
     Mouse wheel zooms toward the pointer (or into the selection if there is one);
     horizontal swipe / Shift+wheel pans; the header's Fit button resets the view.
 */
@@ -55,6 +57,7 @@ public:
 private:
     void timerCallback() override;
     void paintRecordingScope(juce::Graphics&);
+    void beginSelectionDragExport();   // native file drag of the selection to Ableton / Finder
     void rebuildWaveformPath();
     void zoomBy(double factor, int64_t centerSample);
     void zoomToward(double spanFactor, float pointerX);   // wheel zoom (Sieve model)
@@ -69,9 +72,10 @@ private:
     int lastBufferVersion = -1;      // rebuild the paths when the audio content changes
     int lastPathWidth = 0, lastPathHeight = 0;
 
-    enum class DragKind { none, newSelection, resizeStart, resizeEnd };
+    enum class DragKind { none, newSelection, resizeStart, resizeEnd, dragOut };
     DragKind dragKind = DragKind::none;
     int64_t dragAnchor = 0;          // fixed frame: press frame (new) or the opposite edge (resize)
+    bool dragOutStarted = false;     // the native file drag for this gesture has been kicked off
     static constexpr float edgeTolerancePx = 8.0f;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(WaveformDisplay)
