@@ -5,11 +5,12 @@
 #include "PluginProcessor.h"
 
 /**
-    The control surface below the waveform, in the same shape as Sieve's audio editor:
-      row 1  transport   — Play / Loop / time  ....  record meter + Record
-      row 2  operations  — Trim Delete Silence Normalize Amplify… Reverse Fade In/Out │ Cut Copy Paste │ ↶ ↷
-      row 3  file        — Open… / Save As… / Revert  ·  Tools ▾ (Stretch/Pitch, Chop-to-Grid, Export Slices)
+    A single control strip below the waveform:
 
+        Play · Loop · time    ···    ● REC m:ss · Record · Tools ▾
+
+    Everything else — file ops, clipboard, region processing, stretch/pitch,
+    chop-to-grid, undo/redo — lives in the "Tools" pop-up menu.
     Owns the clipboard and talks to the AudioDocument / processor directly.
 */
 class EditorToolbar : public juce::Component,
@@ -23,7 +24,6 @@ public:
     void resized() override;
     void changeListenerCallback(juce::ChangeBroadcaster*) override;
 
-    std::function<void()> onZoomIn, onZoomOut;
     std::function<void(juce::String name)> onSourceNameChanged;   // "" for a fresh recording
     std::function<void()> onSaved;                                // after a successful open / save
 
@@ -52,32 +52,11 @@ private:
     AudioDocument& document;
     Clipboard clipboard;
 
-    // row 1 — transport
-    juce::TextButton recordButton { "Record" };
     juce::TextButton playButton   { "Play" };
     juce::ToggleButton loopButton { "Loop" };
     juce::Label timeLabel;
-    juce::Label recLabel;   // "● 0:05" while recording, right-aligned
-
-    // row 2 — operations
-    juce::TextButton trimButton      { "Trim" };
-    juce::TextButton deleteButton    { "Delete" };
-    juce::TextButton silenceButton   { "Silence" };
-    juce::TextButton normalizeButton { "Normalize" };
-    juce::TextButton amplifyButton   { "Amplify..." };
-    juce::TextButton reverseButton   { "Reverse" };
-    juce::TextButton fadeInButton    { "Fade In" };
-    juce::TextButton fadeOutButton   { "Fade Out" };
-    juce::TextButton cutButton       { "Cut" };
-    juce::TextButton copyButton      { "Copy" };
-    juce::TextButton pasteButton     { "Paste" };
-    juce::TextButton undoButton      { "Undo" };
-    juce::TextButton redoButton      { "Redo" };
-
-    // row 3 — file
-    juce::TextButton openButton   { "Open..." };
-    juce::TextButton saveButton   { "Save As..." };
-    juce::TextButton revertButton { "Revert" };
+    juce::Label recLabel;   // "● REC m:ss" while recording, right-aligned
+    juce::TextButton recordButton { "Record" };
     juce::TextButton toolsButton  { "Tools" };
 
     std::unique_ptr<juce::FileChooser> fileChooser;

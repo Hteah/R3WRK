@@ -219,48 +219,23 @@ namespace
 EditorToolbar::EditorToolbar(EdisonCloneAudioProcessor& proc, AudioDocument& doc)
     : processor(proc), document(doc)
 {
-    for (auto* b : { &recordButton, &playButton,
-                     &trimButton, &deleteButton, &silenceButton, &normalizeButton, &amplifyButton,
-                     &reverseButton, &fadeInButton, &fadeOutButton,
-                     &cutButton, &copyButton, &pasteButton, &undoButton, &redoButton,
-                     &openButton, &saveButton, &revertButton, &toolsButton })
-        addAndMakeVisible(b);
+    addAndMakeVisible(playButton);
     addAndMakeVisible(loopButton);
     addAndMakeVisible(timeLabel);
     addAndMakeVisible(recLabel);
+    addAndMakeVisible(recordButton);
+    addAndMakeVisible(toolsButton);
 
     recordButton.setColour(juce::TextButton::buttonColourId, juce::Colours::darkred);
     timeLabel.setFont(juce::Font(juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::plain));
     timeLabel.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
     recLabel.setJustificationType(juce::Justification::centredRight);
     recLabel.setColour(juce::Label::textColourId, juce::Colours::red);
-    undoButton.setButtonText(juce::String::fromUTF8("\xe2\x86\xb6"));   // ↶
-    redoButton.setButtonText(juce::String::fromUTF8("\xe2\x86\xb7"));   // ↷
-    undoButton.setTooltip("Undo");
-    redoButton.setTooltip("Redo");
     toolsButton.setButtonText(juce::String::fromUTF8("Tools \xe2\x96\xbe"));   // Tools ▾
 
     recordButton.onClick = [this] { toggleTransport(); };
     playButton.onClick   = [this] { togglePlay(); };
     loopButton.onClick   = [this] { document.loopEnabled = loopButton.getToggleState(); };
-
-    trimButton.onClick      = [this] { EditActions::trimToSelection(document); };
-    deleteButton.onClick    = [this] { EditActions::deleteSelection(document); };
-    silenceButton.onClick   = [this] { EditActions::silence(document); };
-    normalizeButton.onClick = [this] { EditActions::normalize(document); };
-    amplifyButton.onClick   = [this] { showAmplifyCallout(); };
-    reverseButton.onClick   = [this] { EditActions::reverse(document); };
-    fadeInButton.onClick    = [this] { EditActions::fadeIn(document); };
-    fadeOutButton.onClick   = [this] { EditActions::fadeOut(document); };
-    cutButton.onClick       = [this] { doCut(); };
-    copyButton.onClick      = [this] { doCopy(); };
-    pasteButton.onClick     = [this] { doPaste(); };
-    undoButton.onClick      = [this] { doUndo(); };
-    redoButton.onClick      = [this] { doRedo(); };
-
-    openButton.onClick   = [this] { openFile(); };
-    saveButton.onClick   = [this] { saveFile(); };
-    revertButton.onClick = [this] { revertAll(); };
     toolsButton.onClick  = [this] { showToolsMenu(); };
 
     document.changeBroadcaster.addChangeListener(this);
@@ -307,20 +282,77 @@ void EditorToolbar::revertAll()
 //==============================================================================
 void EditorToolbar::showToolsMenu()
 {
-    enum { idStretch = 1, idChop, idExport };
-    const bool empty = document.isEmpty();
+    enum { idOpen = 1, idSave, idRevert,
+           idCut, idCopy, idPaste,
+           idTrim, idDelete, idSilence,
+           idNormalize, idAmplify, idFadeIn, idFadeOut, idReverse,
+           idStretch, idChop, idExport,
+           idUndo, idRedo };
+
+    const bool empty   = document.isEmpty();
+    const bool sel     = document.hasSelection();
+    const bool clip    = clipboard.hasContent();
+    const bool canUndo = document.undoManager.canUndo();
+    const bool canRedo = document.undoManager.canRedo();
+
+    const juce::String cmd   = juce::String::fromUTF8("\xe2\x8c\x98");           // ⌘
+    const juce::String shift = juce::String::fromUTF8("\xe2\x87\xa7");           // ⇧
+    auto keyed = [](juce::String text, int id, bool enabled, juce::String shortcut)
+    {
+        juce::PopupMenu::Item i(std::move(text));
+        i.itemID = id; i.isEnabled = enabled; i.shortcutKeyDescription = std::move(shortcut);
+        return i;
+    };
 
     juce::PopupMenu m;
+    m.addItem(idOpen,   juce::String::fromUTF8("Open\xE2\x80\xA6"));
+    m.addItem(idSave,   juce::String::fromUTF8("Save As\xE2\x80\xA6"), ! empty);
+    m.addItem(idRevert, "Revert", canUndo);
+    m.addSeparator();
+    m.addItem(keyed("Cut",   idCut,   sel,  cmd + "X"));
+    m.addItem(keyed("Copy",  idCopy,  sel,  cmd + "C"));
+    m.addItem(keyed("Paste", idPaste, clip, cmd + "V"));
+    m.addSeparator();
+    m.addItem(idTrim,    "Trim to Selection", sel);
+    m.addItem(idDelete,  "Delete Selection",  sel);
+    m.addItem(idSilence, "Silence Selection", ! empty);
+    m.addSeparator();
+    m.addItem(idNormalize, "Normalize",  ! empty);
+    m.addItem(idAmplify,   juce::String::fromUTF8("Amplify\xE2\x80\xA6"), ! empty);
+    m.addItem(idFadeIn,    "Fade In",    ! empty);
+    m.addItem(idFadeOut,   "Fade Out",   ! empty);
+    m.addItem(idReverse,   "Reverse",    ! empty);
+    m.addSeparator();
     m.addItem(idStretch, juce::String::fromUTF8("Stretch / Pitch\xE2\x80\xA6"), ! empty);
     m.addItem(idChop,    juce::String::fromUTF8("Chop to Grid\xE2\x80\xA6"),    ! empty);
     m.addItem(idExport,  juce::String::fromUTF8("Export Slices\xE2\x80\xA6"),   ! empty);
+    m.addSeparator();
+    m.addItem(keyed("Undo", idUndo, canUndo, cmd + "Z"));
+    m.addItem(keyed("Redo", idRedo, canRedo, shift + cmd + "Z"));
+
     m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(toolsButton), [this](int r)
     {
         switch (r)
         {
-            case idStretch: showStretchCallout(); break;
-            case idChop:    showChopCallout();    break;
-            case idExport:  exportSlices();       break;
+            case idOpen:      openFile();   break;
+            case idSave:      saveFile();   break;
+            case idRevert:    revertAll();  break;
+            case idCut:       doCut();      break;
+            case idCopy:      doCopy();     break;
+            case idPaste:     doPaste();    break;
+            case idTrim:      EditActions::trimToSelection(document); break;
+            case idDelete:    EditActions::deleteSelection(document); break;
+            case idSilence:   EditActions::silence(document);        break;
+            case idNormalize: EditActions::normalize(document);      break;
+            case idAmplify:   showAmplifyCallout(); break;
+            case idFadeIn:    EditActions::fadeIn(document);  break;
+            case idFadeOut:   EditActions::fadeOut(document); break;
+            case idReverse:   EditActions::reverse(document); break;
+            case idStretch:   showStretchCallout(); break;
+            case idChop:      showChopCallout();    break;
+            case idExport:    exportSlices();       break;
+            case idUndo:      doUndo(); break;
+            case idRedo:      doRedo(); break;
             default: break;
         }
     });
@@ -329,7 +361,7 @@ void EditorToolbar::showToolsMenu()
 void EditorToolbar::showAmplifyCallout()
 {
     juce::CallOutBox::launchAsynchronously(std::make_unique<AmplifyPanel>(document),
-                                           amplifyButton.getScreenBounds(), nullptr);
+                                           toolsButton.getScreenBounds(), nullptr);
 }
 
 void EditorToolbar::showStretchCallout()
@@ -354,18 +386,6 @@ void EditorToolbar::updateTransportButtonText()
     playButton.setButtonText(playing ? "Stop" : "Play");
     loopButton.setToggleState(document.loopEnabled.load(), juce::dontSendNotification);
     recordButton.setEnabled(! playing || rec);
-
-    const bool canUndo = document.undoManager.canUndo();
-    undoButton.setEnabled(canUndo);
-    redoButton.setEnabled(document.undoManager.canRedo());
-    revertButton.setEnabled(canUndo);
-
-    const bool sel = document.hasSelection();
-    trimButton.setEnabled(sel);
-    deleteButton.setEnabled(sel);
-    cutButton.setEnabled(sel);
-    copyButton.setEnabled(sel);
-    pasteButton.setEnabled(clipboard.hasContent());
 }
 
 void EditorToolbar::timerCallback()
@@ -439,47 +459,22 @@ void EditorToolbar::exportSlices()
 //==============================================================================
 void EditorToolbar::resized()
 {
-    auto area = getLocalBounds();
-    const int rowH = 26;
+    auto row = getLocalBounds().removeFromTop(26);
     const int gap = 4;
 
-    // width < 0  -> flexible spacer; comp == nullptr with width >= 0 -> fixed spacer.
-    auto flexRow = [&](juce::Rectangle<int> row,
-                       std::initializer_list<std::pair<juce::Component*, int>> items)
+    juce::FlexBox fb;
+    fb.flexDirection = juce::FlexBox::Direction::row;
+    auto add = [&](juce::Component& c, int w)
     {
-        juce::FlexBox fb;
-        fb.flexDirection = juce::FlexBox::Direction::row;
-        for (auto& [comp, w] : items)
-        {
-            if (comp == nullptr)
-                fb.items.add(w < 0 ? juce::FlexItem().withFlex(1.0f)
-                                   : juce::FlexItem().withWidth((float) w));
-            else
-                fb.items.add(juce::FlexItem(*comp).withWidth((float) w).withMinWidth(22.0f)
-                                 .withMargin(juce::FlexItem::Margin(0, (float) gap, 0, 0)));
-        }
-        fb.performLayout(row);
+        fb.items.add(juce::FlexItem(c).withWidth((float) w).withMinWidth(22.0f)
+                         .withMargin(juce::FlexItem::Margin(0, (float) gap, 0, 0)));
     };
-
-    flexRow(area.removeFromTop(rowH),
-            { { &playButton, 58 }, { &loopButton, 56 }, { &timeLabel, 150 },
-              { nullptr, -1 },
-              { &recLabel, 118 }, { &recordButton, 80 } });
-
-    area.removeFromTop(gap);
-    flexRow(area.removeFromTop(rowH),
-            { { &trimButton, 50 }, { &deleteButton, 58 }, { &silenceButton, 62 },
-              { &normalizeButton, 76 }, { &amplifyButton, 74 }, { &reverseButton, 64 },
-              { &fadeInButton, 62 }, { &fadeOutButton, 66 },
-              { nullptr, 10 },
-              { &cutButton, 46 }, { &copyButton, 50 }, { &pasteButton, 52 },
-              { nullptr, 10 },
-              { &undoButton, 34 }, { &redoButton, 34 },
-              { nullptr, -1 } });
-
-    area.removeFromTop(gap);
-    flexRow(area.removeFromTop(rowH),
-            { { &openButton, 62 }, { &saveButton, 76 }, { &revertButton, 62 },
-              { nullptr, 10 }, { &toolsButton, 74 },
-              { nullptr, -1 } });
+    add(playButton, 58);
+    add(loopButton, 56);
+    add(timeLabel, 150);
+    fb.items.add(juce::FlexItem().withFlex(1.0f));
+    add(recLabel, 118);
+    add(recordButton, 80);
+    add(toolsButton, 84);
+    fb.performLayout(row);
 }

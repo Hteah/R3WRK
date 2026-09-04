@@ -46,8 +46,7 @@ void EdisonCloneAudioProcessorEditor::resized()
     header.setBounds(area.removeFromTop(30));
     area.removeFromTop(6);
 
-    // three control rows (26 px each) + gaps, pinned to the bottom
-    toolbar.setBounds(area.removeFromBottom(3 * 26 + 2 * 4));
+    toolbar.setBounds(area.removeFromBottom(28));   // single control strip
     area.removeFromBottom(6);
 
     waveformDisplay.setBounds(area);
