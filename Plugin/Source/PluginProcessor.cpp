@@ -1,0 +1,218 @@
+#include "PluginProcessor.h"
+#include "PluginEditor.h"
+
+namespace
+{
+    constexpr int kStateMagic = 0x45443031; // "ED01"
+}
+
+EdisonCloneAudioProcessor::EdisonCloneAudioProcessor()
+    : AudioProcessor(BusesProperties()
+                          .withInput("Input", juce::AudioChannelSet::stereo(), true)
+                          .withOutput("Output", juce::AudioChannelSet::stereo(), true))
+{
+    document.newEmptyDocument(2, 44100.0);
+}
+
+EdisonCloneAudioProcessor::~EdisonCloneAudioProcessor() = default;
+
+void EdisonCloneAudioProcessor::prepareToPlay(double sampleRate, int /*samplesPerBlock*/)
+{
+    currentSampleRate = sampleRate;
+    if (document.isEmpty())
+        document.setSampleRate(sampleRate);
+}
+
+void EdisonCloneAudioProcessor::releaseResources()
+{
+}
+
+bool EdisonCloneAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
+{
+    auto mono = juce::AudioChannelSet::mono();
+    auto stereo = juce::AudioChannelSet::stereo();
+    auto in = layouts.getMainInputChannelSet();
+    auto out = layouts.getMainOutputChannelSet();
+    if (in != out)
+        return false;
+    return in == mono || in == stereo;
+}
+
+void EdisonCloneAudioProcessor::ensureRecordingCapacity(int numChannels, int64_t additionalSamples)
+{
+    int64_t needed = recordingWritePos + additionalSamples;
+    if (recordingAccumulator.getNumChannels() != numChannels || (int64_t) recordingAccumulator.getNumSamples() < needed)
+    {
+        int64_t newCapacity = juce::jmax((int64_t) recordingAccumulator.getNumSamples(),
+                                          (int64_t) (currentSampleRate * 4.0));
+        while (newCapacity < needed)
+            newCapacity *= 2;
+        recordingAccumulator.setSize(numChannels, (int) newCapacity, true, true, true);
+    }
+}
+
+void EdisonCloneAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
+{
+    juce::ScopedNoDenormals noDenormals;
+    const int numSamples = buffer.getNumSamples();
+    const int numCh = buffer.getNumChannels();
+
+    if (document.isRecording.load(std::memory_order_relaxed))
+    {
+        ensureRecordingCapacity(numCh, numSamples);
+        for (int ch = 0; ch < numCh; ++ch)
+            recordingAccumulator.copyFrom(ch, (int) recordingWritePos, buffer, ch, 0, numSamples);
+        recordingWritePos += numSamples;
+        return; // pass input through unchanged so the user can monitor while recording
+    }
+
+    if (document.isPlaying.load(std::memory_order_relaxed))
+    {
+        buffer.clear();
+
+        const juce::CriticalSection::ScopedTryLockType stl(document.getLock());
+        if (stl.isLocked())
+        {
+            auto& docBuf = document.getBuffer();
+            const int64_t docLen = document.getNumSamples();
+            const bool loop = document.loopEnabled.load(std::memory_order_relaxed);
+            const int64_t loopStartS = document.loopStart.load(std::memory_order_relaxed);
+            const int64_t loopEndS = document.loopEnd.load(std::memory_order_relaxed);
+            const int64_t stopAt = (loop && loopEndS > loopStartS) ? loopEndS : docLen;
+
+            int64_t pos = document.playhead.load(std::memory_order_relaxed);
+            int written = 0;
+
+            while (written < numSamples && docBuf.getNumChannels() > 0)
+            {
+                if (pos >= stopAt)
+                {
+                    if (loop && loopEndS > loopStartS)
+                    {
+                        pos = loopStartS;
+                        continue;
+                    }
+                    break;
+                }
+
+                int chunk = (int) juce::jmin((int64_t) (numSamples - written), stopAt - pos);
+                for (int ch = 0; ch < numCh; ++ch)
+                {
+                    int srcCh = juce::jmin(ch, docBuf.getNumChannels() - 1);
+                    buffer.copyFrom(ch, written, docBuf, srcCh, (int) pos, chunk);
+                }
+                pos += chunk;
+                written += chunk;
+            }
+
+            document.playhead.store(pos, std::memory_order_relaxed);
+
+            if (! loop && pos >= docLen)
+                document.isPlaying.store(false, std::memory_order_relaxed);
+        }
+        return;
+    }
+
+    // Neither recording nor playing back: pass the host's input straight through.
+    juce::ignoreUnused(buffer);
+}
+
+void EdisonCloneAudioProcessor::startRecording()
+{
+    recordingWritePos = 0;
+    int chans = getTotalNumInputChannels() > 0 ? getTotalNumInputChannels() : 2;
+    recordingAccumulator.setSize(chans, (int) juce::jmax(1.0, currentSampleRate * 4.0), false, true, true);
+    document.isPlaying = false;
+    document.isRecording = true;
+}
+
+void EdisonCloneAudioProcessor::stopRecording()
+{
+    document.isRecording = false;
+
+    juce::AudioBuffer<float> finalBuffer(recordingAccumulator.getNumChannels(), (int) recordingWritePos);
+    for (int ch = 0; ch < finalBuffer.getNumChannels(); ++ch)
+        finalBuffer.copyFrom(ch, 0, recordingAccumulator, ch, 0, (int) recordingWritePos);
+
+    document.beginChange();
+    document.setSampleRate(currentSampleRate);
+    document.commitChange(std::move(finalBuffer), "Record");
+    document.loopStart = 0;
+    document.loopEnd = document.getNumSamples();
+}
+
+void EdisonCloneAudioProcessor::startPlayback()
+{
+    if (document.isEmpty())
+        return;
+    document.isRecording = false;
+    if (document.playhead.load() >= document.getNumSamples())
+        document.playhead = document.hasSelection() ? document.getSelectionStart() : 0;
+    document.isPlaying = true;
+}
+
+void EdisonCloneAudioProcessor::stopPlayback()
+{
+    document.isPlaying = false;
+}
+
+juce::AudioProcessorEditor* EdisonCloneAudioProcessor::createEditor()
+{
+    return new EdisonCloneAudioProcessorEditor(*this);
+}
+
+void EdisonCloneAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
+{
+    juce::MemoryOutputStream out(destData, false);
+    out.writeInt(kStateMagic);
+    out.writeDouble(document.getSampleRate());
+    out.writeInt(document.getNumChannels());
+    out.writeInt64(document.getNumSamples());
+    out.writeInt64(document.loopStart.load());
+    out.writeInt64(document.loopEnd.load());
+    out.writeBool(document.loopEnabled.load());
+    out.writeDouble(document.chopBpm);
+    out.writeInt(document.chopDivision);
+
+    auto& buf = document.getBuffer();
+    for (int ch = 0; ch < buf.getNumChannels(); ++ch)
+        out.write(buf.getReadPointer(ch), (size_t) buf.getNumSamples() * sizeof(float));
+}
+
+void EdisonCloneAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
+{
+    juce::MemoryInputStream in(data, (size_t) sizeInBytes, false);
+    if (in.readInt() != kStateMagic)
+        return;
+
+    double sr = in.readDouble();
+    int numCh = in.readInt();
+    int64_t numSamples = in.readInt64();
+    int64_t lStart = in.readInt64();
+    int64_t lEnd = in.readInt64();
+    bool lEnabled = in.readBool();
+    double bpm = in.readDouble();
+    int division = in.readInt();
+
+    if (numCh <= 0 || numSamples < 0)
+        return;
+
+    juce::AudioBuffer<float> loaded(numCh, (int) numSamples);
+    for (int ch = 0; ch < numCh; ++ch)
+        in.read(loaded.getWritePointer(ch), (int) ((size_t) numSamples * sizeof(float)));
+
+    document.newEmptyDocument(numCh, sr);
+    document.beginChange();
+    document.commitChange(std::move(loaded), "Load State");
+    document.loopStart = lStart;
+    document.loopEnd = lEnd;
+    document.loopEnabled = lEnabled;
+    document.chopBpm = bpm;
+    document.chopDivision = division;
+    document.recalculateChopMarkers();
+}
+
+juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
+{
+    return new EdisonCloneAudioProcessor();
+}

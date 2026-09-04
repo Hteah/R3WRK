@@ -1,0 +1,10 @@
+JUCE/
+build/
+build-*/
+*.xcodeproj
+xcuserdata/
+DerivedData/
+.DS_Store
+
+# Claude Code local worktrees / scratch
+.claude/

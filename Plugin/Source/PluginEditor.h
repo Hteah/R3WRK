@@ -1,0 +1,26 @@
+#pragma once
+#include <JuceHeader.h>
+#include "PluginProcessor.h"
+#include "EditorToolbar.h"
+#include "WaveformDisplay.h"
+#include "SpectrogramDisplay.h"
+
+class EdisonCloneAudioProcessorEditor : public juce::AudioProcessorEditor
+{
+public:
+    explicit EdisonCloneAudioProcessorEditor(EdisonCloneAudioProcessor&);
+    ~EdisonCloneAudioProcessorEditor() override;
+
+    void paint(juce::Graphics&) override;
+    void resized() override;
+
+private:
+    EdisonCloneAudioProcessor& processorRef;
+
+    EditorToolbar toolbar;
+    WaveformDisplay waveformDisplay;
+    SpectrogramDisplay spectrogramDisplay;
+    bool showingSpectrogram = false;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(EdisonCloneAudioProcessorEditor)
+};

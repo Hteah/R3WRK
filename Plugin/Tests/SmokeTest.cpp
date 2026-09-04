@@ -1,0 +1,262 @@
+// Headless correctness smoke test for the core editing engine (no GUI, no audio device).
+// Exercises AudioDocument + EditActions + TimeStretchEngine directly.
+
+#include <JuceHeader.h>
+#include "../Source/AudioDocument.h"
+#include "../Source/EditActions.h"
+#include "../Source/TimeStretchEngine.h"
+
+namespace
+{
+    int failures = 0;
+
+    void check(bool condition, const juce::String& what)
+    {
+        if (condition)
+        {
+            std::cout << "  [PASS] " << what << std::endl;
+        }
+        else
+        {
+            std::cout << "  [FAIL] " << what << std::endl;
+            ++failures;
+        }
+    }
+
+    void checkNear(double a, double b, double tol, const juce::String& what)
+    {
+        check(std::abs(a - b) <= tol, what + juce::String::formatted(" (got %.4f, expected ~%.4f)", a, b));
+    }
+
+    juce::AudioBuffer<float> makeSineBuffer(int numChannels, int numSamples, double sampleRate, double freqHz, float amplitude)
+    {
+        juce::AudioBuffer<float> buf(numChannels, numSamples);
+        for (int ch = 0; ch < numChannels; ++ch)
+        {
+            auto* d = buf.getWritePointer(ch);
+            for (int i = 0; i < numSamples; ++i)
+                d[i] = amplitude * (float) std::sin(2.0 * juce::MathConstants<double>::pi * freqHz * (double) i / sampleRate);
+        }
+        return buf;
+    }
+
+    void setDocumentContent(AudioDocument& doc, juce::AudioBuffer<float> content, double sampleRate)
+    {
+        doc.newEmptyDocument(content.getNumChannels(), sampleRate);
+        doc.beginChange();
+        doc.commitChange(std::move(content), "Init");
+        doc.undoManager.clearUndoHistory();
+    }
+}
+
+int main()
+{
+    const double sr = 44100.0;
+    std::cout << "=== EdisonClone core engine smoke test ===" << std::endl;
+
+    // --- selection / copy / cut / undo ---------------------------------
+    {
+        std::cout << "-- selection, copy, cut, undo --" << std::endl;
+        AudioDocument doc;
+        setDocumentContent(doc, makeSineBuffer(1, (int) sr, sr, 440.0, 0.5f), sr);
+        check(doc.getNumSamples() == (int64_t) sr, "document has 1 second of audio");
+
+        doc.setSelection(1000, 2000);
+        check(doc.getSelectionEnd() - doc.getSelectionStart() == 1000, "selection spans 1000 samples");
+
+        Clipboard clip;
+        EditActions::copy(doc, clip);
+        check(clip.buffer.getNumSamples() == 1000, "copy captured 1000 samples");
+        check(doc.getNumSamples() == (int64_t) sr, "copy did not change document length");
+
+        int64_t beforeCut = doc.getNumSamples();
+        EditActions::cut(doc, clip);
+        check(doc.getNumSamples() == beforeCut - 1000, "cut removed 1000 samples");
+
+        doc.undoManager.undo();
+        check(doc.getNumSamples() == beforeCut, "undo restored original length");
+
+        doc.undoManager.redo();
+        check(doc.getNumSamples() == beforeCut - 1000, "redo re-applied the cut");
+    }
+
+    // --- paste ------------------------------------------------------------
+    {
+        std::cout << "-- paste --" << std::endl;
+        AudioDocument doc;
+        setDocumentContent(doc, makeSineBuffer(1, 5000, sr, 440.0, 0.5f), sr);
+        Clipboard clip;
+        clip.buffer = makeSineBuffer(1, 300, sr, 220.0, 0.3f);
+        clip.sampleRate = sr;
+
+        doc.setSelection(1000, 1000); // zero-length -> insert
+        EditActions::pasteReplace(doc, clip);
+        check(doc.getNumSamples() == 5300, "paste-insert grew document by clipboard length");
+
+        doc.setSelection(0, 5300);
+        EditActions::pasteReplace(doc, clip); // replace whole selection with 300-sample clip
+        check(doc.getNumSamples() == 300, "paste-replace over a selection shrinks to clipboard length");
+    }
+
+    // --- trim / delete / insert silence ------------------------------------
+    {
+        std::cout << "-- trim, delete, insert silence --" << std::endl;
+        AudioDocument doc;
+        setDocumentContent(doc, makeSineBuffer(1, 10000, sr, 440.0, 0.5f), sr);
+
+        doc.setSelection(2000, 4000);
+        EditActions::trimToSelection(doc);
+        check(doc.getNumSamples() == 2000, "trim keeps only the selection");
+
+        doc.setSelection(0, 500);
+        EditActions::deleteSelection(doc);
+        check(doc.getNumSamples() == 1500, "delete removes the selection");
+
+        EditActions::insertSilence(doc, 0, 100);
+        check(doc.getNumSamples() == 1600, "insertSilence grows the document");
+        float peak = doc.getBuffer().getMagnitude(0, 0, 100);
+        check(peak == 0.0f, "inserted region is actually silent");
+    }
+
+    // --- gain / normalize / fade / reverse / silence -----------------------
+    {
+        std::cout << "-- gain, normalize, fade, reverse, silence --" << std::endl;
+        AudioDocument doc;
+        setDocumentContent(doc, makeSineBuffer(1, 4410, sr, 440.0, 0.2f), sr);
+
+        doc.clearSelection();
+        EditActions::normalize(doc, -0.3f);
+        float peakAfterNorm = doc.getBuffer().getMagnitude(0, 0, (int) doc.getNumSamples());
+        checkNear((double) juce::Decibels::gainToDecibels(peakAfterNorm), -0.3, 0.05, "normalize hits target peak dB");
+
+        auto beforeGainBuf = doc.getBuffer();
+        doc.clearSelection();
+        EditActions::applyGainDb(doc, -6.0f);
+        float afterGainPeak = doc.getBuffer().getMagnitude(0, 0, (int) doc.getNumSamples());
+        float beforeGainPeak = beforeGainBuf.getMagnitude(0, 0, beforeGainBuf.getNumSamples());
+        checkNear((double) (afterGainPeak / beforeGainPeak), (double) juce::Decibels::decibelsToGain(-6.0f), 0.01,
+                  "applyGainDb(-6dB) halves amplitude as expected");
+
+        doc.clearSelection();
+        EditActions::fadeIn(doc);
+        check(std::abs(doc.getBuffer().getSample(0, 0)) < 1.0e-6f, "fadeIn starts at silence");
+
+        auto beforeReverse = doc.getBuffer();
+        doc.clearSelection();
+        EditActions::reverse(doc);
+        EditActions::reverse(doc);
+        bool roundTripsOk = true;
+        for (int i = 0; i < doc.getBuffer().getNumSamples() && roundTripsOk; ++i)
+            if (std::abs(doc.getBuffer().getSample(0, i) - beforeReverse.getSample(0, i)) > 1.0e-6f)
+                roundTripsOk = false;
+        check(roundTripsOk, "reverse twice returns to the original signal");
+
+        doc.setSelection(0, 1000);
+        EditActions::silence(doc);
+        check(doc.getBuffer().getMagnitude(0, 0, 1000) == 0.0f, "silence zeroes the selection");
+    }
+
+    // --- chop-to-grid + slice export ----------------------------------------
+    {
+        std::cout << "-- chop-to-grid + export --" << std::endl;
+        AudioDocument doc;
+        setDocumentContent(doc, makeSineBuffer(1, (int) sr * 2, sr, 440.0, 0.4f), sr); // 2 seconds
+        doc.chopBpm = 120.0;   // 2 beats/sec
+        doc.chopDivision = 4;  // quarter notes -> 1 marker per beat -> ~4 markers in 2s
+        doc.recalculateChopMarkers();
+        check(doc.chopMarkers.size() >= 3 && doc.chopMarkers.size() <= 5,
+              "chop markers land near the expected count (" + juce::String((int) doc.chopMarkers.size()) + ")");
+
+        auto tempDir = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                           .getChildFile("edison_clone_test_slices");
+        tempDir.createDirectory();
+        for (auto& f : tempDir.findChildFiles(juce::File::findFiles, false))
+            f.deleteFile();
+
+        bool exported = EditActions::exportChopSlices(doc, tempDir, "slice");
+        auto files = tempDir.findChildFiles(juce::File::findFiles, false, "*.wav");
+        check(exported && files.size() == (int) doc.chopMarkers.size(), "exported one WAV file per chop region");
+        for (auto& f : files)
+            check(f.getSize() > 44, "slice file " + f.getFileName() + " has real audio data, not just a header");
+        tempDir.deleteRecursively();
+    }
+
+    // --- time-stretch / pitch-shift ------------------------------------------
+    {
+        std::cout << "-- time-stretch / pitch-shift (RubberBand) --" << std::endl;
+        auto region = makeSineBuffer(1, (int) sr, sr, 440.0, 0.4f); // 1 second
+
+        auto same = TimeStretchEngine::process(region, sr, 1.0, 0.0);
+        checkNear((double) same.getNumSamples(), (double) region.getNumSamples(), sr * 0.02,
+                  "ratio=1.0 keeps ~same length");
+
+        auto longer = TimeStretchEngine::process(region, sr, 2.0, 0.0);
+        checkNear((double) longer.getNumSamples(), (double) region.getNumSamples() * 2.0, sr * 0.05,
+                  "ratio=2.0 roughly doubles length");
+
+        auto shorter = TimeStretchEngine::process(region, sr, 0.5, 0.0);
+        checkNear((double) shorter.getNumSamples(), (double) region.getNumSamples() * 0.5, sr * 0.05,
+                  "ratio=0.5 roughly halves length");
+
+        auto pitched = TimeStretchEngine::process(region, sr, 1.0, 12.0); // +1 octave, same length
+        checkNear((double) pitched.getNumSamples(), (double) region.getNumSamples(), sr * 0.02,
+                  "pitch-only shift keeps length constant");
+        check(pitched.getMagnitude(0, 0, pitched.getNumSamples()) > 0.05f, "pitched output is not silent");
+    }
+
+    // --- replaceRangeWith used end-to-end (this is what the stretch tool calls) --
+    {
+        std::cout << "-- replaceRangeWith end-to-end (as used by Apply Stretch/Pitch) --" << std::endl;
+        AudioDocument doc;
+        setDocumentContent(doc, makeSineBuffer(1, 4410, sr, 440.0, 0.3f), sr);
+        doc.setSelection(1000, 2000); // 1000-sample selection
+
+        juce::AudioBuffer<float> region(1, 1000);
+        for (int ch = 0; ch < doc.getBuffer().getNumChannels(); ++ch)
+            region.copyFrom(ch, 0, doc.getBuffer(), ch, 1000, 1000);
+
+        auto stretched = TimeStretchEngine::process(region, sr, 2.0, 0.0); // roughly doubles to ~2000 samples
+        int64_t before = doc.getNumSamples();
+        EditActions::replaceRangeWith(doc, { (int64_t) 1000, (int64_t) 2000 }, stretched, "Time Stretch/Pitch");
+        int64_t after = doc.getNumSamples();
+        checkNear((double) (after - before), (double) stretched.getNumSamples() - 1000.0, sr * 0.05,
+                  "document grew by (stretched length - original selection length)");
+    }
+
+    // --- save / load round trip, plus resample-on-load ----------------------
+    {
+        std::cout << "-- save/load round trip + resample-on-load --" << std::endl;
+        AudioDocument doc;
+        setDocumentContent(doc, makeSineBuffer(2, (int) sr, sr, 440.0, 0.6f), sr);
+
+        auto tempFile = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                            .getChildFile("edison_clone_test_roundtrip.wav");
+        tempFile.deleteFile();
+        bool saved = doc.saveToFile(tempFile);
+        check(saved, "saveToFile wrote a file");
+        check(tempFile.getSize() > 44, "saved file has real audio data");
+
+        AudioDocument doc2;
+        bool loaded = doc2.loadFromFile(tempFile);
+        check(loaded, "loadFromFile read the file back");
+        check(doc2.getNumChannels() == 2, "reloaded file kept its channel count");
+        checkNear((double) doc2.getNumSamples(), (double) sr, 4.0, "reloaded file kept its sample length");
+
+        AudioDocument doc3;
+        bool loadedResampled = doc3.loadFromFile(tempFile, sr * 2.0); // pretend host runs at double rate
+        check(loadedResampled, "loadFromFile with resample target succeeded");
+        check(std::abs(doc3.getSampleRate() - sr * 2.0) < 0.01, "document sample rate now matches the target rate");
+        checkNear((double) doc3.getNumSamples(), (double) sr * 2.0, sr * 0.02,
+                  "resampled length roughly doubled to match the new rate");
+
+        tempFile.deleteFile();
+    }
+
+    std::cout << "===========================================" << std::endl;
+    if (failures == 0)
+        std::cout << "ALL CHECKS PASSED" << std::endl;
+    else
+        std::cout << failures << " CHECK(S) FAILED" << std::endl;
+
+    return failures == 0 ? 0 : 1;
+}
