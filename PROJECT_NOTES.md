@@ -30,6 +30,8 @@ R3WRK/
                                 talks directly to AudioDocument/EditActions
       KnobRow.h/.cpp           rotary knob strip under the transport bar
                                 (Pitch, Speed, Stretch, Start, End; extensible)
+      KnobLookAndFeel.h/.cpp   custom rotary knob painting for KnobRow (flat
+                                disc + pointer line, no value-arc; theme-aware)
       TimeRuler.h/.cpp          time ruler under the waveform; follows the
                                 waveform's view range, nice tick spacing
       Theme.h/.cpp              Palette (11 editable colours) + ThemeManager
