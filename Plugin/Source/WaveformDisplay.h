@@ -3,8 +3,8 @@
 #include "AudioDocument.h"
 
 /**
-    Draws the waveform for the document (one lane per channel), plus selection,
-    playhead and loop markers.
+    Draws the waveform for the document (one lane per channel), plus a per-lane
+    zero-amplitude line, selection, playhead and loop markers.
 
     Selection (same model as Sieve's audio editor):
       - drag across the waveform to select a range;
