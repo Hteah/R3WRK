@@ -3,6 +3,7 @@
 #include <limits>
 #include "AudioDocument.h"
 #include "Theme.h"
+#include "KnobLookAndFeel.h"
 
 /**
     A horizontal strip of small rotary knobs beneath the transport bar.
@@ -45,6 +46,7 @@ private:
 
     AudioDocument& document;
     juce::SharedResourcePointer<ThemeManager> theme;
+    KnobLookAndFeel knobLnF;
 
     juce::OwnedArray<Knob> knobs;
     Knob* startKnob = nullptr;

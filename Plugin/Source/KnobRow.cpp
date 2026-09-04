@@ -123,6 +123,8 @@ KnobRow::KnobRow(AudioDocument& doc)
 
 KnobRow::~KnobRow()
 {
+    for (auto* k : knobs)
+        k->slider.setLookAndFeel(nullptr);   // detach before knobLnF is destroyed
     theme->removeChangeListener(this);
 }
 
@@ -155,6 +157,7 @@ KnobRow::Knob& KnobRow::addKnob(const juce::String& name)
 
     k->slider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
     k->slider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 68, 14);
+    k->slider.setLookAndFeel(&knobLnF);
 
     Knob* kp = k;
     k->slider.onValueChange = [kp] { if (kp->apply) kp->apply(kp->slider.getValue()); };
