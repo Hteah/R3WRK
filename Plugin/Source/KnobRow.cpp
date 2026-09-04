@@ -41,6 +41,22 @@ KnobRow::KnobRow(R3WRKAudioProcessor& proc, AudioDocument& doc)
         k.pull  = [this] { return processor.playbackSpeed.load(); };
     }
 
+    //== Stretch (pure time-stretch, pitch kept) ==============================
+    {
+        auto& k = addKnob("Stretch");
+        k.slider.setRange(R3WRKAudioProcessor::kMinStretch, R3WRKAudioProcessor::kMaxStretch, 0.0);
+        k.slider.setSkewFactorFromMidPoint(1.0);   // fine control near 1x, room to crank to 50x
+        k.slider.setDoubleClickReturnValue(true, 1.0);
+        k.slider.textFromValueFunction = [](double v)
+        {
+            return juce::String(v, v < 10.0 ? 2 : 1) + juce::String::fromUTF8(" \xc3\x97");
+        };
+        k.slider.setValue(processor.playbackStretch.load(), juce::dontSendNotification);
+        k.slider.updateText();
+        k.apply = [this](double v) { processor.playbackStretch.store(v); };
+        k.pull  = [this] { return processor.playbackStretch.load(); };
+    }
+
     //== Start / End (selection edges) ========================================
     {
         auto& k = addKnob("Start");
@@ -123,7 +139,7 @@ KnobRow::Knob& KnobRow::addKnob(const juce::String& name)
     k->slider.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
 
     Knob* kp = k;
-    k->slider.onValueChange = [this, kp] { if (kp->apply) kp->apply(kp->slider.getValue()); };
+    k->slider.onValueChange = [kp] { if (kp->apply) kp->apply(kp->slider.getValue()); };
 
     addAndMakeVisible(k->caption);
     addAndMakeVisible(k->slider);

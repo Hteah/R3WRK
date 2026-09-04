@@ -4,8 +4,8 @@ An Edison-style pop-out audio recorder/editor, built as a JUCE plugin
 (VST3 + AU + standalone app): waveform + spectrogram views, record/play/loop,
 cut/copy/paste/trim/delete/undo, normalize/gain/fade/reverse/silence,
 RubberBand-powered time-stretch & pitch-shift, export-selection to WAV, and a
-live knob row (tape Speed + Pitch that re-pitch playback in real time; Start/End
-that drive the selection edges).
+live knob row (tape Speed, Pitch and extreme Stretch that reshape playback in
+real time; Start/End that drive the selection edges).
 
 Builds natively on macOS (VST3 + AU + Standalone); see `BUILD_ON_MACOS.md`.
 
@@ -98,23 +98,28 @@ points, else the whole clip) straight from the buffer under a try-lock. The
   up, pitch riding along exactly like tape.
 - **Pitch** — an extra ± semitone shift layered on top of the tape speed, so you
   can detune without changing the playback rate.
+- **Stretch** — pure time-stretch, pitch preserved. 1.0 = off; up to 50× for
+  "extreme stretch" (smeary by design). Skewed so 1× sits mid-travel.
 - **Start / End** — normalised (0–1) knobs on the document selection edges,
   reading out as `m:ss.mmm` and following bracket drags. Start slides the whole
   window (End moves with it, length preserved, pegs at the buffer end); End
   moves independently to change the length.
 
-Speed and Pitch are `std::atomic<double>` on the processor. When *both* are
-centred (`speed==1`, `pitch==0`) playback is a plain sample copy — zero latency,
-zero cost. As soon as either is off-centre, playback routes through a **real-time
-RubberBand stretcher** (`OptionProcessRealTime | OptionPitchHighConsistency`),
-built per `prepareToPlay`: `timeRatio = 1/speed`, `pitchScale =
-speed * 2^(pitch/12)`. The stretcher is fed doc-region samples in
-`getSamplesRequired()`-sized blocks from preallocated scratch buffers and drained
-via `available()`/`retrieve()`; it's `reset()` at the start of each play pass and
-whenever the knobs cross the bypass/engaged line. The stored audio is never
-modified — Export Selection still writes the dry clip. The red playhead tracks
-the doc read cursor, so it runs slightly ahead of what you hear by the stretcher
-latency when the knobs are engaged.
+Speed / Pitch / Stretch are `std::atomic<double>` on the processor. When *all
+three* are centred (`speed==1`, `pitch==0`, `stretch==1`) playback is a plain
+sample copy — zero latency, zero cost. As soon as any is off-centre, playback
+routes through a **real-time RubberBand stretcher** (`OptionProcessRealTime |
+OptionPitchHighConsistency`), built per `prepareToPlay`:
+`timeRatio = stretch / speed`, `pitchScale = speed * 2^(pitch/12)` (so stretch
+dilates time without touching pitch, speed is tape). The stretcher is fed
+doc-region samples in `getSamplesRequired()`-sized blocks from preallocated
+scratch buffers and drained via `available()`/`retrieve()`; it's `reset()` at the
+start of each play pass and whenever the knobs cross the bypass/engaged line, and
+the `rtFinished` flag makes sure the end-of-region final block is sent exactly
+once. The stored audio is never modified — Export Selection still writes the dry
+clip. The red playhead tracks the doc read cursor, so it runs slightly ahead of
+what you hear by the stretcher latency when the knobs are engaged (more so at
+high Stretch).
 
 ## Sample-rate handling
 
