@@ -65,8 +65,8 @@ void HeaderBar::timerCallback()
     if (readoutLabel.getText() != text)
         readoutLabel.setText(text, juce::dontSendNotification);
 
-    static bool lastDirty = false;
-    if (isDirty() != lastDirty) { lastDirty = isDirty(); repaint(); }
+    const bool dirty = isDirty();
+    if (dirty != lastDirty) { lastDirty = dirty; repaint(); }
 }
 
 void HeaderBar::paint(juce::Graphics& g)

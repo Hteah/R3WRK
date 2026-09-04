@@ -36,11 +36,12 @@ public:
     int getBufferVersion() const { return bufferVersion; }
 
     //==============================================================================
-    // Selection, in samples, half-open [selStart, selEnd)
+    // Selection, in samples, half-open [selStart, selEnd). Atomic because processBlock()
+    // (audio thread) reads it to decide the playback region while the UI edits it.
     void setSelection(int64_t start, int64_t end);
-    int64_t getSelectionStart() const { return selStart; }
-    int64_t getSelectionEnd() const { return selEnd; }
-    bool hasSelection() const { return selEnd > selStart; }
+    int64_t getSelectionStart() const { return selStart.load(std::memory_order_relaxed); }
+    int64_t getSelectionEnd() const { return selEnd.load(std::memory_order_relaxed); }
+    bool hasSelection() const { return getSelectionEnd() > getSelectionStart(); }
     void clearSelection() { setSelection(0, 0); }
 
     // returns the current selection, clamped to the buffer; if there is no
@@ -93,7 +94,8 @@ private:
     mutable juce::CriticalSection bufferLock;
     juce::AudioBuffer<float> buffer;
     double sampleRate = 44100.0;
-    int64_t selStart = 0, selEnd = 0;
+    std::atomic<int64_t> selStart { 0 };
+    std::atomic<int64_t> selEnd { 0 };
     int bufferVersion = 0;
 
     juce::AudioBuffer<float> preChangeBuffer;

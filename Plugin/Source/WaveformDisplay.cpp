@@ -1,6 +1,12 @@
 #include "WaveformDisplay.h"
 #include <cmath>
 
+namespace
+{
+    const juce::Colour kBackground { 0xff1b1e23 };
+    const juce::Colour kAccent     { 0xff5ec2ff };   // waveform fill + selection brackets
+}
+
 WaveformDisplay::WaveformDisplay(AudioDocument& doc) : document(doc)
 {
     document.changeBroadcaster.addChangeListener(this);
@@ -208,7 +214,7 @@ void WaveformDisplay::resized()
 
 void WaveformDisplay::paint(juce::Graphics& g)
 {
-    g.fillAll(juce::Colour(0xff1b1e23));
+    g.fillAll(kBackground);
 
     if (document.isEmpty())
     {
@@ -229,7 +235,7 @@ void WaveformDisplay::paint(juce::Graphics& g)
         g.drawVerticalLine((int) x, 0.0f, (float) getHeight());
     }
 
-    g.setColour(juce::Colour(0xff5ec2ff));
+    g.setColour(kAccent);
     for (auto& p : channelPaths)
         g.fillPath(p);
 
@@ -241,7 +247,7 @@ void WaveformDisplay::paint(juce::Graphics& g)
     // at top and bottom (same as Sieve's editor).
     if (document.hasSelection())
     {
-        const juce::Colour accent (0xff5ec2ff);
+        const juce::Colour accent = kAccent;
         const float h  = (float) getHeight();
         const float x0 = sampleToX(document.getSelectionStart());
         const float x1 = sampleToX(document.getSelectionEnd());
@@ -394,11 +400,20 @@ void WaveformDisplay::mouseWheelMove(const juce::MouseEvent& e, const juce::Mous
 
 void WaveformDisplay::changeListenerCallback(juce::ChangeBroadcaster*)
 {
-    if (viewEnd <= viewStart || viewEnd > document.getNumSamples())
+    // This fires on every selection/playhead change too (setSelection broadcasts), so only
+    // rebuild the (O(samples)) waveform path when the audio content or view range actually
+    // changed -- otherwise a selection drag would rescan the whole buffer every message loop.
+    const bool viewBad = viewEnd <= viewStart || viewEnd > document.getNumSamples();
+    if (viewBad)
     {
         viewStart = 0;
-        viewEnd = document.getNumSamples();
+        viewEnd = juce::jmax((int64_t) 1, document.getNumSamples());
     }
-    rebuildWaveformPath();
+
+    if (viewBad || document.getBufferVersion() != lastBufferVersion)
+    {
+        lastBufferVersion = document.getBufferVersion();
+        rebuildWaveformPath();
+    }
     repaint();
 }

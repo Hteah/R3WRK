@@ -151,7 +151,7 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     addAndMakeVisible(toolsButton);
 
     recordButton.setColour(juce::TextButton::buttonColourId, juce::Colours::darkred);
-    timeLabel.setFont(juce::Font(juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::plain));
+    timeLabel.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::plain));
     timeLabel.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
     recLabel.setJustificationType(juce::Justification::centredRight);
     recLabel.setColour(juce::Label::textColourId, juce::Colours::red);

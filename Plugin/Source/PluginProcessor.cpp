@@ -3,7 +3,8 @@
 
 namespace
 {
-    constexpr int kStateMagic = 0x45443031; // "ED01"
+    constexpr int kStateMagic = 0x45443031;  // 'ED01' - legacy tag, kept so old saved sessions still load
+    constexpr int kMaxStateChannels = 32;
 }
 
 R3WRKAudioProcessor::R3WRKAudioProcessor()
@@ -119,8 +120,8 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         return;
     }
 
-    // Neither recording nor playing back: pass the host's input straight through.
-    juce::ignoreUnused(buffer);
+    // Neither recording nor playing back: leave `buffer` untouched so the host's input
+    // passes straight through.
 }
 
 void R3WRKAudioProcessor::startRecording()
@@ -135,6 +136,9 @@ void R3WRKAudioProcessor::startRecording()
 void R3WRKAudioProcessor::stopRecording()
 {
     document.isRecording = false;
+
+    if (recordingWritePos <= 0)   // stopped before any audio was captured -- leave the document alone
+        return;
 
     juce::AudioBuffer<float> finalBuffer(recordingAccumulator.getNumChannels(), (int) recordingWritePos);
     for (int ch = 0; ch < finalBuffer.getNumChannels(); ++ch)
@@ -213,8 +217,12 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     double bpm = in.readDouble();
     int division = in.readInt();
 
-    if (numCh <= 0 || numSamples < 0)
+    if (numCh <= 0 || numCh > kMaxStateChannels || numSamples < 0 || numSamples > 0x7fffffff)
         return;
+
+    const int64_t audioBytes = numSamples * numCh * (int64_t) sizeof(float);
+    if (audioBytes > (int64_t) (in.getTotalLength() - in.getPosition()))
+        return;   // truncated / corrupt state -- don't try to read past the end
 
     juce::AudioBuffer<float> loaded(numCh, (int) numSamples);
     for (int ch = 0; ch < numCh; ++ch)

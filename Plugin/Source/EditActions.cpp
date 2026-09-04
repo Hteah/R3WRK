@@ -13,6 +13,29 @@ namespace
         return out;
     }
 
+    // Writes `region` to `file` as a 24-bit WAV, overwriting anything already there.
+    bool writeWav(const juce::File& file, const juce::AudioBuffer<float>& region, double sampleRate)
+    {
+        if (region.getNumSamples() <= 0)
+            return false;
+
+        file.deleteFile();
+        std::unique_ptr<juce::OutputStream> stream(file.createOutputStream());
+        if (stream == nullptr)
+            return false;
+
+        juce::WavAudioFormat wavFormat;
+        auto writer = wavFormat.createWriterFor(stream, juce::AudioFormatWriterOptions{}
+                                                            .withSampleRate(sampleRate)
+                                                            .withNumChannels(region.getNumChannels())
+                                                            .withBitsPerSample(24));
+        if (writer == nullptr)
+            return false;
+
+        writer->writeFromAudioSampleBuffer(region, 0, region.getNumSamples());
+        return true;
+    }
+
     // Builds a new buffer equal to: [0,start) + middle + [end,originalLength)
     juce::AudioBuffer<float> spliceReplace(const juce::AudioBuffer<float>& src, int64_t start, int64_t end,
                                             const juce::AudioBuffer<float>& middle)
@@ -211,25 +234,7 @@ bool exportSelection(const AudioDocument& doc, const juce::File& file)
     if (range.getLength() <= 0)
         return false;
 
-    auto region = extractRange(doc.getBuffer(), range.getStart(), range.getEnd());
-    if (region.getNumSamples() <= 0)
-        return false;
-
-    file.deleteFile();
-    std::unique_ptr<juce::FileOutputStream> stream(file.createOutputStream());
-    if (stream == nullptr)
-        return false;
-
-    juce::WavAudioFormat wavFormat;
-    std::unique_ptr<juce::AudioFormatWriter> writer(
-        wavFormat.createWriterFor(stream.get(), doc.getSampleRate(),
-                                  (unsigned int) region.getNumChannels(), 24, {}, 0));
-    if (writer == nullptr)
-        return false;
-
-    stream.release();   // writer owns the stream now
-    writer->writeFromAudioSampleBuffer(region, 0, region.getNumSamples());
-    return true;
+    return writeWav(file, extractRange(doc.getBuffer(), range.getStart(), range.getEnd()), doc.getSampleRate());
 }
 
 bool exportChopSlices(const AudioDocument& doc, const juce::File& destFolder, const juce::String& baseName)
@@ -242,7 +247,6 @@ bool exportChopSlices(const AudioDocument& doc, const juce::File& destFolder, co
         bounds.insert(bounds.begin(), 0);
     bounds.push_back(doc.getNumSamples());
 
-    juce::WavAudioFormat wavFormat;
     int index = 1;
     for (size_t i = 0; i + 1 < bounds.size(); ++i)
     {
@@ -251,16 +255,7 @@ bool exportChopSlices(const AudioDocument& doc, const juce::File& destFolder, co
             continue;
 
         auto file = destFolder.getChildFile(baseName + "_" + juce::String(index++).paddedLeft('0', 3) + ".wav");
-        file.deleteFile();
-        std::unique_ptr<juce::FileOutputStream> stream(file.createOutputStream());
-        if (stream == nullptr)
-            continue;
-        std::unique_ptr<juce::AudioFormatWriter> writer(
-            wavFormat.createWriterFor(stream.get(), doc.getSampleRate(), (unsigned int) slice.getNumChannels(), 24, {}, 0));
-        if (writer == nullptr)
-            continue;
-        stream.release();
-        writer->writeFromAudioSampleBuffer(slice, 0, slice.getNumSamples());
+        writeWav(file, slice, doc.getSampleRate());
     }
     return true;
 }

@@ -28,8 +28,9 @@ namespace
 
         int getSizeInUnits() override
         {
-            return (int) ((size_t) beforeBuffer.getNumSamples() * sizeof(float) * (size_t) juce::jmax(1, beforeBuffer.getNumChannels())
-                         + (size_t) afterBuffer.getNumSamples()  * sizeof(float) * (size_t) juce::jmax(1, afterBuffer.getNumChannels()));
+            const int64_t samples = (int64_t) beforeBuffer.getNumSamples() * juce::jmax(1, beforeBuffer.getNumChannels())
+                                  + (int64_t) afterBuffer.getNumSamples()  * juce::jmax(1, afterBuffer.getNumChannels());
+            return (int) juce::jmin((int64_t) 0x7fffffff, samples * (int64_t) sizeof(float));
         }
 
     private:
@@ -44,6 +45,10 @@ namespace
 AudioDocument::AudioDocument()
 {
     buffer.setSize(2, 0);
+
+    // Each undo step is a full before+after copy of the audio (snapshot model), so cap the
+    // history by memory rather than letting it grow without bound on a long clip.
+    undoManager.setMaxNumberOfStoredUnits(128 * 1024 * 1024, 24);
 }
 
 void AudioDocument::newEmptyDocument(int numChannels, double sr)
@@ -112,18 +117,19 @@ bool AudioDocument::loadFromFile(const juce::File& file, double resampleToRate)
 
 bool AudioDocument::saveToFile(const juce::File& file) const
 {
-    juce::WavAudioFormat wavFormat;
     file.deleteFile();
-    std::unique_ptr<juce::FileOutputStream> stream(file.createOutputStream());
+    std::unique_ptr<juce::OutputStream> stream(file.createOutputStream());
     if (stream == nullptr)
         return false;
 
-    std::unique_ptr<juce::AudioFormatWriter> writer(
-        wavFormat.createWriterFor(stream.get(), sampleRate, (unsigned int) buffer.getNumChannels(), 24, {}, 0));
+    juce::WavAudioFormat wavFormat;
+    auto writer = wavFormat.createWriterFor(stream, juce::AudioFormatWriterOptions{}
+                                                        .withSampleRate(sampleRate)
+                                                        .withNumChannels(buffer.getNumChannels())
+                                                        .withBitsPerSample(24));
     if (writer == nullptr)
-        return false;
+        return false;   // stream is left intact on failure; unique_ptr cleans it up
 
-    stream.release(); // writer now owns the stream
     writer->writeFromAudioSampleBuffer(buffer, 0, buffer.getNumSamples());
     return true;
 }
@@ -143,7 +149,7 @@ void AudioDocument::setSelection(int64_t start, int64_t end)
 juce::Range<int64_t> AudioDocument::getEffectiveRange() const
 {
     if (hasSelection())
-        return { selStart, selEnd };
+        return { getSelectionStart(), getSelectionEnd() };
     return { (int64_t) 0, getNumSamples() };
 }
 
@@ -167,8 +173,8 @@ void AudioDocument::beginChange()
 {
     jassert(! changeInProgress);
     preChangeBuffer.makeCopyOf(buffer);
-    preChangeSelStart = selStart;
-    preChangeSelEnd = selEnd;
+    preChangeSelStart = getSelectionStart();
+    preChangeSelEnd = getSelectionEnd();
     changeInProgress = true;
 }
 
@@ -179,7 +185,7 @@ void AudioDocument::commitChange(juce::AudioBuffer<float> newBuffer, const juce:
 
     auto action = std::make_unique<SnapshotAction>(*this,
                                                      preChangeBuffer, preChangeSelStart, preChangeSelEnd,
-                                                     std::move(newBuffer), selStart, selEnd);
+                                                     std::move(newBuffer), getSelectionStart(), getSelectionEnd());
     undoManager.perform(action.release(), actionName);
     notifyChanged();
 }

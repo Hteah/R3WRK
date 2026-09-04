@@ -31,6 +31,7 @@ private:
     juce::String sourceName;
     int savedAtVersion = 0;
     bool showingSpectrogram = false;
+    bool lastDirty = false;   // last isDirty() seen by the timer, so we only repaint on a change
 
     juce::Label nameLabel, readoutLabel;
     juce::TextButton zoomFitButton { "Fit" };
