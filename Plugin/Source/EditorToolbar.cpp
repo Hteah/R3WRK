@@ -137,82 +137,6 @@ namespace
         juce::Slider stretch, pitch;
         juce::TextButton apply { "Apply" };
     };
-
-    //==============================================================================
-    struct ChopPanel : juce::Component
-    {
-        ChopPanel(AudioDocument& doc, std::function<void()> exportSlices)
-            : document(doc), onExport(std::move(exportSlices))
-        {
-            title.setText("Chop to Grid", juce::dontSendNotification);
-            title.setFont(juce::FontOptions(14.0f, juce::Font::bold));
-
-            bpmLabel.setText("BPM", juce::dontSendNotification);
-            bpm.setRange(40.0, 240.0, 0.1);
-            bpm.setValue(document.chopBpm);
-            bpm.setSliderStyle(juce::Slider::LinearHorizontal);
-            bpm.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 22);
-            bpm.onValueChange = [this] { push(); };
-
-            divLabel.setText("Grid", juce::dontSendNotification);
-            division.addItem("1/4", 4);
-            division.addItem("1/8", 8);
-            division.addItem("1/16", 16);
-            division.addItem("1/32", 32);
-            division.setSelectedId(document.chopDivision > 0 ? document.chopDivision : 16,
-                                   juce::dontSendNotification);
-            division.onChange = [this] { push(); };
-
-            update.onClick = [this] { push(); document.recalculateChopMarkers(); document.notifyChanged(); };
-            exportBtn.onClick = [this]
-            {
-                push();
-                if (onExport) onExport();
-                dismissEnclosingCallout(*this);
-            };
-
-            addAndMakeVisible(title);
-            addAndMakeVisible(bpmLabel);
-            addAndMakeVisible(bpm);
-            addAndMakeVisible(divLabel);
-            addAndMakeVisible(division);
-            addAndMakeVisible(update);
-            addAndMakeVisible(exportBtn);
-            setSize(300, 132);
-        }
-
-        void push()
-        {
-            document.chopBpm = bpm.getValue();
-            document.chopDivision = division.getSelectedId();
-        }
-
-        void resized() override
-        {
-            auto r = getLocalBounds().reduced(10);
-            title.setBounds(r.removeFromTop(18));
-            r.removeFromTop(6);
-            auto row = r.removeFromTop(24);
-            bpmLabel.setBounds(row.removeFromLeft(40));
-            bpm.setBounds(row);
-            r.removeFromTop(6);
-            row = r.removeFromTop(24);
-            divLabel.setBounds(row.removeFromLeft(40));
-            division.setBounds(row.removeFromLeft(90));
-            r.removeFromTop(8);
-            row = r.removeFromTop(24);
-            update.setBounds(row.removeFromLeft(96));
-            row.removeFromLeft(6);
-            exportBtn.setBounds(row);
-        }
-
-        AudioDocument& document;
-        std::function<void()> onExport;
-        juce::Label title, bpmLabel, divLabel;
-        juce::Slider bpm;
-        juce::ComboBox division;
-        juce::TextButton update { "Update Grid" }, exportBtn { "Export Slices\xE2\x80\xA6" };
-    };
 }
 
 //==============================================================================
@@ -286,7 +210,7 @@ void EditorToolbar::showToolsMenu()
            idCut, idCopy, idPaste,
            idTrim, idDelete, idSilence,
            idNormalize, idAmplify, idFadeIn, idFadeOut, idReverse,
-           idStretch, idChop, idExportSel, idExport,
+           idStretch, idExportSel,
            idUndo, idRedo };
 
     const bool empty   = document.isEmpty();
@@ -324,9 +248,7 @@ void EditorToolbar::showToolsMenu()
     m.addItem(idReverse,   "Reverse",    ! empty);
     m.addSeparator();
     m.addItem(idStretch,   juce::String::fromUTF8("Stretch / Pitch\xE2\x80\xA6"),  ! empty);
-    m.addItem(idChop,      juce::String::fromUTF8("Chop to Grid\xE2\x80\xA6"),     ! empty);
     m.addItem(idExportSel, juce::String::fromUTF8("Export Selection\xE2\x80\xA6"), sel);
-    m.addItem(idExport,    juce::String::fromUTF8("Export Slices\xE2\x80\xA6"),    ! empty);
     m.addSeparator();
     m.addItem(keyed("Undo", idUndo, canUndo, cmd + "Z"));
     m.addItem(keyed("Redo", idRedo, canRedo, shift + cmd + "Z"));
@@ -350,9 +272,7 @@ void EditorToolbar::showToolsMenu()
             case idFadeOut:   EditActions::fadeOut(document); break;
             case idReverse:   EditActions::reverse(document); break;
             case idStretch:   showStretchCallout();      break;
-            case idChop:      showChopCallout();         break;
             case idExportSel: exportSelectionToFile();   break;
-            case idExport:    exportSlices();            break;
             case idUndo:      doUndo(); break;
             case idRedo:      doRedo(); break;
             default: break;
@@ -370,13 +290,6 @@ void EditorToolbar::showStretchCallout()
 {
     juce::CallOutBox::launchAsynchronously(std::make_unique<StretchPanel>(document),
                                            toolsButton.getScreenBounds(), nullptr);
-}
-
-void EditorToolbar::showChopCallout()
-{
-    juce::CallOutBox::launchAsynchronously(
-        std::make_unique<ChopPanel>(document, [this] { exportSlices(); }),
-        toolsButton.getScreenBounds(), nullptr);
 }
 
 //==============================================================================
@@ -456,21 +369,6 @@ void EditorToolbar::exportSelectionToFile()
         auto file = fc.getResult();
         if (file != juce::File())
             EditActions::exportSelection(document, file);
-    });
-}
-
-void EditorToolbar::exportSlices()
-{
-    document.recalculateChopMarkers();
-    document.notifyChanged();
-
-    fileChooser = std::make_unique<juce::FileChooser>("Choose a folder for the exported slices", juce::File());
-    auto flags = juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories;
-    fileChooser->launchAsync(flags, [this](const juce::FileChooser& fc)
-    {
-        auto folder = fc.getResult();
-        if (folder.isDirectory())
-            EditActions::exportChopSlices(document, folder, "slice");
     });
 }
 

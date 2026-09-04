@@ -10,7 +10,7 @@
         Play · Loop · time    ···    ● REC m:ss · Record · Tools ▾
 
     Everything else — file ops, clipboard, region processing, stretch/pitch,
-    chop-to-grid, undo/redo — lives in the "Tools" pop-up menu.
+    export selection, undo/redo — lives in the "Tools" pop-up menu.
     Owns the clipboard and talks to the AudioDocument / processor directly.
 */
 class EditorToolbar : public juce::Component,
@@ -45,8 +45,6 @@ private:
     void showToolsMenu();
     void showAmplifyCallout();
     void showStretchCallout();
-    void showChopCallout();
-    void exportSlices();
     void exportSelectionToFile();
 
     EdisonCloneAudioProcessor& processor;
