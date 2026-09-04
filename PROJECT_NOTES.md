@@ -1,13 +1,11 @@
 # R3WRK — project notes
 
 An Edison-style pop-out audio recorder/editor, built as a JUCE plugin
-(VST3 + AU + standalone app). Full-featured v1: waveform + spectrogram views,
-record/play/loop, cut/copy/paste/trim/delete/undo, normalize/gain/fade/reverse/
-silence, RubberBand-powered time-stretch & pitch-shift, and BPM-based
-chop-to-grid with per-slice WAV export.
+(VST3 + AU + standalone app): waveform + spectrogram views, record/play/loop,
+cut/copy/paste/trim/delete/undo, normalize/gain/fade/reverse/silence,
+RubberBand-powered time-stretch & pitch-shift, and export-selection to WAV.
 
-Compiled and passing on Linux (VST3 + Standalone); see `BUILD_ON_MACOS.md` for
-producing a native macOS VST3/AU with Xcode.
+Builds natively on macOS (VST3 + AU + Standalone); see `BUILD_ON_MACOS.md`.
 
 ## Layout
 
@@ -18,9 +16,9 @@ R3WRK/
     CMakeLists.txt
     Source/
       AudioDocument.h/.cpp     the document: buffer, selection, playhead, loop,
-                                chop markers, undo history (snapshot-based)
+                                undo history (snapshot-based)
       EditActions.h/.cpp       cut/copy/paste/trim/delete/normalize/gain/
-                                fade/reverse/silence/export-slices, all
+                                fade/reverse/silence/export-selection, all
                                 operating on AudioDocument as single undo steps
       TimeStretchEngine.h/.cpp offline time-stretch/pitch-shift via librubberband
       WaveformDisplay.h/.cpp   waveform view: draw, select, zoom, scroll
@@ -46,11 +44,10 @@ cmake --build build --target R3WRKSmokeTest
 ```
 
 It builds a sine wave in memory and exercises selection, copy/cut/paste,
-trim/delete/insert-silence, gain/normalize/fade/reverse/silence, chop-marker
-math + slice export, RubberBand time-stretch/pitch-shift at several ratios,
-the exact `replaceRangeWith` path the "Apply Stretch/Pitch" button uses, and
-a save-to-WAV / load-from-WAV round trip including resample-on-load. All of
-this passed as of the last build in this container.
+trim/delete/insert-silence, gain/normalize/fade/reverse/silence, export-selection
+to WAV, RubberBand time-stretch/pitch-shift at several ratios, the exact
+`replaceRangeWith` path the "Apply Stretch/Pitch" button uses, and a save-to-WAV /
+load-from-WAV round trip including resample-on-load.
 
 ## How editing/undo works
 
@@ -60,9 +57,11 @@ helpers, which never touch the live buffer directly), and
 `AudioDocument::commitChange(newBuffer, name)` pushes a `juce::UndoableAction`
 that swaps between the two full copies. This was the deliberate simplicity
 trade-off for a v1: it's easy to reason about and hard to get subtly wrong,
-at the cost of memory scaling with (audio length) × (undo steps kept). For
-typical Edison-style use — chopping/editing individual samples/loops rather
-than hour-long recordings — that's a fine trade.
+at the cost of memory scaling with (audio length) × (undo steps kept). The
+undo history is capped by total size (`UndoManager::setMaxNumberOfStoredUnits`),
+so it drops the oldest steps rather than growing without bound. For typical
+Edison-style use — chopping/editing individual samples/loops rather than
+hour-long recordings — that's a fine trade.
 
 ## Thread safety
 
@@ -96,9 +95,11 @@ current sample rate if they differ, so pitch/speed is correct in your DAW.
 - The spectrogram recomputes for the *whole* document on any audio-content
   change; fine for typical sample lengths, would want to be a smarter
   incremental/windowed computation for very long recordings.
-- No keyboard shortcuts yet (space to play/stop, etc.) — everything is
-  button/mouse driven.
+- Keyboard shortcuts are limited to the editor essentials (Space, ⌘Z/⌘⇧Z,
+  ⌘X/⌘C/⌘V); no user-configurable key map.
 - The time-stretch/pitch-shift preview is "commit only" (no live audition
   before applying) — you set the sliders and hit Apply.
+- Restored plugin state is not resampled to the host rate (only file loads
+  are), so loading a 44.1k session into a 48k project plays back pitched.
 - No AAX/LV2 build target configured (VST3 + AU + Standalone only), since
   those weren't asked for; JUCE supports adding them if you want them later.

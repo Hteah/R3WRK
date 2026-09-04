@@ -237,27 +237,4 @@ bool exportSelection(const AudioDocument& doc, const juce::File& file)
     return writeWav(file, extractRange(doc.getBuffer(), range.getStart(), range.getEnd()), doc.getSampleRate());
 }
 
-bool exportChopSlices(const AudioDocument& doc, const juce::File& destFolder, const juce::String& baseName)
-{
-    if (doc.getNumSamples() <= 0)
-        return false;
-
-    std::vector<int64_t> bounds = doc.chopMarkers;
-    if (bounds.empty() || bounds.front() != 0)
-        bounds.insert(bounds.begin(), 0);
-    bounds.push_back(doc.getNumSamples());
-
-    int index = 1;
-    for (size_t i = 0; i + 1 < bounds.size(); ++i)
-    {
-        auto slice = extractRange(doc.getBuffer(), bounds[i], bounds[i + 1]);
-        if (slice.getNumSamples() <= 0)
-            continue;
-
-        auto file = destFolder.getChildFile(baseName + "_" + juce::String(index++).paddedLeft('0', 3) + ".wav");
-        writeWav(file, slice, doc.getSampleRate());
-    }
-    return true;
-}
-
 } // namespace EditActions

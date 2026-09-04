@@ -62,7 +62,6 @@ void AudioDocument::newEmptyDocument(int numChannels, double sr)
     playhead = 0;
     loopStart = loopEnd = 0;
     loopEnabled = false;
-    chopMarkers.clear();
     undoManager.clearUndoHistory();
     ++bufferVersion;
     notifyChanged();
@@ -108,7 +107,6 @@ bool AudioDocument::loadFromFile(const juce::File& file, double resampleToRate)
     loopStart = 0;
     loopEnd = getNumSamples();
     loopEnabled = false;
-    chopMarkers.clear();
     undoManager.clearUndoHistory();
     ++bufferVersion;
     notifyChanged();
@@ -153,22 +151,6 @@ juce::Range<int64_t> AudioDocument::getEffectiveRange() const
     return { (int64_t) 0, getNumSamples() };
 }
 
-void AudioDocument::recalculateChopMarkers()
-{
-    chopMarkers.clear();
-    if (chopBpm <= 0.0 || chopDivision <= 0 || getNumSamples() <= 0)
-        return;
-
-    const double secondsPerBeat = 60.0 / chopBpm;
-    const double secondsPerSlice = secondsPerBeat * (4.0 / (double) chopDivision);
-    const double samplesPerSlice = secondsPerSlice * sampleRate;
-    if (samplesPerSlice < 1.0)
-        return;
-
-    for (double pos = 0.0; pos < (double) getNumSamples(); pos += samplesPerSlice)
-        chopMarkers.push_back((int64_t) pos);
-}
-
 void AudioDocument::beginChange()
 {
     jassert(! changeInProgress);
@@ -201,7 +183,6 @@ void AudioDocument::restoreSnapshot(const juce::AudioBuffer<float>& newBuffer, i
     playhead = juce::jlimit((int64_t) 0, getNumSamples(), playhead.load());
     loopStart = juce::jlimit((int64_t) 0, getNumSamples(), loopStart.load());
     loopEnd = juce::jlimit((int64_t) 0, getNumSamples(), loopEnd.load());
-    recalculateChopMarkers();
     ++bufferVersion;
     notifyChanged();
 }

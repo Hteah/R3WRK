@@ -3,7 +3,7 @@
 
 /**
     The in-memory audio buffer being edited, plus selection, playhead,
-    loop points, chop markers and undo history.
+    loop points and undo history.
 
     Editing model: edits are snapshot-based. Call beginChange() before
     mutating getBufferForWriting(), do the mutation (resizing the buffer
@@ -56,14 +56,6 @@ public:
     std::atomic<int64_t> loopStart { 0 };
     std::atomic<int64_t> loopEnd { 0 };
     std::atomic<bool> loopEnabled { false };
-
-    //==============================================================================
-    // Chop-to-grid markers (sample positions), purely a view/export aid.
-    std::vector<int64_t> chopMarkers;
-    double chopBpm = 120.0;
-    int chopDivision = 16; // e.g. 16 = 1/16 notes
-
-    void recalculateChopMarkers();
 
     //==============================================================================
     juce::UndoManager undoManager;

@@ -35,10 +35,6 @@ namespace EditActions
     void replaceRangeWith(AudioDocument& doc, juce::Range<int64_t> range, const juce::AudioBuffer<float>& newRegion,
                            const juce::String& actionName);
 
-    // Writes each region between consecutive chop markers (and the tail) to its own wav file
-    // in destFolder, named baseName_001.wav, baseName_002.wav, ...
-    bool exportChopSlices(const AudioDocument& doc, const juce::File& destFolder, const juce::String& baseName);
-
     // Writes the current effective range (the selection, or the whole clip if none) to `file`
     // as a 24-bit WAV.
     bool exportSelection(const AudioDocument& doc, const juce::File& file);

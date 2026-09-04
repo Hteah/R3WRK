@@ -156,31 +156,6 @@ int main()
         check(doc.getBuffer().getMagnitude(0, 0, 1000) == 0.0f, "silence zeroes the selection");
     }
 
-    // --- chop-to-grid + slice export ----------------------------------------
-    {
-        std::cout << "-- chop-to-grid + export --" << std::endl;
-        AudioDocument doc;
-        setDocumentContent(doc, makeSineBuffer(1, (int) sr * 2, sr, 440.0, 0.4f), sr); // 2 seconds
-        doc.chopBpm = 120.0;   // 2 beats/sec
-        doc.chopDivision = 4;  // quarter notes -> 1 marker per beat -> ~4 markers in 2s
-        doc.recalculateChopMarkers();
-        check(doc.chopMarkers.size() >= 3 && doc.chopMarkers.size() <= 5,
-              "chop markers land near the expected count (" + juce::String((int) doc.chopMarkers.size()) + ")");
-
-        auto tempDir = juce::File::getSpecialLocation(juce::File::tempDirectory)
-                           .getChildFile("r3wrk_test_slices");
-        tempDir.createDirectory();
-        for (auto& f : tempDir.findChildFiles(juce::File::findFiles, false))
-            f.deleteFile();
-
-        bool exported = EditActions::exportChopSlices(doc, tempDir, "slice");
-        auto files = tempDir.findChildFiles(juce::File::findFiles, false, "*.wav");
-        check(exported && files.size() == (int) doc.chopMarkers.size(), "exported one WAV file per chop region");
-        for (auto& f : files)
-            check(f.getSize() > 44, "slice file " + f.getFileName() + " has real audio data, not just a header");
-        tempDir.deleteRecursively();
-    }
-
     // --- export selection --------------------------------------------------
     {
         std::cout << "-- export selection --" << std::endl;

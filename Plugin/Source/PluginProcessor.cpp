@@ -3,7 +3,7 @@
 
 namespace
 {
-    constexpr int kStateMagic = 0x45443031;  // 'ED01' - legacy tag, kept so old saved sessions still load
+    constexpr int kStateMagic = 0x52335731;   // 'R3W1' - session-state format tag
     constexpr int kMaxStateChannels = 32;
 }
 
@@ -194,8 +194,6 @@ void R3WRKAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     out.writeInt64(document.loopStart.load());
     out.writeInt64(document.loopEnd.load());
     out.writeBool(document.loopEnabled.load());
-    out.writeDouble(document.chopBpm);
-    out.writeInt(document.chopDivision);
 
     auto& buf = document.getBuffer();
     for (int ch = 0; ch < buf.getNumChannels(); ++ch)
@@ -214,8 +212,6 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     int64_t lStart = in.readInt64();
     int64_t lEnd = in.readInt64();
     bool lEnabled = in.readBool();
-    double bpm = in.readDouble();
-    int division = in.readInt();
 
     if (numCh <= 0 || numCh > kMaxStateChannels || numSamples < 0 || numSamples > 0x7fffffff)
         return;
@@ -234,9 +230,6 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     document.loopStart = lStart;
     document.loopEnd = lEnd;
     document.loopEnabled = lEnabled;
-    document.chopBpm = bpm;
-    document.chopDivision = division;
-    document.recalculateChopMarkers();
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

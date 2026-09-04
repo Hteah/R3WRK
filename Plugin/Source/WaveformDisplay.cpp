@@ -226,15 +226,6 @@ void WaveformDisplay::paint(juce::Graphics& g)
     int numCh = juce::jmax(1, document.getNumChannels());
     int laneHeight = getHeight() / numCh;
 
-    g.setColour(juce::Colours::white.withAlpha(0.10f));
-    for (auto m : document.chopMarkers)
-    {
-        if (m < viewStart || m > viewEnd)
-            continue;
-        float x = sampleToX(m);
-        g.drawVerticalLine((int) x, 0.0f, (float) getHeight());
-    }
-
     g.setColour(kAccent);
     for (auto& p : channelPaths)
         g.fillPath(p);

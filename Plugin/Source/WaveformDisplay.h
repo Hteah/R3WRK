@@ -4,7 +4,7 @@
 
 /**
     Draws the waveform for the document (one lane per channel), plus selection,
-    playhead, loop markers and chop-grid lines.
+    playhead and loop markers.
 
     Selection (same model as Sieve's audio editor):
       - drag across the waveform to select a range;
