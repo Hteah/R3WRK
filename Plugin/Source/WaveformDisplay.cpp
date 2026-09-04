@@ -174,50 +174,117 @@ void WaveformDisplay::panByPixels(float dxPixels)
     repaint();
 }
 
-void WaveformDisplay::rebuildWaveformPath()
+void WaveformDisplay::rebuildPeakCache()
 {
-    channelPaths.clear();
-    const juce::ScopedLock sl(document.getLock());
-    auto& buf = document.getBuffer();
-    int numCh = buf.getNumChannels();
-    int w = getWidth();
-    int h = getHeight();
-    lastPathWidth = w;
-    lastPathHeight = h;
-    if (numCh <= 0 || buf.getNumSamples() <= 0 || w <= 0 || h <= 0)
-        return;
+    juce::AudioBuffer<float> copy;
+    {
+        const juce::ScopedLock sl(document.getLock());   // held only for the copy, not the scan
+        copy.makeCopyOf(document.getBuffer());
+        peakVersion = document.getBufferVersion();
+    }
 
-    int laneHeight = h / numCh;
-    int64_t rangeLen = juce::jmax((int64_t) 1, viewEnd - viewStart);
-    double samplesPerPixel = (double) rangeLen / (double) w;
+    const int numCh = juce::jmax(0, copy.getNumChannels());
+    const int64_t total = copy.getNumSamples();
+    peakTotalSamples = total;
+
+    const int nBins = (int) ((total + peakBinSize - 1) / peakBinSize);
+    chPeakMin.assign((size_t) numCh, std::vector<float>((size_t) juce::jmax(0, nBins), 0.0f));
+    chPeakMax.assign((size_t) numCh, std::vector<float>((size_t) juce::jmax(0, nBins), 0.0f));
 
     for (int ch = 0; ch < numCh; ++ch)
     {
-        auto* data = buf.getReadPointer(ch);
-        float laneY = (float) (ch * laneHeight);
-        float laneMid = laneY + (float) laneHeight * 0.5f;
-        float laneHalf = (float) laneHeight * 0.48f;
+        const float* d = copy.getReadPointer(ch);
+        auto& mn = chPeakMin[(size_t) ch];
+        auto& mx = chPeakMax[(size_t) ch];
+        for (int b = 0; b < nBins; ++b)
+        {
+            const int64_t s0 = (int64_t) b * peakBinSize;
+            const int64_t s1 = juce::jmin(total, s0 + peakBinSize);
+            const auto r = juce::FloatVectorOperations::findMinAndMax(d + s0, (int) (s1 - s0));
+            mn[(size_t) b] = r.getStart();
+            mx[(size_t) b] = r.getEnd();
+        }
+    }
+}
 
-        std::vector<float> mins((size_t) w), maxs((size_t) w);
+void WaveformDisplay::rebuildWaveformPath()
+{
+    channelPaths.clear();
+
+    const int w = getWidth();
+    const int h = getHeight();
+    lastPathWidth = w;
+    lastPathHeight = h;
+
+    if (peakVersion != document.getBufferVersion())
+        rebuildPeakCache();
+
+    const int numCh = (int) chPeakMin.size();
+    const int64_t total = peakTotalSamples;
+    if (numCh <= 0 || total <= 0 || w <= 0 || h <= 0)
+        return;
+
+    const int laneHeight = h / numCh;
+    const int64_t rangeLen = juce::jmax((int64_t) 1, viewEnd - viewStart);
+    const double samplesPerPixel = (double) rangeLen / (double) w;
+
+    // Deep zoom (fewer than one peak bin per pixel): copy the small visible span out from
+    // under the lock once, then read it per-sample below. rawStart is its offset in `total`.
+    juce::AudioBuffer<float> raw;
+    int64_t rawStart = 0;
+    if (samplesPerPixel < (double) peakBinSize)
+    {
+        rawStart = juce::jlimit((int64_t) 0, total, viewStart);
+        const int rawLen = (int) juce::jlimit((int64_t) 0, total - rawStart,
+                                              juce::jmax((int64_t) 1, viewEnd) - rawStart);
+        const juce::ScopedLock sl(document.getLock());
+        auto& src = document.getBuffer();
+        const int copyLen = juce::jmin(rawLen, src.getNumSamples() - (int) rawStart);
+        if (copyLen > 0)
+        {
+            raw.setSize(src.getNumChannels(), copyLen);
+            for (int ch = 0; ch < src.getNumChannels(); ++ch)
+                raw.copyFrom(ch, 0, src, ch, (int) rawStart, copyLen);
+        }
+    }
+
+    for (int ch = 0; ch < numCh; ++ch)
+    {
+        const auto& binMin = chPeakMin[(size_t) ch];
+        const auto& binMax = chPeakMax[(size_t) ch];
+        const int nBins = (int) binMin.size();
+
+        const float laneMid  = (float) (ch * laneHeight) + (float) laneHeight * 0.5f;
+        const float laneHalf = (float) laneHeight * 0.48f;
+
+        std::vector<float> mins((size_t) w, 0.0f), maxs((size_t) w, 0.0f);
         for (int x = 0; x < w; ++x)
         {
-            int64_t s0 = viewStart + (int64_t) (x * samplesPerPixel);
+            int64_t s0 = viewStart + (int64_t) (x       * samplesPerPixel);
             int64_t s1 = viewStart + (int64_t) ((x + 1) * samplesPerPixel);
-            s0 = juce::jlimit((int64_t) 0, document.getNumSamples(), s0);
-            s1 = juce::jlimit((int64_t) 0, document.getNumSamples(), s1);
+            s0 = juce::jlimit((int64_t) 0, total, s0);
+            s1 = juce::jlimit((int64_t) 0, total, s1);
             if (s1 <= s0)
-                s1 = juce::jmin(document.getNumSamples(), s0 + 1);
+                s1 = juce::jmin(total, s0 + 1);
 
             float mn = 0.0f, mx = 0.0f;
-            if (s1 > s0)
+            const int64_t r0 = s0 - rawStart, r1 = s1 - rawStart;
+            if (raw.getNumSamples() > 0 && ch < raw.getNumChannels()
+                && r0 >= 0 && r1 <= raw.getNumSamples() && r1 > r0)
             {
-                mn = 1.0f;
-                mx = -1.0f;
-                for (int64_t s = s0; s < s1; ++s)
+                const auto r = juce::FloatVectorOperations::findMinAndMax(raw.getReadPointer(ch) + r0,
+                                                                         (int) (r1 - r0));
+                mn = r.getStart();
+                mx = r.getEnd();
+            }
+            else if (nBins > 0)
+            {
+                int b0 = juce::jlimit(0, nBins - 1, (int) (s0 / peakBinSize));
+                int b1 = juce::jlimit(b0, nBins - 1, (int) ((s1 - 1) / peakBinSize));
+                for (int b = b0; b <= b1; ++b)
                 {
-                    float v = data[s];
-                    mn = juce::jmin(mn, v);
-                    mx = juce::jmax(mx, v);
+                    mn = juce::jmin(mn, binMin[(size_t) b]);
+                    mx = juce::jmax(mx, binMax[(size_t) b]);
                 }
             }
             mins[(size_t) x] = mn;

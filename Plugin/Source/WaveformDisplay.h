@@ -58,7 +58,8 @@ private:
     void timerCallback() override;
     void paintRecordingScope(juce::Graphics&);
     void beginSelectionDragExport();   // native file drag of the selection to Ableton / Finder
-    void rebuildWaveformPath();
+    void rebuildPeakCache();           // scan the buffer once per content change (holds the lock briefly)
+    void rebuildWaveformPath();        // build the display path from the cache (no lock) per view change
     void zoomBy(double factor, int64_t centerSample);
     void zoomToward(double spanFactor, float pointerX);   // wheel zoom (Sieve model)
     void panByPixels(float dxPixels);
@@ -71,6 +72,15 @@ private:
     std::vector<juce::Path> channelPaths;
     int lastBufferVersion = -1;      // rebuild the paths when the audio content changes
     int lastPathWidth = 0, lastPathHeight = 0;
+
+    // Peak cache: one min/max per `peakBinSize` source samples, per channel. Rebuilt only
+    // when the audio content changes -- so zoom/pan build the path from this with no lock,
+    // instead of scanning document.getBuffer() under getLock() (which was starving
+    // processBlock's try-lock and clicking playback when zooming in a DAW).
+    static constexpr int peakBinSize = 64;
+    std::vector<std::vector<float>> chPeakMin, chPeakMax;
+    int peakVersion = -1;
+    int64_t peakTotalSamples = 0;
 
     enum class DragKind { none, newSelection, resizeStart, resizeEnd, dragOut };
     DragKind dragKind = DragKind::none;
