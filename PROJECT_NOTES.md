@@ -25,6 +25,7 @@ R3WRK/
       TimeStretchEngine.h/.cpp offline time-stretch/pitch-shift via librubberband
       WaveformDisplay.h/.cpp   waveform view: draw, select, zoom, scroll
       SpectrogramDisplay.h/.cpp FFT spectrogram view of the whole document
+                                (built, but no UI toggle reaches it right now)
       EditorToolbar.h/.cpp     transport strip + Tools menu; owns the clipboard,
                                 talks directly to AudioDocument/EditActions
       KnobRow.h/.cpp           rotary knob strip under the transport bar
@@ -32,8 +33,9 @@ R3WRK/
       PluginProcessor.h/.cpp   audio thread: record / playback (direct or via a
                                 real-time RubberBand tape+pitch engine) / pass-
                                 through, plugin state save/load
-      PluginEditor.h/.cpp      wires HeaderBar + WaveformDisplay/SpectrogramDisplay
-                                + EditorToolbar + KnobRow together
+      PluginEditor.h/.cpp      wires HeaderBar + WaveformDisplay + EditorToolbar
+                                + KnobRow together (SpectrogramDisplay is built
+                                as a hidden child, currently unreachable)
     Tests/
       SmokeTest.cpp            headless correctness tests for the engine
                                 (no GUI/audio device needed) — see below
