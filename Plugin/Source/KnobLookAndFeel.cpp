@@ -12,10 +12,10 @@ void KnobLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int widt
     const float radius   = diameter * 0.5f;
     const float angle    = rotaryStartAngle + sliderPos * (rotaryEndAngle - rotaryStartAngle);
 
-    // Disc: near-black, tinted a touch toward the panel colour so it still reads as "dark
-    // knob" against a light theme, not just a black hole. Outline and pointer come straight
-    // from the palette so a theme swap re-colours the knobs along with everything else.
-    const juce::Colour disc    = juce::Colours::black.interpolatedWith(pal.panelBg, 0.18f);
+    // Disc: the panel colour, darkened for weight/contrast -- so it visibly tracks each
+    // theme (dark blue-grey in Midnight, dark warm brown in Amber, a muted tan in the
+    // light Paper theme) rather than staying a fixed near-black regardless of theme.
+    const juce::Colour disc    = pal.panelBg.interpolatedWith(juce::Colours::black, 0.35f);
     const juce::Colour outline = pal.text.withAlpha(0.35f);
     const juce::Colour pointer = pal.accent;
 
