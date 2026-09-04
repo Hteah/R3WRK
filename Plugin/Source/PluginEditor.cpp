@@ -26,6 +26,18 @@ EdisonCloneAudioProcessorEditor::EdisonCloneAudioProcessorEditor(EdisonCloneAudi
     };
     toolbar.onSaved = [this] { header.markSaved(); };
 
+    // A committed drag-selection / edge-resize drops the playhead at the selection start,
+    // so Play picks up from there (Sieve's editor jumps playback on selection commit).
+    waveformDisplay.onSelectionCommitted = [this]
+    {
+        auto& d = processorRef.document;
+        if (d.hasSelection())
+        {
+            d.playhead = d.getSelectionStart();
+            d.notifyChanged();
+        }
+    };
+
     setWantsKeyboardFocus(true);
     setResizable(true, true);
     setResizeLimits(680, 340, 2200, 1300);

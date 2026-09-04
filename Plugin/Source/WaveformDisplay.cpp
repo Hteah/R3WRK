@@ -200,21 +200,102 @@ void WaveformDisplay::paint(juce::Graphics& g)
     g.drawVerticalLine((int) sampleToX(document.playhead.load()), 0.0f, (float) getHeight());
 }
 
+WaveformDisplay::EdgeHit WaveformDisplay::hitEdge(float pressX, float startX, float endX, float tolerance)
+{
+    const float dStart = juce::jmax(pressX - startX, startX - pressX);
+    const float dEnd   = juce::jmax(pressX - endX,   endX - pressX);
+    if (dStart > tolerance && dEnd > tolerance)
+        return EdgeHit::newSelection;
+    return dStart <= dEnd ? EdgeHit::resizeStart : EdgeHit::resizeEnd;
+}
+
 void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
 {
-    dragStartSample = xToSample((float) e.x);
-    document.playhead = dragStartSample;
-    document.setSelection(dragStartSample, dragStartSample);
+    const int64_t f = xToSample((float) e.x);
+
+    if (document.hasSelection())
+    {
+        const float sx = sampleToX(document.getSelectionStart());
+        const float ex = sampleToX(document.getSelectionEnd());
+        switch (hitEdge((float) e.x, sx, ex, edgeTolerancePx))
+        {
+            case EdgeHit::resizeStart:
+                dragKind = DragKind::resizeStart; dragAnchor = document.getSelectionEnd();   return;
+            case EdgeHit::resizeEnd:
+                dragKind = DragKind::resizeEnd;   dragAnchor = document.getSelectionStart(); return;
+            case EdgeHit::newSelection:
+                break;
+        }
+    }
+
+    // The playhead move / selection clear waits for mouseUp, so we can tell a click from a drag.
+    dragKind = DragKind::newSelection;
+    dragAnchor = f;
 }
 
 void WaveformDisplay::mouseDrag(const juce::MouseEvent& e)
 {
-    document.setSelection(dragStartSample, xToSample((float) e.x));
+    if (dragKind == DragKind::none)
+        return;
+
+    const int64_t f  = xToSample((float) e.x);
+    const int64_t lo = juce::jmin(dragAnchor, f);
+    const int64_t hi = juce::jmax(dragAnchor, f);
+
+    if (dragKind == DragKind::newSelection)
+        document.setSelection(lo, hi);                    // end <= start reads as "no selection"
+    else
+        document.setSelection(lo, juce::jmax(hi, lo + 1));
+}
+
+void WaveformDisplay::mouseUp(const juce::MouseEvent& e)
+{
+    const DragKind kind = dragKind;
+    dragKind = DragKind::none;
+    if (kind == DragKind::none)
+        return;
+
+    const int64_t f = xToSample((float) e.x);
+
+    if (kind == DragKind::newSelection)
+    {
+        const double framesPerPixel = (double) juce::jmax((int64_t) 1, viewEnd - viewStart)
+                                    / (double) juce::jmax(1, getWidth());
+        const int64_t slop = juce::jmax((int64_t) 1, (int64_t) (3.0 * framesPerPixel));
+        int64_t moved = dragAnchor - f;
+        if (moved < 0) moved = -moved;
+        if (moved <= slop)                                // a click, not a drag
+        {
+            document.clearSelection();
+            document.playhead = f;
+            document.notifyChanged();
+            return;
+        }
+    }
+
+    if (document.hasSelection() && onSelectionCommitted)
+        onSelectionCommitted();
+}
+
+void WaveformDisplay::mouseMove(const juce::MouseEvent& e)
+{
+    bool nearEdge = false;
+    if (document.hasSelection())
+    {
+        const float sx = sampleToX(document.getSelectionStart());
+        const float ex = sampleToX(document.getSelectionEnd());
+        nearEdge = juce::jmax((float) e.x - sx, sx - (float) e.x) <= edgeTolerancePx
+                || juce::jmax((float) e.x - ex, ex - (float) e.x) <= edgeTolerancePx;
+    }
+    setMouseCursor(nearEdge ? juce::MouseCursor::LeftRightResizeCursor
+                            : juce::MouseCursor::NormalCursor);
 }
 
 void WaveformDisplay::mouseDoubleClick(const juce::MouseEvent&)
 {
     document.setSelection(0, document.getNumSamples());
+    if (onSelectionCommitted)
+        onSelectionCommitted();
 }
 
 void WaveformDisplay::mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
