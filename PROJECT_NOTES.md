@@ -29,13 +29,15 @@ R3WRK/
       EditorToolbar.h/.cpp     transport strip + Tools menu; owns the clipboard,
                                 talks directly to AudioDocument/EditActions
       KnobRow.h/.cpp           rotary knob strip under the transport bar
-                                (Pitch, Speed, Start, End; extensible)
+                                (Pitch, Speed, Stretch, Start, End; extensible)
+      TimeRuler.h/.cpp          time ruler under the waveform; follows the
+                                waveform's view range, nice tick spacing
       PluginProcessor.h/.cpp   audio thread: record / playback (direct or via a
                                 real-time RubberBand tape+pitch engine) / pass-
                                 through, plugin state save/load
-      PluginEditor.h/.cpp      wires HeaderBar + WaveformDisplay + EditorToolbar
-                                + KnobRow together (SpectrogramDisplay is built
-                                as a hidden child, currently unreachable)
+      PluginEditor.h/.cpp      wires HeaderBar + WaveformDisplay + TimeRuler +
+                                EditorToolbar + KnobRow together (SpectrogramDisplay
+                                is built as a hidden child, currently unreachable)
     Tests/
       SmokeTest.cpp            headless correctness tests for the engine
                                 (no GUI/audio device needed) — see below
