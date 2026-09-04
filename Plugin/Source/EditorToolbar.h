@@ -5,14 +5,14 @@
 #include "PluginProcessor.h"
 
 /**
-    Every button/slider the editor exposes: transport, file, edit, processing,
-    time-stretch/pitch, chop-to-grid and loop tools. Owns the clipboard and talks
-    to the AudioDocument (and the processor, for record/play transport) directly;
-    exposes a couple of callbacks for things it doesn't own (view toggle, zoom).
+    The compact toolbar: transport + file + undo + a single view toggle + zoom-fit,
+    with everything else (clipboard, region processing, stretch/pitch, chop-to-grid,
+    loop) tucked behind the "Edit" menu button. Owns the clipboard and talks to the
+    AudioDocument / processor directly.
 */
 class EditorToolbar : public juce::Component,
-                 public juce::ChangeListener,
-                 private juce::Timer
+                      public juce::ChangeListener,
+                      private juce::Timer
 {
 public:
     EditorToolbar(EdisonCloneAudioProcessor& processor, AudioDocument& document);
@@ -24,62 +24,41 @@ public:
     std::function<void()> onZoomIn, onZoomOut, onZoomFit;
     std::function<void(bool showSpectrogram)> onViewModeChanged;
 
+    // Called by the editor's keyPressed so ⌘X/C/V/Z and Space work from anywhere.
+    void doCut();
+    void doCopy();
+    void doPaste();
+    void doUndo();
+    void doRedo();
+    void toggleTransport();   // Record button: record if idle, else stop
+    void togglePlay();        // Space: play if idle, else stop
+
 private:
     void timerCallback() override;
     void updateTransportButtonText();
     void openFile();
     void saveFile();
+    void showEditMenu();
+    void showGainCallout();
+    void showStretchCallout();
+    void showChopCallout();
     void exportSlices();
-    void applyTimeStretch();
 
     EdisonCloneAudioProcessor& processor;
     AudioDocument& document;
     Clipboard clipboard;
+    bool showingSpectrogram = false;
 
-    // Row 1: transport + file + undo
-    juce::TextButton recordButton { "Record" };
-    juce::TextButton playButton   { "Play" };
-    juce::ToggleButton loopButton { "Loop" };
-    juce::TextButton openButton   { "Open..." };
-    juce::TextButton saveButton   { "Save As..." };
-    juce::TextButton undoButton   { "Undo" };
-    juce::TextButton redoButton   { "Redo" };
-    juce::TextButton waveViewButton { "Waveform" };
-    juce::TextButton specViewButton { "Spectrogram" };
-    juce::TextButton zoomInButton  { "Zoom +" };
-    juce::TextButton zoomOutButton { "Zoom -" };
-    juce::TextButton zoomFitButton { "Zoom Fit" };
-
-    // Row 2: edit + processing
-    juce::TextButton cutButton    { "Cut" };
-    juce::TextButton copyButton   { "Copy" };
-    juce::TextButton pasteButton  { "Paste" };
-    juce::TextButton trimButton   { "Trim" };
-    juce::TextButton deleteButton { "Delete" };
-    juce::TextButton normalizeButton { "Normalize" };
-    juce::TextButton fadeInButton  { "Fade In" };
-    juce::TextButton fadeOutButton { "Fade Out" };
-    juce::TextButton reverseButton { "Reverse" };
-    juce::TextButton silenceButton { "Silence" };
-    juce::Slider gainSlider;
-    juce::TextButton applyGainButton { "Apply Gain" };
-
-    // Row 3: time-stretch / pitch, chop-to-grid, loop
-    juce::Label stretchLabel { {}, "Stretch x" };
-    juce::Slider stretchSlider;
-    juce::Label pitchLabel { {}, "Pitch st" };
-    juce::Slider pitchSlider;
-    juce::TextButton applyStretchButton { "Apply Stretch/Pitch" };
-
-    juce::Label bpmLabel { {}, "BPM" };
-    juce::Slider bpmSlider;
-    juce::ComboBox divisionBox;
-    juce::TextButton recalcGridButton { "Update Grid" };
-    juce::TextButton exportSlicesButton { "Export Slices..." };
-
-    juce::TextButton setLoopStartButton { "Loop = Sel Start" };
-    juce::TextButton setLoopEndButton   { "Loop = Sel End" };
-
+    juce::TextButton recordButton  { "Record" };
+    juce::TextButton playButton    { "Play" };
+    juce::ToggleButton loopButton  { "Loop" };
+    juce::TextButton openButton    { "Open\xE2\x80\xA6" };
+    juce::TextButton saveButton    { "Save\xE2\x80\xA6" };
+    juce::TextButton undoButton    { "Undo" };
+    juce::TextButton redoButton    { "Redo" };
+    juce::TextButton viewButton    { "Spectrogram" };
+    juce::TextButton zoomFitButton { "Fit" };
+    juce::TextButton editMenuButton { "Edit \xE2\x96\xBE" };
     juce::Label statusLabel;
 
     std::unique_ptr<juce::FileChooser> fileChooser;
