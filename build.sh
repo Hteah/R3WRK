@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build EdisonClone (Standalone + VST3 + AU) on macOS. Clones JUCE if missing.
+# Build R3WRK (Standalone + VST3 + AU) on macOS. Clones JUCE if missing.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -16,9 +16,9 @@ command -v cmake >/dev/null || { echo "cmake not found — see BUILD_ON_MACOS.md
 cd Plugin
 cmake -B build -G Xcode -DCMAKE_POLICY_VERSION_MINIMUM=3.5 .
 cmake --build build --config "$CONFIG" \
-    --target EdisonCloneSmokeTest EdisonClone_Standalone EdisonClone_VST3 EdisonClone_AU
+    --target R3WRKSmokeTest R3WRK_Standalone R3WRK_VST3 R3WRK_AU
 
 echo
-echo "→ artefacts in Plugin/build/EdisonClone_artefacts/$CONFIG/"
+echo "→ artefacts in Plugin/build/R3WRK_artefacts/$CONFIG/"
 echo "→ run the engine test:"
-echo "  ./build/EdisonCloneSmokeTest_artefacts/$CONFIG/EdisonCloneSmokeTest"
+echo "  ./build/R3WRKSmokeTest_artefacts/$CONFIG/R3WRKSmokeTest"

@@ -140,7 +140,7 @@ namespace
 }
 
 //==============================================================================
-EditorToolbar::EditorToolbar(EdisonCloneAudioProcessor& proc, AudioDocument& doc)
+EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     : processor(proc), document(doc)
 {
     addAndMakeVisible(playButton);

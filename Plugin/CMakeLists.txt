@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(EdisonClone VERSION 0.1.0)
+project(R3WRK VERSION 0.1.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -22,13 +22,13 @@ if(PkgConfig_FOUND)
 endif()
 
 if(RUBBERBAND_FOUND)
-    message(STATUS "EdisonClone: using system RubberBand ${RUBBERBAND_VERSION}")
+    message(STATUS "R3WRK: using system RubberBand ${RUBBERBAND_VERSION}")
     add_library(rubberband_dep INTERFACE)
     target_include_directories(rubberband_dep INTERFACE ${RUBBERBAND_INCLUDE_DIRS})
     target_link_directories(rubberband_dep INTERFACE ${RUBBERBAND_LIBRARY_DIRS})
     target_link_libraries(rubberband_dep INTERFACE ${RUBBERBAND_LIBRARIES})
 else()
-    message(STATUS "EdisonClone: building RubberBand v3.3.0 from its single-file unit")
+    message(STATUS "R3WRK: building RubberBand v3.3.0 from its single-file unit")
     include(FetchContent)
     FetchContent_Declare(rubberband_src
         GIT_REPOSITORY https://github.com/breakfastquay/rubberband.git
@@ -48,9 +48,9 @@ else()
 endif()
 
 #===============================================================================
-juce_add_plugin(EdisonClone
+juce_add_plugin(R3WRK
     COMPANY_NAME "Heath Audio"
-    BUNDLE_ID "com.heathaudio.edisonclone"
+    BUNDLE_ID "com.heathaudio.r3wrk"
     IS_SYNTH FALSE
     NEEDS_MIDI_INPUT FALSE
     NEEDS_MIDI_OUTPUT FALSE
@@ -58,13 +58,13 @@ juce_add_plugin(EdisonClone
     EDITOR_WANTS_KEYBOARD_FOCUS TRUE
     COPY_PLUGIN_AFTER_BUILD FALSE
     PLUGIN_MANUFACTURER_CODE Heat
-    PLUGIN_CODE Edis
+    PLUGIN_CODE R3wk
     FORMATS VST3 AU Standalone
-    PRODUCT_NAME "EdisonClone")
+    PRODUCT_NAME "R3WRK")
 
-juce_generate_juce_header(EdisonClone)
+juce_generate_juce_header(R3WRK)
 
-target_sources(EdisonClone
+target_sources(R3WRK
     PRIVATE
         Source/PluginProcessor.cpp
         Source/PluginEditor.cpp
@@ -76,14 +76,14 @@ target_sources(EdisonClone
         Source/HeaderBar.cpp
         Source/EditorToolbar.cpp)
 
-target_compile_definitions(EdisonClone
+target_compile_definitions(R3WRK
     PUBLIC
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
         JUCE_VST3_CAN_REPLACE_VST2=0
         JUCE_DISPLAY_SPLASH_SCREEN=0)
 
-target_link_libraries(EdisonClone
+target_link_libraries(R3WRK
     PRIVATE
         juce::juce_audio_utils
         juce::juce_audio_processors
@@ -100,22 +100,22 @@ target_link_libraries(EdisonClone
 #===============================================================================
 # Headless smoke test for the editing engine (AudioDocument/EditActions/TimeStretch)
 # -- no GUI, no audio device, safe to run in CI or a sandboxed build.
-juce_add_console_app(EdisonCloneSmokeTest PRODUCT_NAME "EdisonCloneSmokeTest")
-juce_generate_juce_header(EdisonCloneSmokeTest)
+juce_add_console_app(R3WRKSmokeTest PRODUCT_NAME "R3WRKSmokeTest")
+juce_generate_juce_header(R3WRKSmokeTest)
 
-target_sources(EdisonCloneSmokeTest
+target_sources(R3WRKSmokeTest
     PRIVATE
         Source/AudioDocument.cpp
         Source/EditActions.cpp
         Source/TimeStretchEngine.cpp
         Tests/SmokeTest.cpp)
 
-target_compile_definitions(EdisonCloneSmokeTest
+target_compile_definitions(R3WRKSmokeTest
     PUBLIC
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0)
 
-target_link_libraries(EdisonCloneSmokeTest
+target_link_libraries(R3WRKSmokeTest
     PRIVATE
         juce::juce_core
         juce::juce_data_structures

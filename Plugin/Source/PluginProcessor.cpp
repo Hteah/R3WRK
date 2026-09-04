@@ -6,7 +6,7 @@ namespace
     constexpr int kStateMagic = 0x45443031; // "ED01"
 }
 
-EdisonCloneAudioProcessor::EdisonCloneAudioProcessor()
+R3WRKAudioProcessor::R3WRKAudioProcessor()
     : AudioProcessor(BusesProperties()
                           .withInput("Input", juce::AudioChannelSet::stereo(), true)
                           .withOutput("Output", juce::AudioChannelSet::stereo(), true))
@@ -14,20 +14,20 @@ EdisonCloneAudioProcessor::EdisonCloneAudioProcessor()
     document.newEmptyDocument(2, 44100.0);
 }
 
-EdisonCloneAudioProcessor::~EdisonCloneAudioProcessor() = default;
+R3WRKAudioProcessor::~R3WRKAudioProcessor() = default;
 
-void EdisonCloneAudioProcessor::prepareToPlay(double sampleRate, int /*samplesPerBlock*/)
+void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int /*samplesPerBlock*/)
 {
     currentSampleRate = sampleRate;
     if (document.isEmpty())
         document.setSampleRate(sampleRate);
 }
 
-void EdisonCloneAudioProcessor::releaseResources()
+void R3WRKAudioProcessor::releaseResources()
 {
 }
 
-bool EdisonCloneAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
+bool R3WRKAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
 {
     auto mono = juce::AudioChannelSet::mono();
     auto stereo = juce::AudioChannelSet::stereo();
@@ -38,7 +38,7 @@ bool EdisonCloneAudioProcessor::isBusesLayoutSupported(const BusesLayout& layout
     return in == mono || in == stereo;
 }
 
-void EdisonCloneAudioProcessor::ensureRecordingCapacity(int numChannels, int64_t additionalSamples)
+void R3WRKAudioProcessor::ensureRecordingCapacity(int numChannels, int64_t additionalSamples)
 {
     int64_t needed = recordingWritePos + additionalSamples;
     if (recordingAccumulator.getNumChannels() != numChannels || (int64_t) recordingAccumulator.getNumSamples() < needed)
@@ -51,7 +51,7 @@ void EdisonCloneAudioProcessor::ensureRecordingCapacity(int numChannels, int64_t
     }
 }
 
-void EdisonCloneAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
+void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
     juce::ScopedNoDenormals noDenormals;
     const int numSamples = buffer.getNumSamples();
@@ -123,7 +123,7 @@ void EdisonCloneAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
     juce::ignoreUnused(buffer);
 }
 
-void EdisonCloneAudioProcessor::startRecording()
+void R3WRKAudioProcessor::startRecording()
 {
     recordingWritePos = 0;
     int chans = getTotalNumInputChannels() > 0 ? getTotalNumInputChannels() : 2;
@@ -132,7 +132,7 @@ void EdisonCloneAudioProcessor::startRecording()
     document.isRecording = true;
 }
 
-void EdisonCloneAudioProcessor::stopRecording()
+void R3WRKAudioProcessor::stopRecording()
 {
     document.isRecording = false;
 
@@ -147,7 +147,7 @@ void EdisonCloneAudioProcessor::stopRecording()
     document.loopEnd = document.getNumSamples();
 }
 
-void EdisonCloneAudioProcessor::startPlayback()
+void R3WRKAudioProcessor::startPlayback()
 {
     if (document.isEmpty())
         return;
@@ -170,17 +170,17 @@ void EdisonCloneAudioProcessor::startPlayback()
     document.isPlaying = true;
 }
 
-void EdisonCloneAudioProcessor::stopPlayback()
+void R3WRKAudioProcessor::stopPlayback()
 {
     document.isPlaying = false;
 }
 
-juce::AudioProcessorEditor* EdisonCloneAudioProcessor::createEditor()
+juce::AudioProcessorEditor* R3WRKAudioProcessor::createEditor()
 {
-    return new EdisonCloneAudioProcessorEditor(*this);
+    return new R3WRKAudioProcessorEditor(*this);
 }
 
-void EdisonCloneAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
+void R3WRKAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
 {
     juce::MemoryOutputStream out(destData, false);
     out.writeInt(kStateMagic);
@@ -198,7 +198,7 @@ void EdisonCloneAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
         out.write(buf.getReadPointer(ch), (size_t) buf.getNumSamples() * sizeof(float));
 }
 
-void EdisonCloneAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
+void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     juce::MemoryInputStream in(data, (size_t) sizeInBytes, false);
     if (in.readInt() != kStateMagic)
@@ -233,5 +233,5 @@ void EdisonCloneAudioProcessor::setStateInformation(const void* data, int sizeIn
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
-    return new EdisonCloneAudioProcessor();
+    return new R3WRKAudioProcessor();
 }

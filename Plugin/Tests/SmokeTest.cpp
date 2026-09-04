@@ -52,7 +52,7 @@ namespace
 int main()
 {
     const double sr = 44100.0;
-    std::cout << "=== EdisonClone core engine smoke test ===" << std::endl;
+    std::cout << "=== R3WRK core engine smoke test ===" << std::endl;
 
     // --- selection / copy / cut / undo ---------------------------------
     {
@@ -168,7 +168,7 @@ int main()
               "chop markers land near the expected count (" + juce::String((int) doc.chopMarkers.size()) + ")");
 
         auto tempDir = juce::File::getSpecialLocation(juce::File::tempDirectory)
-                           .getChildFile("edison_clone_test_slices");
+                           .getChildFile("r3wrk_test_slices");
         tempDir.createDirectory();
         for (auto& f : tempDir.findChildFiles(juce::File::findFiles, false))
             f.deleteFile();
@@ -189,7 +189,7 @@ int main()
         doc.setSelection(10000, 25000);   // 15000 samples
 
         auto out = juce::File::getSpecialLocation(juce::File::tempDirectory)
-                       .getChildFile("edison_clone_export_selection.wav");
+                       .getChildFile("r3wrk_export_selection.wav");
         out.deleteFile();
         bool ok = EditActions::exportSelection(doc, out);
         check(ok && out.existsAsFile(), "exportSelection wrote a file");
@@ -255,7 +255,7 @@ int main()
         setDocumentContent(doc, makeSineBuffer(2, (int) sr, sr, 440.0, 0.6f), sr);
 
         auto tempFile = juce::File::getSpecialLocation(juce::File::tempDirectory)
-                            .getChildFile("edison_clone_test_roundtrip.wav");
+                            .getChildFile("r3wrk_test_roundtrip.wav");
         tempFile.deleteFile();
         bool saved = doc.saveToFile(tempFile);
         check(saved, "saveToFile wrote a file");

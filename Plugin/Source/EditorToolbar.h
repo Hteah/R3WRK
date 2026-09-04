@@ -18,7 +18,7 @@ class EditorToolbar : public juce::Component,
                       private juce::Timer
 {
 public:
-    EditorToolbar(EdisonCloneAudioProcessor& processor, AudioDocument& document);
+    EditorToolbar(R3WRKAudioProcessor& processor, AudioDocument& document);
     ~EditorToolbar() override;
 
     void resized() override;
@@ -47,7 +47,7 @@ private:
     void showStretchCallout();
     void exportSelectionToFile();
 
-    EdisonCloneAudioProcessor& processor;
+    R3WRKAudioProcessor& processor;
     AudioDocument& document;
     Clipboard clipboard;
 

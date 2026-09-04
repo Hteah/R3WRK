@@ -2,11 +2,11 @@
 #include <JuceHeader.h>
 #include "AudioDocument.h"
 
-class EdisonCloneAudioProcessor : public juce::AudioProcessor
+class R3WRKAudioProcessor : public juce::AudioProcessor
 {
 public:
-    EdisonCloneAudioProcessor();
-    ~EdisonCloneAudioProcessor() override;
+    R3WRKAudioProcessor();
+    ~R3WRKAudioProcessor() override;
 
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
@@ -49,5 +49,5 @@ private:
     int64_t recordingWritePos = 0;
     void ensureRecordingCapacity(int numChannels, int64_t additionalSamples);
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(EdisonCloneAudioProcessor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(R3WRKAudioProcessor)
 };

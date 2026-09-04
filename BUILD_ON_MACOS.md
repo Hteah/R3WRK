@@ -1,4 +1,4 @@
-# Building EdisonClone on macOS (VST3 + AU + Standalone)
+# Building R3WRK on macOS (VST3 + AU + Standalone)
 
 Confirmed building and running on macOS (Apple Silicon, Xcode 26, macOS 26 SDK)
 with **JUCE 8.0.15**. The headless engine test suite (`Plugin/Tests/SmokeTest.cpp`)
@@ -28,7 +28,7 @@ instead.
 ## 2. Get the code
 
 ```bash
-git clone <this repo> EdisonClone && cd EdisonClone
+git clone <this repo> R3WRK && cd R3WRK
 git clone --depth 1 --branch 8.0.15 https://github.com/juce-framework/JUCE.git
 ```
 
@@ -40,7 +40,7 @@ It's git-ignored.
 ```bash
 cd Plugin
 cmake -B build -G Xcode -DCMAKE_POLICY_VERSION_MINIMUM=3.5 .
-cmake --build build --config Release --target EdisonClone_Standalone EdisonClone_VST3 EdisonClone_AU
+cmake --build build --config Release --target R3WRK_Standalone R3WRK_VST3 R3WRK_AU
 ```
 
 Or run `./build.sh` from the repo root (clones JUCE if missing, then does the above).
@@ -48,25 +48,25 @@ Or run `./build.sh` from the repo root (clones JUCE if missing, then does the ab
 The headless engine test:
 
 ```bash
-cmake --build build --config Release --target EdisonCloneSmokeTest
-./build/EdisonCloneSmokeTest_artefacts/Release/EdisonCloneSmokeTest
+cmake --build build --config Release --target R3WRKSmokeTest
+./build/R3WRKSmokeTest_artefacts/Release/R3WRKSmokeTest
 ```
 
 ## 4. Where the artefacts land
 
 ```
-Plugin/build/EdisonClone_artefacts/Release/Standalone/EdisonClone.app
-Plugin/build/EdisonClone_artefacts/Release/VST3/EdisonClone.vst3
-Plugin/build/EdisonClone_artefacts/Release/AU/EdisonClone.component
+Plugin/build/R3WRK_artefacts/Release/Standalone/R3WRK.app
+Plugin/build/R3WRK_artefacts/Release/VST3/R3WRK.vst3
+Plugin/build/R3WRK_artefacts/Release/AU/R3WRK.component
 ```
 
 ## 5. Install into the plugin folders
 
 ```bash
-cd Plugin/build/EdisonClone_artefacts/Release
-codesign --force --deep -s - Standalone/EdisonClone.app VST3/EdisonClone.vst3 AU/EdisonClone.component
-cp -R VST3/EdisonClone.vst3      ~/Library/Audio/Plug-Ins/VST3/
-cp -R AU/EdisonClone.component   ~/Library/Audio/Plug-Ins/Components/
+cd Plugin/build/R3WRK_artefacts/Release
+codesign --force --deep -s - Standalone/R3WRK.app VST3/R3WRK.vst3 AU/R3WRK.component
+cp -R VST3/R3WRK.vst3      ~/Library/Audio/Plug-Ins/VST3/
+cp -R AU/R3WRK.component   ~/Library/Audio/Plug-Ins/Components/
 ```
 
 Ad-hoc signing (`-s -`) is enough for a locally-built plugin to load; no paid Apple
@@ -74,12 +74,12 @@ Developer account required. Then rescan plugins in your DAW.
 
 ## 6. What to try first
 
-1. Open **EdisonClone.app** (Standalone) — fastest way to test without a DAW.
+1. Open **R3WRK.app** (Standalone) — fastest way to test without a DAW.
 2. **Record** (mic), **Stop Rec** (same button).
 3. **Trim**, **Normalize**, **Reverse**; drag a selection, move the Stretch/Pitch
    sliders, **Apply Stretch/Pitch**.
 4. **Waveform** / **Spectrogram** toggle.
 5. Set a BPM + division, **Update Grid**, **Export Slices…**.
-6. Load `EdisonClone.vst3` / `.component` in a DAW as a track insert.
+6. Load `R3WRK.vst3` / `.component` in a DAW as a track insert.
 
 See `PROJECT_NOTES.md` for architecture and known v1 limitations.

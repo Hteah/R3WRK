@@ -1,4 +1,4 @@
-# EdisonClone — project notes
+# R3WRK — project notes
 
 An Edison-style pop-out audio recorder/editor, built as a JUCE plugin
 (VST3 + AU + standalone app). Full-featured v1: waveform + spectrogram views,
@@ -41,8 +41,8 @@ edison-clone/
 ```
 cd Plugin
 cmake -B build .
-cmake --build build --target EdisonCloneSmokeTest
-./build/EdisonCloneSmokeTest_artefacts/EdisonCloneSmokeTest    # (Release/ suffix on multi-config generators)
+cmake --build build --target R3WRKSmokeTest
+./build/R3WRKSmokeTest_artefacts/R3WRKSmokeTest    # (Release/ suffix on multi-config generators)
 ```
 
 It builds a sine wave in memory and exercises selection, copy/cut/paste,

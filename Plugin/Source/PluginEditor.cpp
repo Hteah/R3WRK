@@ -1,6 +1,6 @@
 #include "PluginEditor.h"
 
-EdisonCloneAudioProcessorEditor::EdisonCloneAudioProcessorEditor(EdisonCloneAudioProcessor& p)
+R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
     : AudioProcessorEditor(&p), processorRef(p),
       header(p.document), waveformDisplay(p.document), spectrogramDisplay(p.document),
       toolbar(p, p.document)
@@ -44,14 +44,14 @@ EdisonCloneAudioProcessorEditor::EdisonCloneAudioProcessorEditor(EdisonCloneAudi
     setSize(1000, 560);
 }
 
-EdisonCloneAudioProcessorEditor::~EdisonCloneAudioProcessorEditor() = default;
+R3WRKAudioProcessorEditor::~R3WRKAudioProcessorEditor() = default;
 
-void EdisonCloneAudioProcessorEditor::paint(juce::Graphics& g)
+void R3WRKAudioProcessorEditor::paint(juce::Graphics& g)
 {
     g.fillAll(juce::Colour(0xff14161a));
 }
 
-void EdisonCloneAudioProcessorEditor::resized()
+void R3WRKAudioProcessorEditor::resized()
 {
     auto area = getLocalBounds().reduced(8);
 
@@ -65,7 +65,7 @@ void EdisonCloneAudioProcessorEditor::resized()
     spectrogramDisplay.setBounds(area);
 }
 
-bool EdisonCloneAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
+bool R3WRKAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
 {
     using KP = juce::KeyPress;
     const auto cmd = juce::ModifierKeys::commandModifier;

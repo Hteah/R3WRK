@@ -6,18 +6,18 @@
 #include "WaveformDisplay.h"
 #include "SpectrogramDisplay.h"
 
-class EdisonCloneAudioProcessorEditor : public juce::AudioProcessorEditor
+class R3WRKAudioProcessorEditor : public juce::AudioProcessorEditor
 {
 public:
-    explicit EdisonCloneAudioProcessorEditor(EdisonCloneAudioProcessor&);
-    ~EdisonCloneAudioProcessorEditor() override;
+    explicit R3WRKAudioProcessorEditor(R3WRKAudioProcessor&);
+    ~R3WRKAudioProcessorEditor() override;
 
     void paint(juce::Graphics&) override;
     void resized() override;
     bool keyPressed(const juce::KeyPress&) override;
 
 private:
-    EdisonCloneAudioProcessor& processorRef;
+    R3WRKAudioProcessor& processorRef;
 
     HeaderBar header;
     WaveformDisplay waveformDisplay;
@@ -25,5 +25,5 @@ private:
     EditorToolbar toolbar;
     bool showingSpectrogram = false;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(EdisonCloneAudioProcessorEditor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(R3WRKAudioProcessorEditor)
 };
