@@ -12,7 +12,7 @@ producing a native macOS VST3/AU with Xcode.
 ## Layout
 
 ```
-edison-clone/
+R3WRK/
   JUCE/                    JUCE framework (cloned separately, see BUILD_ON_MACOS.md)
   Plugin/
     CMakeLists.txt
