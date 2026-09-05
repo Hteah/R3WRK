@@ -35,6 +35,16 @@ namespace
             gain.setTextValueSuffix(" dB");
             gain.setSliderStyle(juce::Slider::LinearHorizontal);
             gain.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 22);
+            // Live preview: WaveformDisplay redraws the selection at this gain as the slider
+            // moves (see AudioDocument::previewActive), reverted -- see the destructor below --
+            // whether the user clicks Apply or dismisses the panel without applying.
+            gain.onValueChange = [this]
+            {
+                document.previewActive = true;
+                document.previewGainLinear = juce::Decibels::decibelsToGain((float) gain.getValue());
+                document.previewStretchRatio = 1.0;
+                document.notifyChanged();
+            };
             apply.onClick = [this]
             {
                 EditActions::applyGainDb(document, (float) gain.getValue());
@@ -44,6 +54,12 @@ namespace
             addAndMakeVisible(gain);
             addAndMakeVisible(apply);
             setSize(280, 86);
+        }
+        ~AmplifyPanel() override
+        {
+            document.previewActive = false;
+            document.previewGainLinear = 1.0f;
+            document.notifyChanged();
         }
         void resized() override
         {
@@ -75,6 +91,16 @@ namespace
             stretch.setTextValueSuffix(" x");
             stretch.setSliderStyle(juce::Slider::LinearHorizontal);
             stretch.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 22);
+            // Live preview: WaveformDisplay redraws the selection stretched to this ratio as
+            // the slider moves (see AudioDocument::previewActive) -- pitch has no separate
+            // visual (it doesn't change the waveform's duration/shape in our preview model).
+            stretch.onValueChange = [this]
+            {
+                document.previewActive = true;
+                document.previewStretchRatio = stretch.getValue();
+                document.previewGainLinear = 1.0f;
+                document.notifyChanged();
+            };
 
             pitchLabel.setText("Pitch", juce::dontSendNotification);
             pitch.setRange(-24.0, 24.0, 0.1);
@@ -98,6 +124,12 @@ namespace
             addAndMakeVisible(hint);
             addAndMakeVisible(apply);
             setSize(330, 150);
+        }
+        ~StretchPanel() override
+        {
+            document.previewActive = false;
+            document.previewStretchRatio = 1.0;
+            document.notifyChanged();
         }
 
         void run()
@@ -376,11 +408,11 @@ void EditorToolbar::showToolsMenu()
             case idDelete:    EditActions::deleteSelection(document); break;
             case idSilence:   EditActions::silence(document);        break;
             case idNormalize: EditActions::normalize(document);      break;
-            case idAmplify:   showAmplifyCallout(); break;
+            case idAmplify:   showAmplifyCallout(toolsButton.getScreenBounds()); break;
             case idFadeIn:    EditActions::fadeIn(document);  break;
             case idFadeOut:   EditActions::fadeOut(document); break;
             case idReverse:   EditActions::reverse(document); break;
-            case idStretch:      showStretchCallout();      break;
+            case idStretch:      showStretchCallout(toolsButton.getScreenBounds()); break;
             case idExportSel:    exportSelectionToFolder(); break;
             case idOutputFolder: chooseOutputFolder();      break;
             case idTheme:        showThemeCallout();        break;
@@ -391,16 +423,39 @@ void EditorToolbar::showToolsMenu()
     });
 }
 
-void EditorToolbar::showAmplifyCallout()
+void EditorToolbar::showAmplifyCallout(juce::Rectangle<int> screenTargetArea)
 {
     juce::CallOutBox::launchAsynchronously(std::make_unique<AmplifyPanel>(document),
-                                           toolsButton.getScreenBounds(), nullptr);
+                                           screenTargetArea, nullptr);
 }
 
-void EditorToolbar::showStretchCallout()
+void EditorToolbar::showStretchCallout(juce::Rectangle<int> screenTargetArea)
 {
     juce::CallOutBox::launchAsynchronously(std::make_unique<StretchPanel>(document),
-                                           toolsButton.getScreenBounds(), nullptr);
+                                           screenTargetArea, nullptr);
+}
+
+//==============================================================================
+void EditorToolbar::showSelectionContextMenu(juce::Point<int> screenPosition)
+{
+    enum { idAmplify = 1, idReverse, idStretch };
+
+    juce::PopupMenu m;
+    m.addItem(idAmplify, juce::String::fromUTF8("Amplify\xE2\x80\xA6"));
+    m.addItem(idReverse, "Reverse");
+    m.addItem(idStretch, juce::String::fromUTF8("Stretch / Pitch\xE2\x80\xA6"));
+
+    const auto targetArea = juce::Rectangle<int>(screenPosition.x, screenPosition.y, 1, 1);
+    m.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(targetArea), [this, targetArea](int r)
+    {
+        switch (r)
+        {
+            case idAmplify: showAmplifyCallout(targetArea); break;
+            case idReverse: EditActions::reverse(document); break;
+            case idStretch: showStretchCallout(targetArea); break;
+            default: break;
+        }
+    });
 }
 
 void EditorToolbar::showThemeCallout()

@@ -42,6 +42,12 @@ public:
     void togglePlay();        // Space: play if idle, else stop
     void playFromStart();     // restarts playback at sample 0 (region-snapped, see processBlock)
 
+    // Right-click inside a selection (WaveformDisplay::onSelectionContextMenu) -> a small
+    // menu of the region-processing ops that make sense on a selection: Amplify, Reverse,
+    // Stretch/Pitch. Reverse runs immediately (same as Tools ▾); the other two open the same
+    // pop-up panels Tools ▾ uses, anchored at the click instead of the Tools button.
+    void showSelectionContextMenu(juce::Point<int> screenPosition);
+
 private:
     void timerCallback() override;
     void applyTheme();
@@ -50,8 +56,8 @@ private:
     void saveFile();
     void revertAll();
     void showToolsMenu();
-    void showAmplifyCallout();
-    void showStretchCallout();
+    void showAmplifyCallout(juce::Rectangle<int> screenTargetArea);
+    void showStretchCallout(juce::Rectangle<int> screenTargetArea);
     void showThemeCallout();
     void chooseOutputFolder();
     void exportSelectionToFolder();

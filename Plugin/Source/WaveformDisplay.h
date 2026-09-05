@@ -14,7 +14,9 @@
       - a click (no real drag) clears the selection and moves the playhead there;
       - double-click selects all;
       - drag from inside the selection body to drag the audio out as a WAV file
-        (onto an Ableton track, Finder, ...).
+        (onto an Ableton track, Finder, ...);
+      - right-click inside the selection body for a context menu
+        (Amplify/Reverse/Stretch·Pitch) -- see onSelectionContextMenu.
     Mouse wheel zooms toward the pointer (or into the selection if there is one);
     horizontal swipe / Shift+wheel pans; the header's Fit button resets the view.
 */
@@ -55,6 +57,10 @@ public:
     /// Called after a real drag-selection or an edge-resize finishes (selection already updated).
     std::function<void()> onSelectionCommitted;
 
+    /// Right-click inside the selection body (not near an edge) -- e.g. show a context menu
+    /// (Amplify/Reverse/Stretch·Pitch) at the given screen position.
+    std::function<void(juce::Point<int> screenPosition)> onSelectionContextMenu;
+
     /// Which drag a press begins, given the press x and the selection-edge x's (pixels).
     /// Pure + static so it can be unit-tested. `newSelection` when neither edge is within
     /// `tolerance`, otherwise the nearer edge.
@@ -64,6 +70,7 @@ public:
 private:
     void timerCallback() override;
     void paintRecordingScope(juce::Graphics&);
+    void paintSelectionPreview(juce::Graphics&);   // live Amplify/Stretch preview overlay, see .cpp
     void beginSelectionDragExport();   // native file drag of the selection to Ableton / Finder
     void rebuildPeakCache();           // scan the buffer once per content change (holds the lock briefly)
     void rebuildWaveformPath();        // build the display path from the cache (no lock) per view change

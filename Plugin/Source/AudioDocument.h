@@ -116,6 +116,17 @@ public:
     void notifyChanged() { changeBroadcaster.sendChangeMessage(); }
 
     //==============================================================================
+    // Live, uncommitted preview of a pending Amplify or Stretch/Pitch edit -- set while the
+    // corresponding pop-up panel's slider is being dragged (right-click a selection in
+    // WaveformDisplay, or Tools ▾), cleared when the panel closes. Message-thread only (the
+    // audio thread never reads these), so plain fields rather than atomics. EditActions and
+    // the real buffer are untouched until "Apply" -- WaveformDisplay reads these only to draw
+    // a live preview over the selection so an adjustment shows before it's committed.
+    bool previewActive = false;
+    float previewGainLinear = 1.0f;      // Amplify preview: linear gain for the selection's peaks
+    double previewStretchRatio = 1.0;    // Stretch preview: the selection's visual width multiplier
+
+    //==============================================================================
     // Internal: used by the undo action to swap buffer/selection state directly.
     void restoreSnapshot(const juce::AudioBuffer<float>& newBuffer, int64_t newSelStart, int64_t newSelEnd);
 

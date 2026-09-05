@@ -382,6 +382,103 @@ void WaveformDisplay::paintRecordingScope(juce::Graphics& g)
     g.drawText("REC  " + clock, 28, 8, 220, 18, juce::Justification::centredLeft, false);
 }
 
+// Live preview of a pending Amplify/Stretch-Pitch edit, drawn over the selection while its
+// pop-up panel's slider is being dragged (see AudioDocument::previewActive and
+// EditorToolbar's AmplifyPanel/StretchPanel). Rebuilt from a fresh raw copy of just the
+// selection's samples every repaint, rather than the whole-buffer peak cache the committed
+// waveform draws from -- selections are typically far smaller than the whole clip, so this
+// stays cheap, and gives full-resolution preview regardless of how deep the view is zoomed.
+//
+// Amplify scales the peaks in place (same pixel span as the real selection). Stretch instead
+// redraws that same audio spread across a wider or narrower span starting at the selection's
+// left edge -- a direct preview of "this audio, once stretched, would occupy this much room
+// and roughly look like this" -- with a dashed marker at the new right edge so it reads as a
+// preview, not the committed selection bound.
+void WaveformDisplay::paintSelectionPreview(juce::Graphics& g)
+{
+    if (! document.previewActive || ! document.hasSelection())
+        return;
+
+    const auto sel = document.getSelection();
+    const int64_t selLen = sel.getEnd() - sel.getStart();
+    if (selLen <= 0)
+        return;
+
+    juce::AudioBuffer<float> raw;
+    {
+        const juce::ScopedLock sl(document.getLock());
+        auto& src = document.getBuffer();
+        const int len = (int) juce::jlimit((int64_t) 0, (int64_t) src.getNumSamples() - sel.getStart(), selLen);
+        if (len <= 0)
+            return;
+        raw.setSize(src.getNumChannels(), len);
+        for (int ch = 0; ch < src.getNumChannels(); ++ch)
+            raw.copyFrom(ch, 0, src, ch, (int) sel.getStart(), len);
+    }
+    if (raw.getNumSamples() <= 0)
+        return;
+
+    const float x0 = sampleToX(sel.getStart());
+    const float normalWidth = juce::jmax(1.0f, sampleToX(sel.getEnd()) - x0);
+    const float previewWidth = juce::jmax(1.0f, normalWidth * (float) document.previewStretchRatio);
+    const int pxStart = (int) juce::jlimit(0.0f, (float) getWidth(), x0);
+    const int pxEnd   = (int) juce::jlimit(0.0f, (float) getWidth(), x0 + previewWidth);
+    const int n = pxEnd - pxStart;
+    if (n <= 0)
+        return;
+
+    const double samplesPerPixel = (double) raw.getNumSamples() / (double) previewWidth;
+    const int numCh = juce::jmax(1, document.getNumChannels());
+    const int laneHeight = getHeight() / numCh;
+    const float gain = document.previewGainLinear;
+
+    std::vector<float> mins((size_t) n), maxs((size_t) n);
+    for (int ch = 0; ch < juce::jmin(numCh, raw.getNumChannels()); ++ch)
+    {
+        const float* d = raw.getReadPointer(ch);
+        for (int i = 0; i < n; ++i)
+        {
+            const double relX = (double) (pxStart + i) - (double) x0;
+            int64_t s0 = (int64_t) (relX * samplesPerPixel);
+            int64_t s1 = (int64_t) ((relX + 1.0) * samplesPerPixel);
+            s0 = juce::jlimit((int64_t) 0, (int64_t) raw.getNumSamples(), s0);
+            s1 = juce::jlimit(s0, (int64_t) raw.getNumSamples(), s1);
+
+            float mn = 0.0f, mx = 0.0f;
+            if (s1 > s0)
+            {
+                const auto r = juce::FloatVectorOperations::findMinAndMax(d + s0, (int) (s1 - s0));
+                mn = r.getStart();
+                mx = r.getEnd();
+            }
+            mins[(size_t) i] = juce::jlimit(-2.0f, 2.0f, mn * gain);
+            maxs[(size_t) i] = juce::jlimit(-2.0f, 2.0f, mx * gain);
+        }
+
+        const float laneMid  = (float) (ch * laneHeight) + (float) laneHeight * 0.5f;
+        const float laneHalf = (float) laneHeight * 0.48f;
+
+        juce::Path p;
+        p.startNewSubPath((float) pxStart, laneMid - maxs[0] * laneHalf);
+        for (int i = 1; i < n; ++i)
+            p.lineTo((float) (pxStart + i), laneMid - maxs[(size_t) i] * laneHalf);
+        for (int i = n - 1; i >= 0; --i)
+            p.lineTo((float) (pxStart + i), laneMid - mins[(size_t) i] * laneHalf);
+        p.closeSubPath();
+
+        g.setColour(theme->palette().accent.withAlpha(0.85f));
+        g.fillPath(p);
+    }
+
+    if (std::abs(document.previewStretchRatio - 1.0) > 1.0e-6)
+    {
+        const float dashes[] = { 3.0f, 3.0f };
+        g.setColour(theme->palette().accent);
+        g.drawDashedLine(juce::Line<float>((float) pxEnd, 0.0f, (float) pxEnd, (float) getHeight()),
+                         dashes, 2, 1.5f);
+    }
+}
+
 void WaveformDisplay::paint(juce::Graphics& g)
 {
     if (document.isRecording.load(std::memory_order_relaxed))
@@ -427,6 +524,8 @@ void WaveformDisplay::paint(juce::Graphics& g)
     g.setColour(pal.gridLine);
     for (int ch = 1; ch < numCh; ++ch)
         g.drawHorizontalLine(ch * laneHeight, 0.0f, (float) getWidth());
+
+    paintSelectionPreview(g);
 
     // Selection: a wash, plus a bracket at each edge — a 2 px line with a small handle pill
     // at top and bottom (same as Sieve's editor).
@@ -476,6 +575,19 @@ WaveformDisplay::EdgeHit WaveformDisplay::hitEdge(float pressX, float startX, fl
 
 void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
 {
+    if (e.mods.isPopupMenu() && document.hasSelection())
+    {
+        const float sx = sampleToX(document.getSelectionStart());
+        const float ex = sampleToX(document.getSelectionEnd());
+        if ((float) e.x > sx + edgeTolerancePx && (float) e.x < ex - edgeTolerancePx)
+        {
+            dragKind = DragKind::none;
+            if (onSelectionContextMenu)
+                onSelectionContextMenu(e.getScreenPosition());
+            return;
+        }
+    }
+
     const int64_t f = xToSample((float) e.x);
     dragOutStarted = false;
 

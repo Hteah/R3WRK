@@ -33,6 +33,14 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
         }
     };
 
+    // Right-click inside the selection -> a small menu of region-processing ops
+    // (Amplify/Reverse/Stretch·Pitch), handled by the toolbar since it already owns those
+    // pop-up panels and EditActions calls.
+    waveformDisplay.onSelectionContextMenu = [this](juce::Point<int> screenPos)
+    {
+        toolbar.showSelectionContextMenu(screenPos);
+    };
+
     theme->addChangeListener(this);
 
     setWantsKeyboardFocus(true);

@@ -103,6 +103,45 @@ they're generated as output-time values first, which come out
 timescale-invariant for a given raw view window (worked out algebraically —
 `x = outputTime · sr · width / rangeLen`, independent of `timeScale`).
 
+## Selection context menu + live Amplify/Stretch preview
+
+Right-clicking inside a selection (`WaveformDisplay::onSelectionContextMenu`,
+fired from `mouseDown` when `e.mods.isPopupMenu()` lands inside the selection
+body) shows a small menu — Amplify…/Reverse/Stretch·Pitch… — handled by
+`EditorToolbar::showSelectionContextMenu()` since it already owns the
+`AmplifyPanel`/`StretchPanel` callouts and the `EditActions` calls Tools ▾ uses.
+Amplify/Stretch open the same panels Tools ▾ does, just anchored at the click
+point (`showAmplifyCallout()`/`showStretchCallout()` now take a
+`juce::Rectangle<int> screenTargetArea` instead of always using
+`toolsButton.getScreenBounds()`); Reverse runs immediately, same as Tools ▾.
+
+Both panels also give a **live preview** while their slider is dragged, before
+Apply — `AudioDocument` gained three plain (message-thread-only, not atomic)
+fields for this: `previewActive`, `previewGainLinear`, `previewStretchRatio`.
+`gain.onValueChange`/`stretch.onValueChange` set these and call
+`notifyChanged()` (which reaches `WaveformDisplay` via the existing
+`changeBroadcaster` listener — since it doesn't bump `bufferVersion`, that
+listener's existing logic already skips the expensive full-path rebuild and
+just repaints, so this reuses that path for free); each panel's destructor
+resets them back to identity and notifies again, so the preview clears however
+the panel closes (Apply, or dismissed by clicking away). Real edits
+(`EditActions`) are completely untouched by any of this until Apply.
+
+`WaveformDisplay::paintSelectionPreview()` draws the preview: a **fresh raw
+copy of just the selection's samples** (not the whole-buffer peak cache the
+committed waveform draws from — selections are typically far smaller than the
+whole clip, so a raw copy stays cheap and gives full-resolution preview
+regardless of zoom). Amplify scales the peaks in place, same pixel span as the
+real selection. Stretch redraws that same audio spread across a wider/narrower
+span starting at the selection's left edge — showing "this audio, once
+stretched, would occupy this much room and roughly look like this" (the actual
+semantics of what Apply will do), with a dashed line at the new right edge so
+it reads as a preview, not the committed bound. Pitch has no visual (it
+doesn't change the waveform's duration/shape here). No preview when there's no
+selection (opening Amplify/Stretch from Tools ▾ with nothing selected — which
+falls back to the whole clip — still works exactly as before, just without a
+live preview).
+
 ## Waveform peak cache
 
 `WaveformDisplay` keeps a peak cache — one min/max per 64 source samples per
