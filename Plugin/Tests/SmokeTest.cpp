@@ -5,6 +5,7 @@
 #include "../Source/AudioDocument.h"
 #include "../Source/EditActions.h"
 #include "../Source/TimeStretchEngine.h"
+#include "../Source/WaveformStretchPreview.h"
 
 namespace
 {
@@ -256,6 +257,58 @@ int main()
         const int64_t refitViewEnd = wasFullView ? juce::jmax((int64_t) 1, totalAfter) : viewEndBefore;
         check(refitViewEnd == totalAfter,
               "so the view refits to (0, totalAfter) -- the whole, now-longer document");
+    }
+
+    // --- WaveformStretchPreview: the real background stretch behind the live waveform
+    // preview (WaveformDisplay draws this instead of a rescaled view of the original once
+    // it's ready) -- exercises the actual debounce -> background thread -> RubberBand ->
+    // delivery pipeline end to end, not just the math -------------------------
+    {
+        std::cout << "-- WaveformStretchPreview (background real-stretch for the waveform) --" << std::endl;
+        AudioDocument doc;
+        setDocumentContent(doc, makeSineBuffer(2, (int) sr, sr, 440.0, 0.3f), sr);   // 1 second, stereo
+
+        WaveformStretchPreview preview(doc);
+
+        bool sawChange = false;
+        for (int i = 0; i < 5; ++i)
+            sawChange |= preview.update();
+        check(! sawChange, "identity knobs never produce a preview");
+        check(preview.getProcessedBuffer().getNumSamples() == 0, "processed buffer stays empty at identity");
+
+        // Turn the (equivalent of the) Stretch knob to 3x and wait for the debounced
+        // background job to settle and finish.
+        doc.playbackStretch = 3.0;
+        bool gotResult = false;
+        auto deadline = juce::Time::getCurrentTime() + juce::RelativeTime::seconds(10.0);
+        while (juce::Time::getCurrentTime() < deadline)
+        {
+            if (preview.update() && preview.getProcessedBuffer().getNumSamples() > 0)
+            {
+                gotResult = true;
+                break;
+            }
+            juce::Thread::sleep(20);
+        }
+        check(gotResult, "a non-identity Stretch eventually produces a real processed buffer");
+        checkNear((double) preview.getProcessedBuffer().getNumSamples(), sr * 3.0, sr * 0.1,
+                  "the processed buffer is roughly 3x as long, matching the real offline stretch");
+        check(preview.getProcessedBuffer().getNumChannels() == 2, "processed buffer kept the channel count");
+
+        // Back to identity: the preview should clear.
+        doc.playbackStretch = 1.0;
+        bool cleared = false;
+        deadline = juce::Time::getCurrentTime() + juce::RelativeTime::seconds(2.0);
+        while (juce::Time::getCurrentTime() < deadline)
+        {
+            if (preview.update())
+            {
+                cleared = preview.getProcessedBuffer().getNumSamples() == 0;
+                break;
+            }
+            juce::Thread::sleep(20);
+        }
+        check(cleared, "returning to identity clears the processed buffer");
     }
 
     // --- save / load round trip, plus resample-on-load ----------------------

@@ -171,6 +171,70 @@ waveform now fills the window edge to edge with real detail (ruler reading
 0:00–~1.9 s, matching 8 s × 0.25 exactly) where it previously left most of the
 width blank.
 
+## Live real-stretch waveform preview (`WaveformStretchPreview`)
+
+While explaining the visual-time-stretch trick above, the user asked the
+natural follow-up: doesn't stretching change the waveform *shape*? — it still
+looked the same, just wider. Correct — everything above is a *rescale* of the
+stored audio's peaks, not a rendering of what a real time-stretch actually
+does to a signal (transients smear/soften at extreme ratios; the true output
+isn't just the same shape spread over more pixels). Asked whether to make the
+live KnobRow preview show the *actual* processed shape instead; yes.
+
+`Source/WaveformStretchPreview.{h,cpp}` (new, `WaveformDisplay` owns one):
+while Speed/Pitch/Stretch are non-identity, runs the **same offline RubberBand
+pass the destructive Stretch/Pitch tool uses** (`TimeStretchEngine::process`
+— not a separate/cheaper algorithm) over the *whole* document, on a
+background `juce::Thread`, and delivers the result back for
+`rebuildWaveformPath()` to draw instead of the rescaled original. Key pieces:
+
+- **Debounced** (`debounceMs = 250`): a knob has to sit still before a
+  recompute starts, so a drag doesn't launch a RubberBand pass on every pixel
+  of motion. `update()` (called from `WaveformDisplay`'s existing 30 Hz timer,
+  alongside the existing timeScale/bufferVersion polling — KnobRow writes its
+  atomics directly with no change broadcast, so this poll is the only place a
+  knob move is ever noticed at all) tracks when the knobs last changed and
+  only signals the worker once they've been still for the debounce window.
+- **Background thread**, not a one-shot job: a `juce::WaitableEvent`-driven
+  `juce::Thread` that wakes on a signal, claims whatever request is current,
+  runs the (blocking, can take real time on a long file at an extreme ratio)
+  offline stretch, and stores the result for the message thread to pick up
+  next `update()`. No attempt to interrupt a pass already in flight if a newer
+  request supersedes it mid-computation — `TimeStretchEngine::process` has no
+  cancellation hook to thread through, so a superseded result is just left
+  undelivered and the worker immediately starts on the newest request once it
+  loops back round instead.
+- **Same time-ratio / pitch-scale mapping the real-time playback engine uses**
+  (`renderPlaybackStretched`): `timeRatio = stretch/speed`, and since the
+  offline engine's `pitchSemitones` parameter is semitones while the
+  real-time engine's is a pitch-scale ratio, `semitones = 12·log2(speed) +
+  pitch` converts between them — so the preview matches what you'll actually
+  hear, not merely something in the same direction.
+- `WaveformDisplay::rebuildWaveformPath()` change is small: a raw sample
+  position `s` (still computed exactly as before) maps to processed-buffer
+  index `s * timeScale` when a preview is available (same factor that already
+  rescales the view span itself, see `effectiveSpanFor()` above) and the peaks
+  are read directly from the processed buffer instead of the raw
+  peak-cache/deep-zoom-copy path — `xToSample()`/`sampleToX()` (selection,
+  playhead, loop) are completely untouched, since those are raw-sample
+  concepts independent of which buffer supplies the drawn shape.
+- Verified end-to-end with a real regression test (`SmokeTest.cpp`,
+  `WaveformStretchPreview` now also linked into the headless `R3WRKSmokeTest`
+  target — it's pure `juce_core`/`juce_events` logic, no GUI dependency)
+  exercising the actual debounce → background thread → RubberBand → delivery
+  pipeline, not just the math: identity knobs never produce a preview; a real
+  Stretch=3x eventually delivers a processed buffer ~3x as long with the
+  channel count preserved; returning to identity clears it again.
+
+Known limitation, accepted for v1: the destructor blocks (`stopThread(10000)`)
+waiting for an in-flight RubberBand pass to finish rather than force-killing
+it, since there's no cancellation hook — a real risk only for a very long
+clip at an extreme ratio outliving the editor being closed, which isn't the
+expected use case for a sample editor. No separate peak cache for the
+processed buffer either (unlike the raw path) — it's rebuilt from scratch on
+every settle, so it's always a direct scan; fine for typical clip lengths,
+would want revisiting for very long recordings at extreme ratios.
+
 ## Selection context menu + live Amplify/Stretch preview
 
 Right-clicking inside a selection (`WaveformDisplay::onSelectionContextMenu`,

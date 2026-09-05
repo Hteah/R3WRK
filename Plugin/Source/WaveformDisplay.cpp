@@ -74,7 +74,11 @@ void WaveformDisplay::timerCallback()
     const int64_t maxSpan = maxViewSpan();
     const bool viewBad = viewEnd <= viewStart || viewEnd > maxSpan || viewStart >= juce::jmax((int64_t) 1, maxSpan);
 
-    if (contentChanged || timeScaleChanged || viewBad
+    // A freshly (or no longer) available real-stretch preview also means the drawn shape is
+    // stale -- see rebuildWaveformPath() for how it's used.
+    const bool previewChanged = stretchPreview.update();
+
+    if (contentChanged || timeScaleChanged || viewBad || previewChanged
         || getWidth() != lastPathWidth || getHeight() != lastPathHeight)
     {
         if (viewBad)   // refits above already handled the "was showing everything" cases
@@ -307,15 +311,24 @@ void WaveformDisplay::rebuildWaveformPath()
     const int64_t rangeLen = juce::jmax((int64_t) 1, viewEnd - viewStart);
     // Raw samples per pixel, folding in the visual time-stretch: at getTimeScale() > 1 the
     // waveform is drawn "spread out" (fewer raw samples per pixel), at < 1 "squeezed in".
-    const double samplesPerPixel = (double) rangeLen / (double) w
-                                  / juce::jmax(0.0001, document.getTimeScale());
+    const double timeScale = juce::jmax(0.0001, document.getTimeScale());
+    const double samplesPerPixel = (double) rangeLen / (double) w / timeScale;
+
+    // While Speed/Pitch/Stretch are non-identity and settled, draw the *real* processed
+    // shape instead of the stored audio rescaled -- see WaveformStretchPreview. Its buffer
+    // is the actual RubberBand output for the whole document at the current knob position, so
+    // a raw sample position s maps to preview-buffer index s*timeScale (the same factor
+    // rescales the view span itself, see effectiveSpanFor()/maxViewSpan() above).
+    const auto& preview = stretchPreview.getProcessedBuffer();
+    const bool usePreview = preview.getNumSamples() > 0 && preview.getNumChannels() > 0;
 
     // Deep zoom (fewer than one peak bin per pixel): copy just the actually-visible span
     // (w * samplesPerPixel raw samples -- bounded even at extreme Stretch, unlike the full
     // [viewStart,viewEnd) range) out from under the lock once, then read it per-sample below.
+    // Not needed at all when drawing from the preview buffer instead.
     juce::AudioBuffer<float> raw;
     int64_t rawStart = 0;
-    if (samplesPerPixel < (double) peakBinSize)
+    if (! usePreview && samplesPerPixel < (double) peakBinSize)
     {
         rawStart = juce::jlimit((int64_t) 0, total, viewStart);
         const int64_t visibleSamples = (int64_t) (samplesPerPixel * (double) w) + 2;
@@ -351,23 +364,39 @@ void WaveformDisplay::rebuildWaveformPath()
                 s1 = juce::jmin(total, s0 + 1);
 
             float mn = 0.0f, mx = 0.0f;
-            const int64_t r0 = s0 - rawStart, r1 = s1 - rawStart;
-            if (raw.getNumSamples() > 0 && ch < raw.getNumChannels()
-                && r0 >= 0 && r1 <= raw.getNumSamples() && r1 > r0)
+            if (usePreview && ch < preview.getNumChannels())
             {
-                const auto r = juce::FloatVectorOperations::findMinAndMax(raw.getReadPointer(ch) + r0,
-                                                                         (int) (r1 - r0));
-                mn = r.getStart();
-                mx = r.getEnd();
-            }
-            else if (nBins > 0)
-            {
-                int b0 = juce::jlimit(0, nBins - 1, (int) (s0 / peakBinSize));
-                int b1 = juce::jlimit(b0, nBins - 1, (int) ((s1 - 1) / peakBinSize));
-                for (int b = b0; b <= b1; ++b)
+                const int64_t previewLen = preview.getNumSamples();
+                int64_t p0 = juce::jlimit((int64_t) 0, previewLen, (int64_t) ((double) s0 * timeScale));
+                int64_t p1 = juce::jlimit(p0, previewLen, (int64_t) ((double) s1 * timeScale));
+                if (p1 > p0)
                 {
-                    mn = juce::jmin(mn, binMin[(size_t) b]);
-                    mx = juce::jmax(mx, binMax[(size_t) b]);
+                    const auto r = juce::FloatVectorOperations::findMinAndMax(preview.getReadPointer(ch) + p0,
+                                                                             (int) (p1 - p0));
+                    mn = r.getStart();
+                    mx = r.getEnd();
+                }
+            }
+            else
+            {
+                const int64_t r0 = s0 - rawStart, r1 = s1 - rawStart;
+                if (raw.getNumSamples() > 0 && ch < raw.getNumChannels()
+                    && r0 >= 0 && r1 <= raw.getNumSamples() && r1 > r0)
+                {
+                    const auto r = juce::FloatVectorOperations::findMinAndMax(raw.getReadPointer(ch) + r0,
+                                                                             (int) (r1 - r0));
+                    mn = r.getStart();
+                    mx = r.getEnd();
+                }
+                else if (nBins > 0)
+                {
+                    int b0 = juce::jlimit(0, nBins - 1, (int) (s0 / peakBinSize));
+                    int b1 = juce::jlimit(b0, nBins - 1, (int) ((s1 - 1) / peakBinSize));
+                    for (int b = b0; b <= b1; ++b)
+                    {
+                        mn = juce::jmin(mn, binMin[(size_t) b]);
+                        mx = juce::jmax(mx, binMax[(size_t) b]);
+                    }
                 }
             }
             mins[(size_t) x] = mn;

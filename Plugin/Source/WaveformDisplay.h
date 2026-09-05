@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "AudioDocument.h"
 #include "Theme.h"
+#include "WaveformStretchPreview.h"
 
 /**
     Draws the waveform for the document (one lane per channel), plus a per-lane
@@ -24,6 +25,12 @@
     end on macOS twice over (see the comment in PluginEditor::keyPressed). The view also
     auto-refits after an edit that changes the document's length while showing the whole
     thing (see refitViewIfContentChanged()).
+
+    While Speed/Pitch/Stretch are non-identity, the drawn waveform *shape* comes from a real
+    offline stretch computed in the background (see WaveformStretchPreview / stretchPreview)
+    rather than the stored audio simply rescaled -- so it actually shows how the audio's
+    detail reshapes at the current knob settings (transients smear at extreme ratios, etc.),
+    not just how long it'll be.
 */
 class WaveformDisplay : public juce::Component,
                          public juce::ChangeListener,
@@ -107,6 +114,8 @@ private:
     std::vector<std::vector<float>> chPeakMin, chPeakMax;
     int peakVersion = -1;
     int64_t peakTotalSamples = 0;
+
+    WaveformStretchPreview stretchPreview { document };   // background real-stretch preview
 
     enum class DragKind { none, newSelection, resizeStart, resizeEnd, dragOut };
     DragKind dragKind = DragKind::none;
