@@ -162,7 +162,17 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     recordButton.setTooltip("Record");
 
     for (auto* b : { &playFromStartButton, &playButton, &loopButton, &recordButton, &toolsButton })
+    {
         b->setLookAndFeel(&toolbarLnF);
+
+        // A mouse click leaves keyboard focus sitting on whichever button was clicked, and on
+        // macOS (with Full Keyboard Access on) a focused button's own accessibility "press"
+        // action fires again on Space -- so e.g. clicking Loop, then hitting Space to
+        // start/stop playback, would re-toggle Loop instead of reaching PluginEditor's Space
+        // handler. These are a transport strip, not a tab-navigable form, so keep keyboard
+        // focus off them entirely and let Space always mean "toggle play".
+        b->setWantsKeyboardFocus(false);
+    }
 
     recordButton.onClick        = [this] { toggleTransport(); };
     playButton.onClick          = [this] { togglePlay(); };

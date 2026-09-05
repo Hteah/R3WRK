@@ -291,6 +291,18 @@ snap then lands it at the start of whatever's actually playing -- the
 selection if there is one, else the loop range, else sample 0 -- with
 no extra region-lookup logic duplicated in the toolbar.
 
+All five toolbar buttons (`playFromStartButton`/`playButton`/`loopButton`/
+`recordButton`/`toolsButton`) call `setWantsKeyboardFocus(false)`. A mouse
+click always leaves keyboard focus sitting on whichever button was
+clicked, and on macOS a focused button's own "press" accessibility action
+fires again on Space (Full Keyboard Access) -- so clicking, say, Loop and
+then hitting Space to toggle playback would re-toggle Loop instead of
+reaching `PluginEditor::keyPressed`'s Space handler. This is a transport
+strip, not a tab-navigable form, so keeping these off the focus chain
+lets a click's focus grab bubble straight up to `PluginEditor` (which
+does want keyboard focus) instead, and Space reliably means "toggle
+play" no matter what was last clicked.
+
 ## Theming
 
 `Source/Theme.{h,cpp}` — `Palette` is 11 `juce::Colour`s (window/panel bg,
