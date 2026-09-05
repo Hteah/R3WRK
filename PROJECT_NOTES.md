@@ -142,6 +142,18 @@ selection (opening Amplify/Stretch from Tools ▾ with nothing selected — whic
 falls back to the whole clip — still works exactly as before, just without a
 live preview).
 
+**Bug found while testing this**: after stretching a selection, the *whole*
+waveform looked stretched, and a freshly loaded file did too. Not this
+feature's fault — `AudioDocument::loadFromFile()`/`newEmptyDocument()` never
+reset the **KnobRow's** Speed/Pitch/Stretch knobs (a separate, pre-existing
+feature — see "Visual time-stretch" above — that live-reshapes the *entire*
+waveform's playback/display via `getTimeScale()`), so whatever position they
+were left at from a previous file silently carried over into the next one.
+Both functions now reset `playbackSpeed`/`playbackPitch`/`playbackStretch` to
+identity (and the preview fields, for good hygiene) alongside the
+selection/playhead/loop reset they already did — the KnobRow's own sliders
+pick this up automatically via their existing 15 Hz `pull()` poll.
+
 ## Waveform peak cache
 
 `WaveformDisplay` keeps a peak cache — one min/max per 64 source samples per
@@ -429,9 +441,12 @@ current sample rate if they differ, so pitch/speed is correct in your DAW.
   incremental/windowed computation for very long recordings.
 - Keyboard shortcuts are limited to the editor essentials (Space, ⌘Z/⌘⇧Z,
   ⌘X/⌘C/⌘V); no user-configurable key map.
-- The offline Stretch/Pitch edit (Tools menu) is "commit only" — no live
-  audition before Apply. The knob-row Speed/Pitch *are* live but non-destructive
-  (playback only); there's no "bake the knob settings into the clip" action yet.
+- The offline Stretch/Pitch edit (Tools menu / selection right-click) commits
+  audio only on Apply — the slider drag previews *visually* (see "Selection
+  context menu + live Amplify/Stretch preview" above) but there's no live
+  *audition* (hearing it) before Apply. The knob-row Speed/Pitch/Stretch are
+  live but non-destructive (playback + visual only); there's no "bake the knob
+  settings into the clip" action yet.
 - Restored plugin state is not resampled to the host rate (only file loads
   are), so loading a 44.1k session into a 48k project plays back pitched.
 - The playhead runs ahead of the audible output by the real-time RubberBand

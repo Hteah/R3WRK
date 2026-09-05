@@ -67,6 +67,13 @@ void AudioDocument::newEmptyDocument(int numChannels, double sr)
     playhead = 0;
     loopStart = loopEnd = 0;
     loopEnabled = false;
+    // A fresh document starts clean -- the Speed/Pitch/Stretch knobs and any Amplify/Stretch
+    // preview are properties of the session with the *previous* audio, not this new one.
+    // (Previously left as-is, so a KnobRow Stretch/Speed/Pitch set on one file silently
+    // carried over -- visually and audibly -- into the next file loaded into the same
+    // instance.)
+    playbackSpeed = 1.0; playbackPitch = 0.0; playbackStretch = 1.0;
+    previewActive = false; previewGainLinear = 1.0f; previewStretchRatio = 1.0;
     undoManager.clearUndoHistory();
     ++bufferVersion;
     notifyChanged();
@@ -112,6 +119,8 @@ bool AudioDocument::loadFromFile(const juce::File& file, double resampleToRate)
     loopStart = 0;
     loopEnd = getNumSamples();
     loopEnabled = false;
+    playbackSpeed = 1.0; playbackPitch = 0.0; playbackStretch = 1.0;   // see newEmptyDocument()
+    previewActive = false; previewGainLinear = 1.0f; previewStretchRatio = 1.0;
     undoManager.clearUndoHistory();
     ++bufferVersion;
     notifyChanged();
