@@ -10,7 +10,7 @@
 /**
     A single control strip below the waveform:
 
-        ⏮ Play · Loop · Scrub · time    ···    ● REC m:ss · Record · Tools
+        ⏮ Play · Loop · Record · Tools · Scrub    ···    time
 
     Everything else — file ops, clipboard, region processing, stretch/pitch,
     export selection, undo/redo — lives in the "Tools" pop-up menu.

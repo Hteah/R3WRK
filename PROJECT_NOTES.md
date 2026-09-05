@@ -900,6 +900,20 @@ stretched across, so doubling-plus it means the same physical drag now lands ear
 along that curve everywhere, not just at the top end. Smoke test passes; all four targets build
 clean.
 
+**Moved to the end of the row, reshaped to a rectangle.** User: "I'd like the button for
+scrubbing moved to the last on the right and I would like you to make it a rectangle not a
+circle, so it can look like the image I gave you." Reordered `EditorToolbar::resized()`'s
+`FlexBox` items: Scrub now comes after Tools (the last item before the flexible gap that pins
+`timeLabel` to the far right), instead of sitting between Loop and Record. Shape needed no
+`R3WRKLookAndFeel` change at all: `drawButtonBackground`'s pill formula is already `radius =
+height/2` on whatever bounds the button has, which draws a true circle only because every other
+icon button happens to be square (28×28) -- giving Scrub a wider `FlexItem` width (28 → 46, same
+height as the rest) makes that identical formula draw a stadium/rounded-rectangle shape on its
+own, matching the reference image's cassette-body proportions. `drawScrubIcon` needed no changes
+either -- its margins are already computed from height alone, so the wider bounds just gives the
+cassette body a wider, more authentic aspect ratio than the cramped square version. Smoke test
+passes; all four targets build clean.
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).
