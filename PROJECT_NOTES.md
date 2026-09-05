@@ -147,6 +147,30 @@ itself changes (not just when `bufferVersion` does), using `lastTimeScale`
 (already tracked, previously only used to know a rebuild was needed) alongside
 the *old* `maxViewSpan()` for the comparison.
 
+**Follow-up: made it symmetric.** The fix above only *widened* the span for
+`timeScale > 1` (`effectiveSpanFor` floored the multiplier at `1.0`), so
+`timeScale < 1` (speeding up) kept the older, merely-not-broken behaviour:
+a "fully zoomed out" view of `[0, rawTotal)` renders all of `rawTotal` well
+before reaching the right edge, leaving the rest of the component's width as
+dead, empty space — not wrong, exactly, but not what the user wanted either
+("make it do the same thing when speeding up... the timeline fits the
+waveform window"). Dropping that floor makes `effectiveSpanFor` symmetric:
+`rawTotal * timeScale` in *both* directions. At `timeScale < 1` this actually
+*shrinks* the span below `rawTotal` -- which sounds like it should lose
+content, but doesn't: `samplesPerPixel = rangeLen/width/timeScale` with
+`rangeLen = rawTotal*timeScale` simplifies to exactly `rawTotal/width`
+regardless of `timeScale`, so the last pixel's cursor lands exactly on
+`rawTotal` either way -- the whole raw buffer, no more, no less, every time.
+One side effect, intentional given the ask: the zoom-out clamps (`zoomToward`,
+`panByPixels`) now use this as a **hard** cap in both directions, so it's no
+longer possible to manually zoom out *past* "exactly fits" to see blank space
+on purpose -- consistent with "the timeline [always] fits the waveform
+window" rather than that being merely the default. Verified against a real
+restored session (persisted Stretch=0.25×, an 8 s file) via screenshot: the
+waveform now fills the window edge to edge with real detail (ruler reading
+0:00–~1.9 s, matching 8 s × 0.25 exactly) where it previously left most of the
+width blank.
+
 ## Selection context menu + live Amplify/Stretch preview
 
 Right-clicking inside a selection (`WaveformDisplay::onSelectionContextMenu`,

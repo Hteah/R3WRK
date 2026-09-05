@@ -93,7 +93,10 @@ void WaveformDisplay::timerCallback()
 // width: at getTimeScale() > 1 (stretched longer), fewer of them do, so the same raw span
 // is spread across more horizontal space than the viewport shows -- visually "zoomed in",
 // exactly like a slowed-down sample looking longer on a hardware sampler. At < 1 (sped up)
-// more of them fit, leaving blank space -- the sample looks shorter.
+// more of them fit, leaving blank space -- the sample looks shorter. (That's the raw
+// mechanism for *any* view span; see effectiveSpanFor() below for the specific span that
+// makes the "zoomed all the way out" view show the whole raw buffer with neither blank
+// space nor unreachable content, whatever timeScale currently is.)
 int64_t WaveformDisplay::xToSample(float x) const
 {
     const int64_t rangeLen = juce::jmax((int64_t) 1, viewEnd - viewStart);
@@ -111,20 +114,22 @@ float WaveformDisplay::sampleToX(int64_t sample) const
     return (float) ((double) (sample - viewStart) / samplesPerPixel);
 }
 
-// The largest view span ("zoomed all the way out") worth allowing. At getTimeScale() <= 1
-// this is just the raw sample count, same as always. At > 1 it has to be *wider* than the
-// raw count: rebuildWaveformPath()/xToSample() divide samples-per-pixel by timeScale, so a
-// view of exactly [0, rawTotal) only actually *renders* [0, rawTotal/timeScale) -- the render
-// loop reaches the component's fixed pixel width well before it has consumed all of
-// rawTotal's samples, silently leaving the rest completely unreachable no matter how far out
-// you zoom. Widening the span to rawTotal*timeScale fixes that: the far end past the real
-// audio renders as blank space (the render loop already clamps s0/s1 to the real sample
-// count, same as the already-correct getTimeScale() < 1 case, which already shows blank
-// space at the *sped-up* end) rather than the rest of the audio just never being drawn.
+// The view span ("zoomed all the way out") that makes the raw audio exactly fill the
+// component's width, however Speed/Pitch/Stretch currently have it visually reshaped --
+// rawTotal*timeScale. rebuildWaveformPath()/xToSample() divide samples-per-pixel by
+// timeScale, so with rangeLen = rawTotal*timeScale, samplesPerPixel works out to exactly
+// rawTotal/width regardless of timeScale -- the last pixel's cursor lands exactly on
+// rawTotal, so the *entire* raw buffer renders edge to edge, neither with unreachable
+// content left over past the last pixel (timeScale > 1: a plain rawTotal span would only
+// render the first rawTotal/timeScale of it, the rest silently never drawn no matter how far
+// out you "zoom") nor with dead blank space left over before it (timeScale < 1: a plain
+// rawTotal span finishes rendering all of it partway across, wasting the rest of the width).
+// The zoom/pan clamps below all treat this as the hard "zoomed all the way out" limit in
+// both directions, same as they'd treat rawTotal itself at timeScale == 1.
 int64_t WaveformDisplay::effectiveSpanFor(int64_t rawTotal, double timeScale) const
 {
     timeScale = juce::jmax(0.0001, timeScale);
-    return (int64_t) ((double) rawTotal * juce::jmax(1.0, timeScale));
+    return juce::jmax((int64_t) 1, (int64_t) ((double) rawTotal * timeScale));
 }
 
 int64_t WaveformDisplay::maxViewSpan() const
