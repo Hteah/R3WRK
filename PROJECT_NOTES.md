@@ -154,6 +154,23 @@ identity (and the preview fields, for good hygiene) alongside the
 selection/playhead/loop reset they already did — the KnobRow's own sliders
 pick this up automatically via their existing 15 Hz `pull()` poll.
 
+**Second bug found while testing this**: after an *extreme* Stretch, the view
+was left showing only what used to be the whole file — the new, much longer
+document was there, just off the right edge, with no obvious way back to the
+full picture short of a lot of manual zoom-out. `viewStart`/`viewEnd` are
+never touched by a length-changing edit on their own (reasonably — a user
+zoomed into a sub-region editing carefully shouldn't get yanked out to full
+view by an unrelated edit), so a `zoomToFit()`-equivalent had to be triggered
+specifically for "the view *was* showing everything." `WaveformDisplay` gained
+`lastKnownTotal` (the sample count as of `lastBufferVersion`) and
+`refitViewIfContentChanged()`: whenever the buffer version changes, if the
+view was at/covering `[0, lastKnownTotal)` just beforehand, it's reset to
+`[0, newTotal)` too — otherwise left alone. Both `timerCallback()` and
+`changeListenerCallback()` (the poll and the async-broadcast paths that used
+to each do their own ad-hoc "viewBad" check) now call this shared helper
+first; the pre-existing `viewBad` shrink-safety-net (view left dangling past a
+now-*shorter* buffer, e.g. after Trim) still runs afterward, unchanged.
+
 ## Waveform peak cache
 
 `WaveformDisplay` keeps a peak cache — one min/max per 64 source samples per

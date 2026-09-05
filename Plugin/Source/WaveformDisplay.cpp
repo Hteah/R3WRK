@@ -6,7 +6,7 @@ WaveformDisplay::WaveformDisplay(AudioDocument& doc) : document(doc)
 {
     document.changeBroadcaster.addChangeListener(this);
     theme->addChangeListener(this);
-    viewEnd = document.getNumSamples();
+    viewEnd = lastKnownTotal = document.getNumSamples();
     setWantsKeyboardFocus(true);
     startTimerHz(30);
 }
@@ -17,23 +17,49 @@ WaveformDisplay::~WaveformDisplay()
     document.changeBroadcaster.removeChangeListener(this);
 }
 
+// If the buffer version just changed (a real edit, not a selection/playhead move) and the
+// view was showing (at or near) the whole document just beforehand, keep showing the whole
+// document. Without this, an edit that changes the document's length -- an extreme Stretch,
+// say -- silently leaves the view pinned to the *old* length: the new, longer document is
+// still there, just off the right edge, with no way back to the full picture short of a lot
+// of manual zooming out. A view the user had deliberately zoomed into a sub-region is left
+// alone (this only fires when the old view covered everything). Returns whether the content
+// actually changed, so callers know whether to rebuild the waveform path.
+bool WaveformDisplay::refitViewIfContentChanged()
+{
+    const int version = document.getBufferVersion();
+    if (version == lastBufferVersion)
+        return false;
+
+    const bool wasFullView = viewStart <= 0 && viewEnd >= lastKnownTotal;
+    lastBufferVersion = version;
+    lastKnownTotal = document.getNumSamples();
+
+    if (wasFullView)
+    {
+        viewStart = 0;
+        viewEnd = juce::jmax((int64_t) 1, lastKnownTotal);
+    }
+    return true;
+}
+
 void WaveformDisplay::timerCallback()
 {
     // Rebuild whenever the audio content changed, or the view range is stale / degenerate,
     // or the component was resized before the buffer existed. Cheaper than trusting only the
     // async ChangeBroadcaster, and self-heals any ordering race on first load.
-    const int version = document.getBufferVersion();
+    const bool contentChanged = refitViewIfContentChanged();
+
     const int64_t total = document.getNumSamples();
     const bool viewBad = viewEnd <= viewStart || viewEnd > total || viewStart >= juce::jmax((int64_t) 1, total);
     const double timeScale = document.getTimeScale();
 
-    if (version != lastBufferVersion || viewBad
+    if (contentChanged || viewBad
         || getWidth() != lastPathWidth || getHeight() != lastPathHeight
         || std::abs(timeScale - lastTimeScale) > 1.0e-9)
     {
-        lastBufferVersion = version;
         lastTimeScale = timeScale;
-        if (viewBad)
+        if (viewBad)   // refitViewIfContentChanged() already handled the "was showing everything" case
         {
             viewStart = 0;
             viewEnd = juce::jmax((int64_t) 1, total);
@@ -758,6 +784,8 @@ void WaveformDisplay::changeListenerCallback(juce::ChangeBroadcaster*)
     // This fires on every selection/playhead change too (setSelection broadcasts), so only
     // rebuild the (O(samples)) waveform path when the audio content or view range actually
     // changed -- otherwise a selection drag would rescan the whole buffer every message loop.
+    const bool contentChanged = refitViewIfContentChanged();
+
     const bool viewBad = viewEnd <= viewStart || viewEnd > document.getNumSamples();
     if (viewBad)
     {
@@ -765,10 +793,7 @@ void WaveformDisplay::changeListenerCallback(juce::ChangeBroadcaster*)
         viewEnd = juce::jmax((int64_t) 1, document.getNumSamples());
     }
 
-    if (viewBad || document.getBufferVersion() != lastBufferVersion)
-    {
-        lastBufferVersion = document.getBufferVersion();
+    if (viewBad || contentChanged)
         rebuildWaveformPath();
-    }
     repaint();
 }

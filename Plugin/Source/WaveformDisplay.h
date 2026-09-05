@@ -69,6 +69,7 @@ public:
 
 private:
     void timerCallback() override;
+    bool refitViewIfContentChanged();   // see .cpp -- keeps "show everything" showing everything
     void paintRecordingScope(juce::Graphics&);
     void paintSelectionPreview(juce::Graphics&);   // live Amplify/Stretch preview overlay, see .cpp
     void beginSelectionDragExport();   // native file drag of the selection to Ableton / Finder
@@ -83,6 +84,8 @@ private:
     int64_t viewStart = 0, viewEnd = 0;
     std::vector<juce::Path> channelPaths;
     int lastBufferVersion = -1;      // rebuild the paths when the audio content changes
+    int64_t lastKnownTotal = 0;      // getNumSamples() as of lastBufferVersion -- see
+                                      // refitIfWasShowingWholeDocument()
     int lastPathWidth = 0, lastPathHeight = 0;
     double lastTimeScale = 1.0;      // rebuild the path when Speed/Pitch/Stretch move the knobs
 
