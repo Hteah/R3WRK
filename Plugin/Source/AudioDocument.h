@@ -7,7 +7,10 @@
 
     Editing model: edits are snapshot-based. Call beginChange() before
     mutating getBufferForWriting(), do the mutation (resizing the buffer
-    is fine), then call commitChange(name) to push an undo step.
+    is fine), then call commitChange(name) to push an undo step -- each
+    commitChange() call is its own separate undo step (it opens a fresh
+    juce::UndoManager transaction itself), never merged with the edit before
+    or after it.
 */
 class AudioDocument
 {
@@ -155,6 +158,22 @@ public:
     void notifyChanged() { changeBroadcaster.sendChangeMessage(); }
 
     //==============================================================================
+    // "Revert to Original" (Tools ▾) -- undoes *editing* done to a loaded or recorded sample,
+    // without touching the load/record itself. Replaces an earlier "Revert" that just walked
+    // the undo stack (undoManager.undo() in a loop) all the way to empty -- fine for a loaded
+    // file (loadFromFile() clears undo history, so there was nothing to walk back through) but
+    // wrong for a recording, where stopRecording()'s own commitChange("Record") was itself just
+    // one more undoable step: reverting a fresh take walked straight past it and erased the
+    // recording. originalBuffer is a separate snapshot, untouched by ordinary edits (Trim,
+    // Amplify, Paste, ...) -- markAsOriginal() re-takes it whenever a *new* load/record/session
+    // establishes a genuinely new starting point; revertToOriginal() restores it the same way
+    // any other edit commits (an ordinary, undoable/redoable SnapshotAction), so it can never
+    // reach back further than the original take, and reverting is itself undoable if it wasn't
+    // what you meant to do.
+    void markAsOriginal();
+    void revertToOriginal();
+
+    //==============================================================================
     // Live, uncommitted preview of a pending Amplify or Stretch/Pitch edit -- set while the
     // corresponding pop-up panel's slider is being dragged (right-click a selection in
     // WaveformDisplay, or Tools ▾), cleared when the panel closes. Message-thread only (the
@@ -183,6 +202,8 @@ private:
     double sampleRate = 44100.0;
     std::atomic<uint64_t> selPacked { 0 };   // (uint32 start << 32) | uint32 end -- see getSelection()
     int bufferVersion = 0;
+
+    juce::AudioBuffer<float> originalBuffer;   // see markAsOriginal()/revertToOriginal() above
 
     juce::AudioBuffer<float> preChangeBuffer;
     int64_t preChangeSelStart = 0, preChangeSelEnd = 0;

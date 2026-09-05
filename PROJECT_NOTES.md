@@ -1038,6 +1038,49 @@ outright by `drawGaugeIcon`; the `iconAutoRecord` marker name is unchanged (stil
 button's function, same as `iconTools`/`iconScrub` keeping their marker names through multiple
 icon redesigns). Smoke test passes; all four targets build clean.
 
+## Revert to Original (replacing the old, buggy Revert)
+
+User: "I'd like a option in settings to undo editing done to a loaded or recorded sample to
+replace 'revert'. In the vst when I hit revert, it clears the recording. Now that we have a
+clear recorder button 'revert' doesn't seem to be needed."
+
+**Root cause of the bug being reported.** The old `revertAll()` was `while (canUndo()) undo();`
+-- walk the undo stack all the way back. For a *loaded* file that's harmless (`loadFromFile()`
+clears undo history right after loading, so there's nothing to walk back through). For a
+*recorded* take it's destructive: `stopRecording()`'s own `commitChange(..., "Record")` is itself
+just one more undoable step on the same stack, so walking all the way back undid the recording
+itself, wiping it to nothing -- exactly the reported symptom, and exactly why Clear (which
+already does "wipe to nothing" on purpose) makes the old Revert redundant at best and dangerous
+at worst.
+
+**The fix.** `AudioDocument` gained a separate snapshot, `originalBuffer`, untouched by ordinary
+edits (Trim, Amplify, Paste, ...) -- `markAsOriginal()` re-takes it only at a genuinely new
+starting point (`loadFromFile()`, `newEmptyDocument()`, `PluginProcessor::stopRecording()`,
+`setStateInformation()`'s restore), and `revertToOriginal()` restores it as an ordinary
+`commitChange()` -- ordinary in the sense that it's just as undoable/redoable as any other edit,
+and it can never reach back further than the original take, because it doesn't touch the undo
+stack's history at all, just adds one more edit that happens to restore an earlier snapshot.
+Tools ▾'s "Revert" renamed to **"Revert to Original"**, enabled whenever there's anything loaded
+(`! empty`) rather than the old `canUndo` (which was true/false for the wrong reasons -- see
+above).
+
+**A second, deeper bug found while testing the fix.** Writing a regression test for "reverting
+is itself undoable" failed on the very first run: undoing a revert restored the *original* take,
+not the edit that came before the revert. Root cause, found in JUCE's own `UndoManager` source
+(`juce_UndoManager.cpp`): `perform()` only starts a genuinely new transaction right after
+construction or a `clearUndoHistory()` call -- every `perform()` after that appends to whatever
+transaction is already open, *forever*, unless something calls `beginNewTransaction()`. Nothing
+in this codebase ever did. So every edit made since the last load/record/clear -- Trim, then
+Amplify, then Fade In, however many -- was silently accumulating into a **single** undo step;
+one Undo (⌘Z, or Tools ▾) would have reverted *all* of them at once, not just the last one, the
+whole time this app has existed. Fixed with one line: `commitChange()` now calls
+`undoManager.beginNewTransaction(actionName)` immediately before `perform()`, so every edit is
+its own isolated, individually undoable/redoable step, matching what the Tools ▾ menu's
+per-action Undo/Redo labels always implied. Added a dedicated regression test ("each edit is its
+own undo step") independent of the Revert-to-Original one, since this affects every edit in the
+app, not just the new feature that happened to surface it. Smoke test passes (both new sections);
+all four targets build clean.
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).

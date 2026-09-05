@@ -75,6 +75,7 @@ void AudioDocument::newEmptyDocument(int numChannels, double sr)
     playbackSpeed = 1.0; playbackPitch = 0.0; playbackStretch = 1.0;
     previewActive = false; previewGainLinear = 1.0f; previewStretchRatio = 1.0;
     undoManager.clearUndoHistory();
+    markAsOriginal();
     ++bufferVersion;
     notifyChanged();
 }
@@ -122,6 +123,7 @@ bool AudioDocument::loadFromFile(const juce::File& file, double resampleToRate)
     playbackSpeed = 1.0; playbackPitch = 0.0; playbackStretch = 1.0;   // see newEmptyDocument()
     previewActive = false; previewGainLinear = 1.0f; previewStretchRatio = 1.0;
     undoManager.clearUndoHistory();
+    markAsOriginal();
     ++bufferVersion;
     notifyChanged();
     return true;
@@ -195,8 +197,29 @@ void AudioDocument::commitChange(juce::AudioBuffer<float> newBuffer, const juce:
     auto action = std::make_unique<SnapshotAction>(*this,
                                                      preChangeBuffer, preChangeSelStart, preChangeSelEnd,
                                                      std::move(newBuffer), getSelectionStart(), getSelectionEnd());
-    undoManager.perform(action.release(), actionName);
+
+    // One commitChange() = one undo step. juce::UndoManager otherwise keeps appending every
+    // perform() to whatever transaction is already open -- it only starts a fresh one right
+    // after construction or a clearUndoHistory() call, never automatically past that point --
+    // so without this, every edit made since the last load/record/clear (Trim, then Amplify,
+    // then Fade In, ...) would silently pile into a *single* undo step, and one Undo would
+    // revert all of them at once instead of just the last one.
+    undoManager.beginNewTransaction(actionName);
+    undoManager.perform(action.release());
     notifyChanged();
+}
+
+void AudioDocument::markAsOriginal()
+{
+    originalBuffer.makeCopyOf(buffer);
+}
+
+void AudioDocument::revertToOriginal()
+{
+    if (isEmpty())
+        return;
+    beginChange();
+    commitChange(originalBuffer, "Revert to Original");
 }
 
 void AudioDocument::restoreSnapshot(const juce::AudioBuffer<float>& newBuffer, int64_t newSelStart, int64_t newSelEnd)

@@ -398,6 +398,7 @@ void R3WRKAudioProcessor::stopRecording()
     document.commitChange(std::move(finalBuffer), "Record");
     document.loopStart = 0;
     document.loopEnd = document.getNumSamples();
+    document.markAsOriginal();   // this take is the new "Revert to Original" baseline
 }
 
 void R3WRKAudioProcessor::startPlayback()
@@ -497,6 +498,7 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     document.playbackPitch.store(juce::jlimit(AudioDocument::kMinPitch, AudioDocument::kMaxPitch, pch));
     document.playbackStretch.store(juce::jlimit(AudioDocument::kMinStretch, AudioDocument::kMaxStretch, str > 0.0 ? str : 1.0));
     document.autoRecordThresholdDb.store(juce::jlimit(-60.0, 0.0, thresh));
+    document.markAsOriginal();   // the restored session is the new "Revert to Original" baseline
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

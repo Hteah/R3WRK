@@ -54,7 +54,7 @@ private:
     void updateTransportButtonText();
     void openFile();
     void saveFile();
-    void revertAll();
+    void revertToOriginal();   // Tools menu's "Revert to Original" -- see AudioDocument::revertToOriginal()
     void showToolsMenu();
     void showAmplifyCallout(juce::Rectangle<int> screenTargetArea);
     void showStretchCallout(juce::Rectangle<int> screenTargetArea);

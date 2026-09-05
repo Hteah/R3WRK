@@ -457,11 +457,9 @@ void EditorToolbar::autoSaveRecording()
     }
 }
 
-void EditorToolbar::revertAll()
+void EditorToolbar::revertToOriginal()
 {
-    while (document.undoManager.canUndo())
-        document.undoManager.undo();
-    document.notifyChanged();
+    document.revertToOriginal();
 }
 
 //==============================================================================
@@ -493,7 +491,7 @@ void EditorToolbar::showToolsMenu()
     juce::PopupMenu m;
     m.addItem(idOpen,   juce::String::fromUTF8("Open\xE2\x80\xA6"));
     m.addItem(idSave,   juce::String::fromUTF8("Save As\xE2\x80\xA6"), ! empty);
-    m.addItem(idRevert, "Revert", canUndo);
+    m.addItem(idRevert, "Revert to Original", ! empty);
     m.addSeparator();
     m.addItem(keyed("Cut",   idCut,   sel,  cmd + "X"));
     m.addItem(keyed("Copy",  idCopy,  sel,  cmd + "C"));
@@ -525,7 +523,7 @@ void EditorToolbar::showToolsMenu()
         {
             case idOpen:      openFile();   break;
             case idSave:      saveFile();   break;
-            case idRevert:    revertAll();  break;
+            case idRevert:    revertToOriginal(); break;
             case idCut:       doCut();      break;
             case idCopy:      doCopy();     break;
             case idPaste:     doPaste();    break;

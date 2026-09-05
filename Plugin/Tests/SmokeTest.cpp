@@ -81,6 +81,71 @@ int main()
         check(doc.getNumSamples() == beforeCut - 1000, "redo re-applied the cut");
     }
 
+    // --- each edit is its own undo step ------------------------------
+    {
+        std::cout << "-- each edit is its own undo step --" << std::endl;
+        // juce::UndoManager keeps appending perform() calls to whatever transaction is
+        // already open -- it only starts a fresh one right after construction or a
+        // clearUndoHistory() call, never automatically past that -- so two commitChange()s
+        // back to back, with no explicit beginNewTransaction() between them, would otherwise
+        // silently merge into one undo step (see AudioDocument::commitChange()).
+        AudioDocument doc;
+        setDocumentContent(doc, makeSineBuffer(1, 2000, sr, 440.0, 0.5f), sr);
+        const float originalPeak = doc.getBuffer().getMagnitude(0, 0, (int) doc.getNumSamples());
+
+        EditActions::applyGainDb(doc, -6.0f);
+        const float halvedPeak = doc.getBuffer().getMagnitude(0, 0, (int) doc.getNumSamples());
+        check(halvedPeak > 0.0f && halvedPeak < originalPeak, "first edit (gain) took effect");
+
+        EditActions::silence(doc);
+        check(doc.getBuffer().getMagnitude(0, 0, (int) doc.getNumSamples()) == 0.0f,
+             "second edit (silence) took effect");
+
+        doc.undoManager.undo();
+        checkNear(doc.getBuffer().getMagnitude(0, 0, (int) doc.getNumSamples()), halvedPeak, 0.001,
+                 "undoing once reverts only the silence, back to the gained (not original) peak");
+
+        doc.undoManager.undo();
+        checkNear(doc.getBuffer().getMagnitude(0, 0, (int) doc.getNumSamples()), originalPeak, 0.001,
+                 "undoing again reverts the gain edit too, back to the original peak");
+    }
+
+    // --- revert to original -------------------------------------------
+    {
+        std::cout << "-- revert to original --" << std::endl;
+        AudioDocument doc;
+        // markAsOriginal() explicitly, the way loadFromFile()/stopRecording() do -- unlike
+        // setDocumentContent() above, which is test-only scaffolding and doesn't call it.
+        setDocumentContent(doc, makeSineBuffer(1, 2000, sr, 440.0, 0.5f), sr);
+        doc.markAsOriginal();
+        const float originalPeak = doc.getBuffer().getMagnitude(0, 0, (int) doc.getNumSamples());
+        check(originalPeak > 0.05f, "original take is not silent");
+
+        EditActions::silence(doc);
+        check(doc.getBuffer().getMagnitude(0, 0, (int) doc.getNumSamples()) == 0.0f,
+             "an edit after the original take can silence it");
+
+        doc.revertToOriginal();
+        check(doc.getBuffer().getMagnitude(0, 0, (int) doc.getNumSamples()) > 0.05f,
+             "revertToOriginal restores the original take, not silence");
+
+        // Reverting is itself an ordinary, undoable edit -- undo it and the silenced edit
+        // comes back; redo puts the revert back.
+        check(doc.undoManager.canUndo(), "the revert itself is undoable");
+        doc.undoManager.undo();
+        check(doc.getBuffer().getMagnitude(0, 0, (int) doc.getNumSamples()) == 0.0f,
+             "undoing a revert restores the silenced edit");
+        doc.undoManager.redo();
+
+        // The bug this replaces: the old "Revert" walked undoManager.undo() in a loop, which
+        // for a fresh recording undid the recording itself, wiping it to nothing. Reverting
+        // again from an already-reverted (== original) buffer must stay at the original --
+        // there's nothing further back for it to reach into.
+        doc.revertToOriginal();
+        check(doc.getBuffer().getMagnitude(0, 0, (int) doc.getNumSamples()) > 0.05f,
+             "reverting again from the original stays at the original");
+    }
+
     // --- paste ------------------------------------------------------------
     {
         std::cout << "-- paste --" << std::endl;
