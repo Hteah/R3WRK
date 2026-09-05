@@ -233,9 +233,18 @@ Any owner must `setLookAndFeel(nullptr)` on every component it attached this
 to, in its destructor, *before* its own `R3WRKLookAndFeel` member is destroyed
 — both `KnobRow` and `EditorToolbar` do this.
 
+`EditorToolbar::paint()` fills a rounded `panelBg` panel (the dark control
+band) behind the whole transport row — the outlined buttons (Loop off, Tools)
+and `timeLabel` sit on it, so they use `screenText`/`screenTextDim` rather than
+`text`/`textDim`. `R3WRKLookAndFeel`'s outline-button ink comes from whichever
+`textColourOffId` the button's owner already set (not read from the theme
+directly), so the one shared instance works for buttons in either context
+without knowing which it's in.
+
 Not yet covered: `ComboBox`/`PopupMenu` (ThemeEditor's preset picker, the Tools
-menu's own popup) still use the default JUCE look, and there's no dark
-"control band" panel behind the transport row yet — that's the next UI pass.
+menu's own popup) still use the default JUCE look, and the waveform/ruler
+panels are still square-cornered (left that way deliberately — the waveform
+itself was asked to stay untouched).
 
 ## Theming
 
