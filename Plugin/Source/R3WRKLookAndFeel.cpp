@@ -159,16 +159,20 @@ void R3WRKLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int wid
     g.fillPath(pointerPath);
 }
 
-// Pill buttons: fully rounded (radius = half the button height). A button whose configured
-// background is fully transparent (see EditorToolbar::applyTheme -- that's how a component
-// asks for the "outline" treatment rather than a filled one) gets a hairline border and a
-// faint hover/press wash instead of a solid fill.
+// Pill buttons: fully rounded (radius = half the button height) -- except Scrub, which reads
+// as a cassette case rather than a transport pill and wants corners closer to that case's own
+// (drawScrubIcon already rounds its body at 0.24 of its own height; the button around it uses
+// a similar, much shallower fraction instead of the full stadium curve every other icon button
+// gets). A button whose configured background is fully transparent (see
+// EditorToolbar::applyTheme -- that's how a component asks for the "outline" treatment rather
+// than a filled one) gets a hairline border and a faint hover/press wash instead of a solid fill.
 void R3WRKLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Button& button,
                                             const juce::Colour& backgroundColour,
                                             bool isHighlighted, bool isDown)
 {
     auto bounds = button.getLocalBounds().toFloat().reduced(0.5f);
-    const float radius = bounds.getHeight() * 0.5f;
+    const bool isScrubButton = button.getButtonText() == iconScrub;
+    const float radius = isScrubButton ? bounds.getHeight() * 0.22f : bounds.getHeight() * 0.5f;
 
     if (backgroundColour.getAlpha() == 0)
     {

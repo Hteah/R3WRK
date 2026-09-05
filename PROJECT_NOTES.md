@@ -914,6 +914,15 @@ either -- its margins are already computed from height alone, so the wider bound
 cassette body a wider, more authentic aspect ratio than the cramped square version. Smoke test
 passes; all four targets build clean.
 
+**Corners squared off.** User: "can you make the corners of the scrub button less rounded?"
+`drawButtonBackground`'s pill formula (`radius = height/2`) is shared by every icon button, so
+narrowing it just for Scrub needed a one-button exception rather than a formula change --
+`drawButtonBackground` now checks `button.getButtonText() == iconScrub` (the same sentinel-marker
+dispatch `drawButtonText` already uses to pick an icon) and uses a much shallower `height*0.22`
+radius for it alone, leaving every other button's full stadium curve untouched. Reads as a proper
+cassette case corner now rather than a stadium with a cassette drawn inside it. Smoke test passes;
+all four targets build clean.
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).
