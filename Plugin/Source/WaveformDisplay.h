@@ -18,7 +18,10 @@
       - right-click inside the selection body for a context menu
         (Amplify/Reverse/Stretch·Pitch) -- see onSelectionContextMenu.
     Mouse wheel zooms toward the pointer (or into the selection if there is one);
-    horizontal swipe / Shift+wheel pans; the header's Fit button resets the view.
+    horizontal swipe / Shift+wheel pans. Ctrl+/Ctrl- zoom in/out centred on the current
+    view (see zoomIn()/zoomOut(), wired up in PluginEditor::keyPressed) for zooming
+    without the mouse; the view also auto-refits after an edit that changes the
+    document's length while showing the whole thing (see refitViewIfContentChanged()).
 */
 class WaveformDisplay : public juce::Component,
                          public juce::ChangeListener,

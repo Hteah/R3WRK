@@ -171,6 +171,18 @@ to each do their own ad-hoc "viewBad" check) now call this shared helper
 first; the pre-existing `viewBad` shrink-safety-net (view left dangling past a
 now-*shorter* buffer, e.g. after Trim) still runs afterward, unchanged.
 
+**Keyboard zoom.** `WaveformDisplay::zoomIn()`/`zoomOut()` (centred on the
+current view, same ±2× step as one mouse-wheel notch) existed but were
+unreachable from the UI since the header's Fit/zoom buttons were removed
+(`63aa955`) — `PluginEditor::keyPressed` now wires **Ctrl+**/**Ctrl-** to them,
+for zooming without a mouse. Matched on the resulting character
+(`KeyPress::getTextCharacter()` — `'+'`/`'='`/`'-'`) rather than a specific
+keyCode+shift combo, so it doesn't matter whether "+" arrives as its own key
+or as Shift-"=" (the usual case on a US keyboard). Deliberately the literal
+Control key, not ⌘ — `ModifierKeys::ctrlModifier` and `commandModifier` are
+distinct bits on macOS (unlike Windows/Linux, where JUCE aliases them), so
+`isCtrlDown()` doesn't fire for ⌘.
+
 ## Waveform peak cache
 
 `WaveformDisplay` keeps a peak cache — one min/max per 64 source samples per
@@ -457,7 +469,7 @@ current sample rate if they differ, so pitch/speed is correct in your DAW.
   change; fine for typical sample lengths, would want to be a smarter
   incremental/windowed computation for very long recordings.
 - Keyboard shortcuts are limited to the editor essentials (Space, ⌘Z/⌘⇧Z,
-  ⌘X/⌘C/⌘V); no user-configurable key map.
+  ⌘X/⌘C/⌘V, Ctrl+/Ctrl- to zoom the waveform); no user-configurable key map.
 - The offline Stretch/Pitch edit (Tools menu / selection right-click) commits
   audio only on Apply — the slider drag previews *visually* (see "Selection
   context menu + live Amplify/Stretch preview" above) but there's no live

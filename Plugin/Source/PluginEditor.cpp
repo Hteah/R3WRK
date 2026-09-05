@@ -90,5 +90,17 @@ bool R3WRKAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
     if (key == KP('x', cmd, 0))               { toolbar.doCut();      return true; }
     if (key == KP('c', cmd, 0))               { toolbar.doCopy();     return true; }
     if (key == KP('v', cmd, 0))               { toolbar.doPaste();    return true; }
+
+    // Zoom the waveform without the mouse. Matched on the resulting character rather than a
+    // specific keyCode+shift combo, so it doesn't matter whether "+" arrives as its own key or
+    // as Shift-"=" (the usual case on a US keyboard) -- either way Ctrl was held and a '+' (or
+    // '=') or '-' came out. Literally Control, not ⌘ -- ctrlModifier and commandModifier are
+    // distinct bits on macOS (unlike Windows/Linux, where JUCE aliases them).
+    if (key.getModifiers().isCtrlDown())
+    {
+        const auto ch = key.getTextCharacter();
+        if (ch == '+' || ch == '=') { waveformDisplay.zoomIn();  return true; }
+        if (ch == '-')              { waveformDisplay.zoomOut(); return true; }
+    }
     return false;
 }
