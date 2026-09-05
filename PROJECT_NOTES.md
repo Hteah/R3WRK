@@ -1141,6 +1141,32 @@ passes; all four targets build clean. **Not independently visually confirmed in 
 (no interactive way to inspect Finder's rendered icon in this environment) beyond the `.icns`
 round-trip check -- flagged to the user to glance at Finder/the Dock themselves.
 
+**Lighter background, per the user's very next message: "Can you make the background a little
+more light? I can't see the vector."** The rounded-square white "card" (from the first pass
+above) sat on a fully *transparent* canvas outside its own rounded corners -- reasonable if
+something composites transparency correctly, but easy to end up looking mostly dark depending on
+where it's rendered, which reads exactly like "the background is too dark, I can't see the
+vector." Simplified rather than re-tuned: dropped the rounded-card-on-transparency approach
+entirely and filled the *whole* 1024×1024 canvas with plain opaque white -- no transparency
+anywhere -- since macOS already applies its own rounded-corner mask/shadow to a modern app icon,
+so drawing one by hand wasn't buying anything, just risking exactly this kind of ambiguity.
+
+**Gotcha hit re-verifying the fix:** overwriting `Plugin/Resources/AppIcon.png` in place and
+re-running `cmake --build` alone did **not** pick up the new pixels -- the generated
+`JuceLibraryCode/AppIcon.icns` (and its copies inside each bundle) kept their original file size
+and an unchanged timestamp. `_juce_generate_icon` (JUCE's CMake icon step) only runs at
+**configure** time, not as a per-build rule that re-checks its source file's content -- exactly
+the same category of gotcha as changing `ICON_BIG` itself needing a reconfigure, just one layer
+further in (this time the *path* didn't change, only the file's *content* did, and that's exactly
+the case CMake's configure-time generation doesn't re-detect on a plain rebuild). Fix: delete the
+stale generated `AppIcon.icns` copies under `build/` and reconfigure
+(`cmake -B build -G Xcode -DCMAKE_POLICY_VERSION_MINIMUM=3.5 .`) -- confirmed by the regenerated
+`.icns`'s file size actually changing (23354 -> 19997 bytes) before rebuilding. **Rule of thumb
+worth remembering: any edit to the icon source image needs a reconfigure, not just a rebuild, to
+actually take effect** -- a plain rebuild will silently keep serving the stale icon. Re-verified
+via the same `.icns` round-trip -- the extracted PNG now matches the plain-white version exactly.
+Smoke test passes; all four targets build clean.
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).
