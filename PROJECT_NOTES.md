@@ -292,17 +292,20 @@ selection if there is one, else the loop range, else sample 0 -- with
 no extra region-lookup logic duplicated in the toolbar.
 
 `toolsButton` (still opens the same Tools ▾ pop-up menu) also dropped its "Tools ▾"
-text for a drawn icon (`iconTools`) -- a crossed screwdriver and open-end wrench,
-from a user-supplied reference image, in the same 28×28 outlined-circle treatment
-as Play-from-start. Simplified from the reference to one terminal shape per tool
-(a single open jaw on the wrench, a single filled-capsule handle on the
-screwdriver, not a symmetric two-ended version of each) -- a first pass with both
-ends detailed on both tools looked like a tangled scribble at 28px; halving the
-shape count per tool reads far more clearly at that size. The wrench's jaw reuses
-the loop icon's addCentredArc-with-a-gap technique, with a wide (~120°) gap so it
-reads as an open hook rather than a near-closed ring; the screwdriver's handle is
-a small filled rounded-rect rather than an outline, since a solid block reads
-better than a thin stroke at this size.
+text for a drawn icon (`iconTools`), in the same 28×28 outlined-circle treatment as
+Play-from-start. First pass was a crossed screwdriver + open-end wrench (from a
+user-supplied reference image) -- rejected ("don't like the way that looks") after
+looking like a scribble even simplified down to one terminal shape per tool.
+Replaced with a plain gear/cog: one filled `Path`, traced as a single polygon
+around the body+teeth perimeter (`Point::getPointOnCircumference` at each tooth's
+left/right edge and the gap after it, walking monotonically around the circle so
+consecutive teeth share their boundary point with no unioning needed), plus a
+centre-hole circle subpath punched out via even-odd fill
+(`Path::setUsingNonZeroWinding(false)`). Getting it legible at 28px took one
+iteration: 8 teeth at ~24° half-width (vs a 22.5° half-step) overlapped into a
+plain octagon with barely-visible seams; narrowing to 13° half-width, shrinking
+the body radius, and lengthening the teeth gave 8 clearly separated teeth around a
+visible centre hole.
 
 All five toolbar buttons (`playFromStartButton`/`playButton`/`loopButton`/
 `recordButton`/`toolsButton`) call `setWantsKeyboardFocus(false)`. A mouse

@@ -41,56 +41,58 @@ namespace
         g.fillPath(heads);
     }
 
-    // Tools: a crossed open-end wrench and flathead screwdriver, drawn as line art
-    // (stroked outlines, nothing filled) to match the reference icon rather than the
-    // solid-fill style of Play/Stop -- built in local (0,0)-centred coordinates with
-    // the long axis along +x, then rotated into place, the same way as the rotary
-    // knob's pointer tick.
-    void drawToolsIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
+    // Tools: a plain gear/cog -- simpler and clearer at 28px than the crossed
+    // wrench+screwdriver this replaced (that one read as a scribble this small).
+    // One filled path, traced as a single polygon around the body/teeth perimeter,
+    // plus a centre-hole subpath punched out via even-odd fill -- no separate pieces
+    // to union or align.
+    void drawGearIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
     {
-        // Small (28px) icon, so this simplifies the reference glyph to one terminal
-        // shape per tool rather than two -- a single-jaw wrench and a plain-handled
-        // screwdriver read far more clearly at this size than a fully symmetric,
-        // four-shape version does.
-        auto area = bounds.reduced(bounds.getHeight() * 0.22f);
+        auto area = bounds.reduced(bounds.getHeight() * 0.20f);
         const float R = juce::jmin(area.getWidth(), area.getHeight()) * 0.5f;
         const auto  centre = area.getCentre();
-        const float thickness = juce::jmax(1.6f, R * 0.24f);
-        const float armLen = R * 1.6f;
 
-        // Wrench: a shaft ending in one open ("C") jaw, gap facing outward -- same
-        // addCentredArc-with-a-gap technique as the loop icon's arcs, but with a wide
-        // (~120deg) gap so it reads as a clear open hook rather than a near-closed ring.
-        juce::Path wrench;
-        wrench.startNewSubPath(-armLen * 0.5f, 0.0f);
-        wrench.lineTo(armLen * 0.30f, 0.0f);
+        const float bodyR   = R * 0.50f;   // radius to the tooth root
+        const float toothLen = R * 0.44f;  // tooth radial length
+        const float holeR   = R * 0.28f;   // centre hole radius
+        const int   numTeeth = 8;
+        // Half-step for 8 teeth is 22.5deg -- keep well under that so each tooth stays a
+        // distinct block with a clear gap either side, rather than merging into a ring
+        // (the first pass used 24deg here, which overlapped adjacent teeth into a plain
+        // octagon with barely-visible seams instead of a recognisable gear).
+        const float toothHalfWidth = juce::degreesToRadians(13.0f);
+        const float step = juce::MathConstants<float>::twoPi / (float) numTeeth;
 
-        const float headR = R * 0.36f;
-        const float gapHalf = 60.0f;
-        const float from = juce::degreesToRadians(90.0f + gapHalf);
-        const float to   = juce::degreesToRadians(90.0f + gapHalf + (360.0f - 2.0f * gapHalf));
-        wrench.addCentredArc(armLen * 0.5f, 0.0f, headR, headR, 0.0f, from, to, true);
+        juce::Path gear;
+        gear.setUsingNonZeroWinding(false);   // even-odd, so the centre-hole subpath knocks out
 
-        wrench.applyTransform(juce::AffineTransform::rotation(juce::degreesToRadians(45.0f)).translated(centre));
+        bool first = true;
+        for (int i = 0; i < numTeeth; ++i)
+        {
+            const float toothCentre = (float) i * step;
+            const float toothL = toothCentre - toothHalfWidth;
+            const float toothR = toothCentre + toothHalfWidth;
+            const float gapEnd = toothCentre + step - toothHalfWidth;
+
+            auto p1 = centre.getPointOnCircumference(bodyR,            toothL);
+            auto p2 = centre.getPointOnCircumference(bodyR + toothLen, toothL);
+            auto p3 = centre.getPointOnCircumference(bodyR + toothLen, toothR);
+            auto p4 = centre.getPointOnCircumference(bodyR,            toothR);
+            auto p5 = centre.getPointOnCircumference(bodyR,            gapEnd);
+
+            if (first) { gear.startNewSubPath(p1); first = false; }
+            else         gear.lineTo(p1);
+            gear.lineTo(p2);
+            gear.lineTo(p3);
+            gear.lineTo(p4);
+            gear.lineTo(p5);
+        }
+        gear.closeSubPath();
+
+        gear.addEllipse(centre.x - holeR, centre.y - holeR, holeR * 2.0f, holeR * 2.0f);
+
         g.setColour(ink);
-        g.strokePath(wrench, juce::PathStrokeType(thickness, juce::PathStrokeType::curved,
-                                                  juce::PathStrokeType::rounded));
-
-        // Screwdriver: a shaft running to a point (the blade) plus a solid, filled
-        // capsule handle at the other end -- a filled block reads more clearly than a
-        // thin outline at this size.
-        juce::Path driver;
-        driver.startNewSubPath(-armLen * 0.5f, 0.0f);
-        driver.lineTo(armLen * 0.14f, 0.0f);
-        driver.applyTransform(juce::AffineTransform::rotation(juce::degreesToRadians(-45.0f)).translated(centre));
-        g.strokePath(driver, juce::PathStrokeType(thickness * 0.85f, juce::PathStrokeType::curved,
-                                                  juce::PathStrokeType::rounded));
-
-        juce::Rectangle<float> handle(armLen * 0.12f, -R * 0.30f, armLen * 0.42f, R * 0.60f);
-        juce::Path handlePath;
-        handlePath.addRoundedRectangle(handle, R * 0.20f);
-        handlePath.applyTransform(juce::AffineTransform::rotation(juce::degreesToRadians(-45.0f)).translated(centre));
-        g.fillPath(handlePath);
+        g.fillPath(gear);
     }
 }
 
@@ -192,7 +194,7 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     }
     if (text == iconTools)
     {
-        drawToolsIcon(g, bounds, ink);
+        drawGearIcon(g, bounds, ink);
         return;
     }
 

@@ -7,8 +7,8 @@
     line -- no value-arc, Eurorack/VCV-module-inspired), pill-shaped buttons (fully
     rounded, filled when "on" or accent-primary, outlined/transparent otherwise), and a
     handful of drawn transport icons in place of button text (play triangle, stop square,
-    loop's two-arrow circle, play-from-start's bar+triangle, Tools' crossed wrench and
-    screwdriver) -- see drawButtonText().
+    loop's two-arrow circle, play-from-start's bar+triangle, Tools' gear) -- see
+    drawButtonText().
     Reads live from the shared theme, so it stays in sync with theme changes the same way
     the rest of the UI does.
 
@@ -36,7 +36,7 @@ public:
     static constexpr const char* iconStop          = "icon:stop";
     static constexpr const char* iconLoop          = "icon:loop";
     static constexpr const char* iconPlayFromStart = "icon:playFromStart";   // a bar + the play triangle
-    static constexpr const char* iconTools         = "icon:tools";          // crossed wrench + screwdriver
+    static constexpr const char* iconTools         = "icon:tools";          // a gear/cog
 
     void drawButtonText(juce::Graphics&, juce::TextButton&,
                        bool isMouseOverButton, bool isButtonDown) override;
