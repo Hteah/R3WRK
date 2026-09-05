@@ -1102,6 +1102,20 @@ not verify the actual drag gesture end-to-end** (no mouse-drag-from-Finder scrip
 environment), only that it builds, launches, and the extension-matching logic is correct by
 inspection; flagged to the user to confirm the feel themselves.
 
+## Trim added to the selection right-click menu + ⌘T
+
+User: "Can you add trim to the drop down menu when you right click in a selection. Also add
+command t for a shortcut." `WaveformDisplay::onSelectionContextMenu` only ever fires with a
+selection already under the pointer (see its class doc), so "Trim to Selection" needed no enable/
+disable check here, unlike Tools ▾'s copy of the same item (gated on `hasSelection()`, since that
+menu is reachable with nothing selected). Added as the first item, ahead of Amplify/Reverse/
+Stretch·Pitch, mirroring Tools ▾'s own ordering (Trim comes before those there too). New
+`EditorToolbar::doTrim()` (`EditActions::trimToSelection(document)`, already a safe no-op with no
+selection) wired to ⌘T in `PluginEditor::keyPressed`, alongside the existing ⌘X/C/V/Z transport
+shortcuts. Tools ▾'s own "Trim to Selection" item now shows the same "⌘T" hint text Cut/Copy/
+Paste already display next to theirs (cosmetic only -- the real key binding lives in
+`keyPressed`, same as those). Smoke test passes; all four targets build clean.
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).

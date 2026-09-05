@@ -497,7 +497,7 @@ void EditorToolbar::showToolsMenu()
     m.addItem(keyed("Copy",  idCopy,  sel,  cmd + "C"));
     m.addItem(keyed("Paste", idPaste, clip, cmd + "V"));
     m.addSeparator();
-    m.addItem(idTrim,    "Trim to Selection", sel);
+    m.addItem(keyed("Trim to Selection", idTrim, sel, cmd + "T"));
     m.addItem(idDelete,  "Delete Selection",  sel);
     m.addItem(idSilence, "Silence Selection", ! empty);
     m.addSeparator();
@@ -562,9 +562,15 @@ void EditorToolbar::showStretchCallout(juce::Rectangle<int> screenTargetArea)
 //==============================================================================
 void EditorToolbar::showSelectionContextMenu(juce::Point<int> screenPosition)
 {
-    enum { idAmplify = 1, idReverse, idStretch };
+    enum { idTrim = 1, idAmplify, idReverse, idStretch };
+
+    const juce::String cmd = juce::String::fromUTF8("\xe2\x8c\x98");   // ⌘
+    juce::PopupMenu::Item trimItem("Trim to Selection");
+    trimItem.itemID = idTrim;
+    trimItem.shortcutKeyDescription = cmd + "T";
 
     juce::PopupMenu m;
+    m.addItem(trimItem);
     m.addItem(idAmplify, juce::String::fromUTF8("Amplify\xE2\x80\xA6"));
     m.addItem(idReverse, "Reverse");
     m.addItem(idStretch, juce::String::fromUTF8("Stretch / Pitch\xE2\x80\xA6"));
@@ -574,6 +580,7 @@ void EditorToolbar::showSelectionContextMenu(juce::Point<int> screenPosition)
     {
         switch (r)
         {
+            case idTrim:    EditActions::trimToSelection(document); break;
             case idAmplify: showAmplifyCallout(targetArea); break;
             case idReverse: EditActions::reverse(document); break;
             case idStretch: showStretchCallout(targetArea); break;
@@ -581,6 +588,8 @@ void EditorToolbar::showSelectionContextMenu(juce::Point<int> screenPosition)
         }
     });
 }
+
+void EditorToolbar::doTrim() { EditActions::trimToSelection(document); }
 
 void EditorToolbar::showThemeCallout()
 {

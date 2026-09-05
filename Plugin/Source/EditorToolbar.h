@@ -32,12 +32,13 @@ public:
     std::function<void()> onSaved;                                // after a successful open / save
     std::function<void(juce::String message)> onStatusMessage;    // brief header status line
 
-    // Called by the editor's keyPressed so ⌘X/C/V/Z and Space work from anywhere.
+    // Called by the editor's keyPressed so ⌘X/C/V/Z/T and Space work from anywhere.
     void doCut();
     void doCopy();
     void doPaste();
     void doUndo();
     void doRedo();
+    void doTrim();   // ⌘T -- Trim to Selection; a no-op with nothing selected, same as the menu items
     void toggleTransport();   // Record button: record if idle, else stop
     void togglePlay();        // Space: play if idle, else stop
     void playFromStart();     // restarts playback at sample 0 (region-snapped, see processBlock)
