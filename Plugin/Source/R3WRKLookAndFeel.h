@@ -8,7 +8,7 @@
     rounded, filled when "on" or accent-primary, outlined/transparent otherwise), and a
     handful of drawn transport icons in place of button text (play triangle, stop square,
     loop's two-arrow circle, play-from-start's bar+triangle, Tools' gear, Scrub's
-    cassette tape) -- see drawButtonText().
+    notched reel hub) -- see drawButtonText().
     Reads live from the shared theme, so it stays in sync with theme changes the same way
     the rest of the UI does.
 
@@ -37,7 +37,7 @@ public:
     static constexpr const char* iconLoop          = "icon:loop";
     static constexpr const char* iconPlayFromStart = "icon:playFromStart";   // a bar + the play triangle
     static constexpr const char* iconTools         = "icon:tools";          // a gear/cog
-    static constexpr const char* iconScrub         = "icon:scrub";          // a cassette tape
+    static constexpr const char* iconScrub         = "icon:scrub";          // a notched reel hub
 
     void drawButtonText(juce::Graphics&, juce::TextButton&,
                        bool isMouseOverButton, bool isButtonDown) override;

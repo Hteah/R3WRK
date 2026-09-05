@@ -97,29 +97,68 @@ namespace
         g.fillPath(gear);
     }
 
-    // Scrub: a cassette tape, traced from a reference icon the user supplied -- a rounded
-    // rectangle body, two reels sitting toward the bottom, and the tape strung between
-    // them along the reels' lower tangent (not through their centres). Stroked outline,
-    // matching the gear icon's line-icon style.
+    // Scrub: a reel hub, traced from a reference icon the user supplied -- a solid ring whose
+    // inner hole isn't a smooth circle but a 6-point spline (six rectangular notches, 60°
+    // apart, cut inward like a cassette reel's drive hub, the little sprocketed hole a tape
+    // deck's spindle grips to turn the reel). Same "outer contour clockwise + inner contour
+    // counter-clockwise, nonzero winding punches the hole" technique as drawGearIcon's body/
+    // centre-hole, just applied to a spline hole instead of a round one.
     void drawScrubIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
     {
-        auto area = bounds.reduced(bounds.getHeight() * 0.20f);
-        const float thickness = juce::jmax(1.3f, area.getHeight() * 0.11f);
+        const auto area   = bounds.reduced(bounds.getHeight() * 0.14f);
+        const auto centre = area.getCentre();
+        const float outerR     = juce::jmin(area.getWidth(), area.getHeight()) * 0.5f;
+        const float ringInnerR = outerR * 0.79f;   // hole radius between notches
+        const float toothR     = outerR * 0.59f;   // hole radius at each notch (cut deeper)
 
-        juce::Path body;
-        body.addRoundedRectangle(area, area.getHeight() * 0.24f);
+        constexpr int   numTeeth          = 6;
+        constexpr float toothHalfWidthDeg = 9.0f;
+        constexpr float stepDeg           = 360.0f / (float) numTeeth;
+        auto angleAt = [](float deg) { return juce::degreesToRadians(deg); };
+
+        // Outer boundary: a plain circle, clockwise (increasing angle is JUCE's clockwise).
+        juce::Path ring;
+        ring.addCentredArc(centre.x, centre.y, outerR, outerR, 0.0f,
+                           0.0f, juce::MathConstants<float>::twoPi, true);
+
+        // Hole boundary: the six-notch spline, traced counter-clockwise (decreasing angle,
+        // walking teeth from the highest index down to 0) so nonzero-winding punches it out
+        // of the ring above as a hole rather than adding to it.
+        const float firstRightEdge = (float) (numTeeth - 1) * stepDeg + toothHalfWidthDeg;
+        juce::Path hole;
+        bool started = false;
+        for (int i = numTeeth - 1; i >= 0; --i)
+        {
+            const float toothCentre = (float) i * stepDeg;
+            const float leftEdge  = toothCentre - toothHalfWidthDeg;
+            const float rightEdge = toothCentre + toothHalfWidthDeg;
+
+            const auto rightOuter = centre.getPointOnCircumference(ringInnerR, angleAt(rightEdge));
+            const auto rightInner = centre.getPointOnCircumference(toothR,     angleAt(rightEdge));
+            const auto leftOuter  = centre.getPointOnCircumference(ringInnerR, angleAt(leftEdge));
+
+            if (! started) { hole.startNewSubPath(rightOuter); started = true; }
+            else             hole.lineTo(rightOuter);
+
+            hole.lineTo(rightInner);
+            hole.addCentredArc(centre.x, centre.y, toothR, toothR, 0.0f,
+                               angleAt(rightEdge), angleAt(leftEdge), false);
+            hole.lineTo(leftOuter);
+
+            // Sweep the gap at ringInnerR down to the next notch's right edge -- the previous
+            // tooth in walking order, wrapping past 0 back to the very first point once i == 0.
+            const float nextRightEdge = (i > 0) ? ((float) (i - 1) * stepDeg + toothHalfWidthDeg)
+                                                 : (firstRightEdge - 360.0f);
+            hole.addCentredArc(centre.x, centre.y, ringInnerR, ringInnerR, 0.0f,
+                               angleAt(leftEdge), angleAt(nextRightEdge), false);
+        }
+        hole.closeSubPath();
+
+        juce::Path full;
+        full.addPath(ring);
+        full.addPath(hole);
         g.setColour(ink);
-        g.strokePath(body, juce::PathStrokeType(thickness, juce::PathStrokeType::curved,
-                                                juce::PathStrokeType::rounded));
-
-        const float reelR   = area.getHeight() * 0.27f;
-        const float reelCy  = area.getBottom() - reelR * 1.2f;
-        const float leftCx  = area.getX() + area.getWidth() * 0.30f;
-        const float rightCx = area.getRight() - area.getWidth() * 0.30f;
-
-        g.drawEllipse(leftCx - reelR, reelCy - reelR, reelR * 2.0f, reelR * 2.0f, thickness);
-        g.drawEllipse(rightCx - reelR, reelCy - reelR, reelR * 2.0f, reelR * 2.0f, thickness);
-        g.drawLine(leftCx, reelCy + reelR, rightCx, reelCy + reelR, thickness);
+        g.fillPath(full);
     }
 }
 
@@ -159,20 +198,16 @@ void R3WRKLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int wid
     g.fillPath(pointerPath);
 }
 
-// Pill buttons: fully rounded (radius = half the button height) -- except Scrub, which reads
-// as a cassette case rather than a transport pill and wants corners closer to that case's own
-// (drawScrubIcon already rounds its body at 0.24 of its own height; the button around it uses
-// a similar, much shallower fraction instead of the full stadium curve every other icon button
-// gets). A button whose configured background is fully transparent (see
-// EditorToolbar::applyTheme -- that's how a component asks for the "outline" treatment rather
-// than a filled one) gets a hairline border and a faint hover/press wash instead of a solid fill.
+// Pill buttons: fully rounded (radius = half the button height). A button whose configured
+// background is fully transparent (see EditorToolbar::applyTheme -- that's how a component
+// asks for the "outline" treatment rather than a filled one) gets a hairline border and a
+// faint hover/press wash instead of a solid fill.
 void R3WRKLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Button& button,
                                             const juce::Colour& backgroundColour,
                                             bool isHighlighted, bool isDown)
 {
     auto bounds = button.getLocalBounds().toFloat().reduced(0.5f);
-    const bool isScrubButton = button.getButtonText() == iconScrub;
-    const float radius = isScrubButton ? bounds.getHeight() * 0.22f : bounds.getHeight() * 0.5f;
+    const float radius = bounds.getHeight() * 0.5f;
 
     if (backgroundColour.getAlpha() == 0)
     {

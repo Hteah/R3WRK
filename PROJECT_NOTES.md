@@ -923,6 +923,26 @@ radius for it alone, leaving every other button's full stadium curve untouched. 
 cassette case corner now rather than a stadium with a cassette drawn inside it. Smoke test passes;
 all four targets build clean.
 
+**Icon replaced with a reel hub; button back to a circle.** User: "Don't like the scrub button.
+Can we use this one and go back to a circle?" — supplied a new reference image (`~/Desktop/Tape
+2.jpg`): a thick ring whose inner hole isn't a smooth circle but a 6-point spline, six
+rectangular notches cut inward every 60°, the sprocketed drive-hole a tape deck's spindle grips
+to turn a cassette reel. Radial ray-cast the reference the same way as the gear icon earlier
+(walk outward from the ink centroid at fine angle steps, record dark/light transitions) —
+confirmed 6-fold symmetry (notches at 60° spacing) and two radii: the outer ring boundary is a
+plain circle throughout, the inner hole alternates between a shallow radius (≈0.79× outer,
+between notches) and a deep radius (≈0.59× outer, at each notch), each notch a straight-edged
+rectangular cut rather than a curve. `drawScrubIcon` rewritten to build exactly that: an outer
+circle (clockwise) plus a 6-notch hole contour (walked counter-clockwise), combined into one
+`Path` and filled with nonzero winding — the same "outer contour clockwise + inner contour
+counter-clockwise punches a hole" technique `drawGearIcon` already used for its body/centre-hole,
+just with a spline hole instead of a round one. Reverted both button-shape changes from the
+rectangle experiment: `EditorToolbar::resized()`'s `scrubButton` width back to 28 (square, so the
+existing pill formula draws a true circle again) and removed `drawButtonBackground`'s
+Scrub-specific shallow-corner-radius exception entirely — the reel-hub icon reads better in a
+circle than the cassette-body icon did. Stayed last in the row (that part of the prior feedback
+holds). Smoke test passes; all four targets build clean.
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).

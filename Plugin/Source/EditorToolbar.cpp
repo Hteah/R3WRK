@@ -618,16 +618,15 @@ void EditorToolbar::resized()
                          .withMargin(juce::FlexItem::Margin(0, (float) gap, 0, 0)));
     };
     // Left-grouped, matching the mockup: Play/Loop/Record/Tools together, time pinned right.
-    // Scrub sits last, at the right-hand end of the button cluster -- and, unlike the round
-    // icon buttons, wider than it is tall, a rectangle rather than a circle (per the user's
-    // reference image; drawButtonBackground's pill formula already draws a stadium shape
-    // for any non-square button, so this needed no LookAndFeel change, just a wider width).
+    // Scrub sits last, at the right-hand end of the button cluster -- round like every other
+    // icon button here (the reel-hub icon reads better in a circle than the earlier
+    // rectangular cassette-body version did).
     add(playFromStartButton, 28);
     add(playButton, 28);
     add(loopButton, 28);
     add(recordButton, 28);
     add(toolsButton, 28);
-    add(scrubButton, 46);
+    add(scrubButton, 28);
     fb.items.add(juce::FlexItem().withFlex(1.0f));
     add(timeLabel, 150);
     fb.performLayout(row);
