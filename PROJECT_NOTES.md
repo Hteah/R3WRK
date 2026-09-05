@@ -262,6 +262,25 @@ rather than force-killing it, since there's no cancellation hook — a real
 risk only for a very long clip at an extreme ratio outliving the editor
 being closed, which isn't the expected use case for a sample editor.
 
+**Related bug, surfaced by testing the above**: after the message-thread-
+blocking fix, the user reported selections were still "hit and miss" at a
+high Stretch — reliable zoomed in, unreliable (especially for *small*
+selections) zoomed out. Root cause was in `WaveformDisplay::mouseUp()`'s
+click-vs-drag test, not the preview feature: every *other* pixel↔frame
+conversion in this file (`xToSample()`, `sampleToX()`, `panByPixels()`,
+`zoomToward()`) divides by `getTimeScale()`, but this one — computing `slop`,
+the "was that actually a drag, or just a click" tolerance — didn't. At a
+high Stretch the *real* frames-per-pixel (what `xToSample()` actually uses)
+is much smaller than this uncorrected version computed, so `slop` came out
+inflated by roughly a factor of `timeScale` — easily swallowing a genuine
+small drag as "just a click" and clearing the selection instead of keeping
+it. Zoomed out made it worse (`viewEnd - viewStart` — and so the error — is
+largest there, at `maxViewSpan()`); zoomed in happened to still work because
+the absolute error stayed small enough not to matter. Not a fluke of this
+session's other fixes — timeScale != 1 is the trigger, so this bug already
+existed wherever Speed/Pitch/Stretch were live, just went unnoticed until
+this round of testing exercised it directly.
+
 ## Selection context menu + live Amplify/Stretch preview
 
 Right-clicking inside a selection (`WaveformDisplay::onSelectionContextMenu`,

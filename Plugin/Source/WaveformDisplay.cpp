@@ -747,8 +747,14 @@ void WaveformDisplay::mouseUp(const juce::MouseEvent& e)
 
     if (kind == DragKind::newSelection)
     {
+        // Same timeScale-aware density xToSample() uses (this file's other frame/pixel
+        // conversions all divide by it -- this one didn't, a real bug: at a high Stretch,
+        // the raw-frame delta for a real few-pixel drag is *much* smaller than this slop
+        // tolerance was computing without the division, so a genuine small selection at a
+        // zoomed-out view kept reading as "just a click" and getting cleared instead of kept).
         const double framesPerPixel = (double) juce::jmax((int64_t) 1, viewEnd - viewStart)
-                                    / (double) juce::jmax(1, getWidth());
+                                    / (double) juce::jmax(1, getWidth())
+                                    / juce::jmax(0.0001, document.getTimeScale());
         const int64_t slop = juce::jmax((int64_t) 1, (int64_t) (3.0 * framesPerPixel));
         int64_t moved = dragAnchor - f;
         if (moved < 0) moved = -moved;
