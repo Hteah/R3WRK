@@ -60,7 +60,8 @@ juce_add_plugin(R3WRK
     PLUGIN_MANUFACTURER_CODE Heat
     PLUGIN_CODE R3wk
     FORMATS VST3 AU Standalone
-    PRODUCT_NAME "R3WRK")
+    PRODUCT_NAME "R3WRK"
+    ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/Resources/AppIcon.png")
 
 juce_generate_juce_header(R3WRK)
 

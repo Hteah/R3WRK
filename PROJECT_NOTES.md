@@ -1116,6 +1116,31 @@ shortcuts. Tools ▾'s own "Trim to Selection" item now shows the same "⌘T" hi
 Paste already display next to theirs (cosmetic only -- the real key binding lives in
 `keyPressed`, same as those). Smoke test passes; all four targets build clean.
 
+## App icon
+
+User: "Please use this as the app launch button" -- supplied a reference image (the same
+notched reel-hub ring already traced for the Scrub button's icon, see `drawScrubIcon` /
+`45771d0`'s predecessor). Rather than re-trace it, rendered the *exact same* geometry (outer
+ring, six 60°-spaced notches, `ringInnerR = outerR*0.79`, `toothR = outerR*0.59`) at 1024×1024
+in Python/Pillow, on a warm off-white rounded-square card matching the reference's own
+presentation -- ties the app's launcher icon to its own Scrub button rather than introducing a
+third, unrelated visual. Saved as `Plugin/Resources/AppIcon.png` (tracked in the repo, so the
+icon regenerates identically on a clean checkout); wired via `ICON_BIG` on the `juce_add_plugin`
+call in `CMakeLists.txt` -- JUCE's own build step converts it to an `.icns` and embeds it in
+whichever bundle format can carry one (Standalone `.app`, VST3, AU), no manual `iconutil` step
+needed. Adding `ICON_BIG` is a CMake *target property* change, not just a source change, so it
+needed a full `cmake -B build -G Xcode -DCMAKE_POLICY_VERSION_MINIMUM=3.5 .` reconfigure before
+the next build would pick it up (a "just build" without reconfiguring silently keeps the old,
+icon-less target definition). Verified by round-tripping the generated `.icns` back through
+`iconutil -c iconset` and inspecting the extracted PNG -- pixel-identical to the source. Only
+two sizes got embedded (512 and 512@2x/1024 -- JUCE's icon step doesn't synthesize the smaller
+16/32/128/256 tiers some `.icns` files carry), which just means macOS downsamples from those for
+small contexts (Finder list view, etc.) rather than using a purpose-drawn tiny version -- fine
+for a hobby-project plugin, a known simplification if it's ever worth revisiting. Smoke test
+passes; all four targets build clean. **Not independently visually confirmed in the Dock/Finder**
+(no interactive way to inspect Finder's rendered icon in this environment) beyond the `.icns`
+round-trip check -- flagged to the user to glance at Finder/the Dock themselves.
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).
