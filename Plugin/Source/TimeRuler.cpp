@@ -45,6 +45,11 @@ void TimeRuler::paint(juce::Graphics& g)
 
     const float w = (float) getWidth();
     const float h = (float) getHeight();
+
+    juce::Path clip;
+    clip.addRoundedRectangle(getLocalBounds().toFloat(), 10.0f);
+    g.reduceClipRegion(clip);
+
     g.fillAll(pal.panelBg);
     g.setColour(pal.gridLine);
     g.drawHorizontalLine(0, 0.0f, w);

@@ -66,8 +66,7 @@ private:
     juce::TextButton playButton   { "Play" };
     juce::TextButton loopButton   { "Loop" };   // setClickingTogglesState(true) -- a toggling
                                                 // pill, not a checkbox, to match Play/Record/Tools
-    juce::Label timeLabel;
-    juce::Label recLabel;   // "● REC m:ss" while recording, right-aligned
+    juce::Label timeLabel;   // also carries the "● REC m:ss" elapsed time while recording
     juce::TextButton recordButton { "Record" };
     juce::TextButton toolsButton  { "Tools" };
 

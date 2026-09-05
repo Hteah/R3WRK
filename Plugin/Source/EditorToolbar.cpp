@@ -147,12 +147,11 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     addAndMakeVisible(playButton);
     addAndMakeVisible(loopButton);
     addAndMakeVisible(timeLabel);
-    addAndMakeVisible(recLabel);
     addAndMakeVisible(recordButton);
     addAndMakeVisible(toolsButton);
 
     timeLabel.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::plain));
-    recLabel.setJustificationType(juce::Justification::centredRight);
+    timeLabel.setJustificationType(juce::Justification::centredRight);
     toolsButton.setButtonText(juce::String::fromUTF8("Tools \xe2\x96\xbe"));   // Tools ▾
     loopButton.setClickingTogglesState(true);
 
@@ -202,8 +201,8 @@ void EditorToolbar::applyTheme()
     toolsButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
     toolsButton.setColour(juce::TextButton::textColourOffId, pal.screenText);
 
+    // timeLabel's colour flips to pal.playhead while recording -- see timerCallback().
     timeLabel.setColour(juce::Label::textColourId, pal.screenTextDim);
-    recLabel.setColour(juce::Label::textColourId, pal.playhead);
     repaint();
 }
 
@@ -385,15 +384,15 @@ void EditorToolbar::timerCallback()
     if (document.isRecording.load())
     {
         const double recSec = (double) document.recordedSamples.load() / sr;
-        timeLabel.setText(formatTime(recSec) + " / " + formatTime(recSec), juce::dontSendNotification);
-        recLabel.setText(juce::String::fromUTF8("\xE2\x97\x8F REC  ") + mmss(recSec), juce::dontSendNotification);
+        timeLabel.setColour(juce::Label::textColourId, theme->palette().playhead);
+        timeLabel.setText(juce::String::fromUTF8("\xE2\x97\x8F REC  ") + mmss(recSec), juce::dontSendNotification);
     }
     else
     {
         const double posSec = (double) document.playhead.load() / sr;
         const double lenSec = (double) document.getNumSamples() / sr;
+        timeLabel.setColour(juce::Label::textColourId, theme->palette().screenTextDim);
         timeLabel.setText(formatTime(posSec) + " / " + formatTime(lenSec), juce::dontSendNotification);
-        recLabel.setText({}, juce::dontSendNotification);
     }
 }
 
@@ -487,12 +486,12 @@ void EditorToolbar::resized()
         fb.items.add(juce::FlexItem(c).withWidth((float) w).withMinWidth(22.0f)
                          .withMargin(juce::FlexItem::Margin(0, (float) gap, 0, 0)));
     };
+    // Left-grouped, matching the mockup: Play/Loop/Record/Tools together, time pinned right.
     add(playButton, 58);
     add(loopButton, 56);
-    add(timeLabel, 150);
-    fb.items.add(juce::FlexItem().withFlex(1.0f));
-    add(recLabel, 118);
     add(recordButton, 80);
     add(toolsButton, 84);
+    fb.items.add(juce::FlexItem().withFlex(1.0f));
+    add(timeLabel, 150);
     fb.performLayout(row);
 }

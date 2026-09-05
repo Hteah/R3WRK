@@ -334,6 +334,11 @@ void WaveformDisplay::resized()
 void WaveformDisplay::paintRecordingScope(juce::Graphics& g)
 {
     const auto& pal = theme->palette();
+
+    juce::Path clip;
+    clip.addRoundedRectangle(getLocalBounds().toFloat(), 10.0f);
+    g.reduceClipRegion(clip);
+
     g.fillAll(pal.panelBg);
 
     const float W = (float) getWidth();
@@ -386,6 +391,10 @@ void WaveformDisplay::paint(juce::Graphics& g)
     }
 
     const auto& pal = theme->palette();
+
+    juce::Path clip;
+    clip.addRoundedRectangle(getLocalBounds().toFloat(), 10.0f);
+    g.reduceClipRegion(clip);
 
     g.fillAll(pal.panelBg);
 
