@@ -1027,6 +1027,17 @@ persisted -- an "armed and waiting" state shouldn't survive a save/reload, the s
 
 Smoke test passes; all four targets build clean.
 
+**Icon replaced with a gauge.** User: "can you use this for the threshold button?" -- supplied a
+reference image (a circular gauge: ring, a shorter inner scale arc, a needle, a centre pivot
+dot). Radial ray-cast it the same way as the gear/reel icons: the outer ring is a plain circle
+throughout; the inner scale arc spans -95° to +5° (JUCE's 0=up/clockwise-positive convention) --
+lower-left, up through the top, stopping just past it, not a tidy symmetric sweep; the needle
+points to +45° (upper-right), well past the arc's own end, exactly as measured rather than
+smoothed into pointing at the arc's tip. `drawAutoRecordIcon` (bars + threshold line) replaced
+outright by `drawGaugeIcon`; the `iconAutoRecord` marker name is unchanged (still names the
+button's function, same as `iconTools`/`iconScrub` keeping their marker names through multiple
+icon redesigns). Smoke test passes; all four targets build clean.
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).

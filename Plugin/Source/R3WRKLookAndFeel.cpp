@@ -202,32 +202,40 @@ namespace
                                              juce::PathStrokeType::rounded));
     }
 
-    // Auto-Record: three ascending level bars crossed by a threshold line -- "waits for the
-    // input to reach this line, then starts recording for real" (see AudioDocument::
-    // autoRecordThresholdDb / PluginProcessor's idle-block level check).
-    void drawAutoRecordIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
+    // Auto-Record: a gauge -- an outer ring, a shorter/thicker inner scale arc, and a needle
+    // pointing off toward the upper right, traced from a reference icon the user supplied
+    // (radial ray-cast the same way as the gear/reel icons: the ring is a plain circle
+    // throughout, the scale arc spans roughly -95deg to +5deg -- lower-left, up through the
+    // top, to just past it -- and the needle points to +45deg, well past the arc's own end,
+    // exactly as measured in the reference rather than tidied into a symmetric sweep).
+    void drawGaugeIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
     {
-        auto area = bounds.reduced(bounds.getHeight() * 0.26f);
-        const float barW = area.getWidth() * 0.22f;
-        const float gap  = area.getWidth() * 0.12f;
-        const float heightFractions[3] = { 0.42f, 0.70f, 1.0f };
-        const float totalW = barW * 3.0f + gap * 2.0f;
-        float x = area.getCentreX() - totalW * 0.5f;
+        auto area = bounds.reduced(bounds.getHeight() * 0.16f);
+        const auto  centre = area.getCentre();
+        const float outerR = juce::jmin(area.getWidth(), area.getHeight()) * 0.5f;
 
-        juce::Path bars;
-        for (float hf : heightFractions)
-        {
-            const float barH = area.getHeight() * hf;
-            bars.addRoundedRectangle(x, area.getBottom() - barH, barW, barH, barW * 0.3f);
-            x += barW + gap;
-        }
         g.setColour(ink);
-        g.fillPath(bars);
 
-        // The threshold line: level with the middle bar's top, spanning the full icon width.
-        const float lineY = area.getBottom() - area.getHeight() * heightFractions[1];
-        const float thickness = juce::jmax(1.3f, area.getHeight() * 0.09f);
-        g.drawLine(area.getX(), lineY, area.getRight(), lineY, thickness);
+        const float ringThickness = outerR * 0.18f;
+        g.drawEllipse(centre.x - outerR + ringThickness * 0.5f, centre.y - outerR + ringThickness * 0.5f,
+                      (outerR - ringThickness * 0.5f) * 2.0f, (outerR - ringThickness * 0.5f) * 2.0f,
+                      ringThickness);
+
+        const float arcR = outerR * 0.66f;
+        const float arcThickness = outerR * 0.19f;
+        juce::Path arc;
+        arc.addCentredArc(centre.x, centre.y, arcR, arcR, 0.0f,
+                          juce::degreesToRadians(-95.0f), juce::degreesToRadians(5.0f), true);
+        g.strokePath(arc, juce::PathStrokeType(arcThickness, juce::PathStrokeType::curved,
+                                               juce::PathStrokeType::butt));
+
+        const float needleLen = outerR * 0.66f;
+        const float needleThickness = juce::jmax(1.6f, outerR * 0.16f);
+        const auto tip = centre.getPointOnCircumference(needleLen, juce::degreesToRadians(45.0f));
+        g.drawLine(centre.x, centre.y, tip.x, tip.y, needleThickness);
+
+        const float dotR = outerR * 0.19f;
+        g.fillEllipse(centre.x - dotR, centre.y - dotR, dotR * 2.0f, dotR * 2.0f);
     }
 }
 
@@ -350,7 +358,7 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     }
     if (text == iconAutoRecord)
     {
-        drawAutoRecordIcon(g, bounds, ink);
+        drawGaugeIcon(g, bounds, ink);
         return;
     }
 
