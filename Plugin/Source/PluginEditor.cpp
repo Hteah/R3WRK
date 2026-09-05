@@ -57,6 +57,12 @@ R3WRKAudioProcessorEditor::~R3WRKAudioProcessorEditor()
 void R3WRKAudioProcessorEditor::paint(juce::Graphics& g)
 {
     g.fillAll(theme->palette().windowBg);
+
+    if (showingDropHighlight)
+    {
+        g.setColour(theme->palette().accent);
+        g.drawRect(getLocalBounds(), 3);
+    }
 }
 
 void R3WRKAudioProcessorEditor::resized()
@@ -108,4 +114,41 @@ bool R3WRKAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
     if (key == KP('-', cmd, 0))
         { waveformDisplay.zoomOut(); return true; }
     return false;
+}
+
+bool R3WRKAudioProcessorEditor::isInterestedInFileDrag(const juce::StringArray& files)
+{
+    // Same extensions Tools ▾ -> "Open…"'s FileChooser filters to (EditorToolbar::openFile()).
+    for (auto& f : files)
+        if (juce::File(f).hasFileExtension("wav;aiff;aif;flac;ogg;mp3"))
+            return true;
+    return false;
+}
+
+void R3WRKAudioProcessorEditor::fileDragEnter(const juce::StringArray&, int, int)
+{
+    showingDropHighlight = true;
+    repaint();
+}
+
+void R3WRKAudioProcessorEditor::fileDragExit(const juce::StringArray&)
+{
+    showingDropHighlight = false;
+    repaint();
+}
+
+void R3WRKAudioProcessorEditor::filesDropped(const juce::StringArray& files, int, int)
+{
+    showingDropHighlight = false;
+    repaint();
+
+    for (auto& f : files)
+    {
+        juce::File file(f);
+        if (file.hasFileExtension("wav;aiff;aif;flac;ogg;mp3"))
+        {
+            toolbar.loadAudioFile(file);
+            return;   // one file at a time, same as Open -- the first recognised one dropped
+        }
+    }
 }

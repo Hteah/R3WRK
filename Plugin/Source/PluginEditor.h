@@ -10,7 +10,8 @@
 #include "Theme.h"
 
 class R3WRKAudioProcessorEditor : public juce::AudioProcessorEditor,
-                                  private juce::ChangeListener
+                                  private juce::ChangeListener,
+                                  public juce::FileDragAndDropTarget
 {
 public:
     explicit R3WRKAudioProcessorEditor(R3WRKAudioProcessor&);
@@ -20,8 +21,20 @@ public:
     void resized() override;
     bool keyPressed(const juce::KeyPress&) override;
 
+    // Drag a sample in from Finder (or a DAW's browser) and drop it anywhere on the window to
+    // load it, same as Tools ▾ -> "Open…" -- covers the whole editor rather than just the
+    // waveform, since none of the child components (WaveformDisplay included) implement
+    // FileDragAndDropTarget themselves, so JUCE's peer keeps walking up the component
+    // hierarchy from whatever's under the cursor until it reaches this one.
+    bool isInterestedInFileDrag(const juce::StringArray& files) override;
+    void fileDragEnter(const juce::StringArray& files, int x, int y) override;
+    void fileDragExit(const juce::StringArray& files) override;
+    void filesDropped(const juce::StringArray& files, int x, int y) override;
+
 private:
     void changeListenerCallback(juce::ChangeBroadcaster*) override { repaint(); }
+
+    bool showingDropHighlight = false;
 
     R3WRKAudioProcessor& processorRef;
     juce::SharedResourcePointer<ThemeManager> theme;

@@ -48,6 +48,12 @@ public:
     // pop-up panels Tools ▾ uses, anchored at the click instead of the Tools button.
     void showSelectionContextMenu(juce::Point<int> screenPosition);
 
+    // Loads an audio file, replacing the current document -- the same call Tools ▾ -> "Open…"
+    // makes after its FileChooser resolves. Public so PluginEditor's FileDragAndDropTarget
+    // (dropping a sample from Finder onto the window) can share it rather than duplicating
+    // the open-succeeded bookkeeping (header name, zoom-to-fit, saved/dirty state).
+    void loadAudioFile(const juce::File& file);
+
 private:
     void timerCallback() override;
     void applyTheme();

@@ -1081,6 +1081,27 @@ own undo step") independent of the Revert-to-Original one, since this affects ev
 app, not just the new feature that happened to surface it. Smoke test passes (both new sections);
 all four targets build clean.
 
+## Drag a sample in from Finder
+
+User: "Have we worked on dragging and dropping samples into R3WRK? Doesn't seem to work" -- it
+hadn't: there was drag-*out* (a selection to Finder/Ableton, `59302c7`) but nothing accepting a
+drop coming *in*.
+
+`R3WRKAudioProcessorEditor` now implements `juce::FileDragAndDropTarget` -- covering the whole
+editor window, not just the waveform strip, since none of the child components implement the
+interface themselves and JUCE's peer walks up the component hierarchy from whatever's under the
+cursor until it finds one that does. `isInterestedInFileDrag`/`filesDropped` check the same
+extension list Tools ▾ -> "Open…"'s `FileChooser` already filters to (`wav;aiff;aif;flac;ogg;
+mp3`); a drop loads the first recognised file the same way Open does -- `EditorToolbar::openFile()`
+had its FileChooser-success body factored out into a new public `loadAudioFile(file)` so both
+paths share the exact same "header name, zoom-to-fit, saved/dirty state" bookkeeping instead of
+duplicating it. `fileDragEnter`/`fileDragExit` toggle a thin accent-coloured border around the
+whole window while a recognised file is being dragged over it, so there's some visual
+acknowledgement before you let go. Smoke test passes; all four targets build clean -- **could
+not verify the actual drag gesture end-to-end** (no mouse-drag-from-Finder scripting in this
+environment), only that it builds, launches, and the extension-matching logic is correct by
+inspection; flagged to the user to confirm the feel themselves.
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).

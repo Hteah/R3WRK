@@ -662,12 +662,18 @@ void EditorToolbar::openFile()
     fileChooser->launchAsync(flags, [this](const juce::FileChooser& fc)
     {
         auto file = fc.getResult();
-        if (file.existsAsFile() && document.loadFromFile(file, processor.getSampleRate()))
-        {
-            if (onSourceNameChanged) onSourceNameChanged(file.getFileName());
-            if (onSaved) onSaved();
-        }
+        if (file.existsAsFile())
+            loadAudioFile(file);
     });
+}
+
+void EditorToolbar::loadAudioFile(const juce::File& file)
+{
+    if (document.loadFromFile(file, processor.getSampleRate()))
+    {
+        if (onSourceNameChanged) onSourceNameChanged(file.getFileName());
+        if (onSaved) onSaved();
+    }
 }
 
 void EditorToolbar::saveFile()
