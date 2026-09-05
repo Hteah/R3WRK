@@ -57,10 +57,10 @@ namespace
         const float toothLen = R * 0.30f;  // tooth radial length
         const float holeR   = R * 0.30f;   // centre hole radius -- comfortably inside bodyR so
                                             // the ring band reads as hollow, not solid, once stroked
-        const int   numTeeth = 8;
-        // Half-step for 8 teeth is 22.5deg -- keep well under that so each tooth stays a
+        const int   numTeeth = 6;   // matches the reference glyph (6 teeth, not 8)
+        // Half-step for 6 teeth is 30deg -- keep well under that so each tooth stays a
         // distinct block with a clear gap either side, rather than merging into a ring.
-        const float toothHalfWidth = juce::degreesToRadians(12.0f);
+        const float toothHalfWidth = juce::degreesToRadians(15.0f);
         const float step = juce::MathConstants<float>::twoPi / (float) numTeeth;
 
         juce::Path gear;

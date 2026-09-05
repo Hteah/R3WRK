@@ -310,7 +310,9 @@ rounds of screenshot+zoom iteration: 8 teeth at a half-width too close to the
 stroked style, the ring band between body and hole radius also needed to be
 wider than the stroke thickness or it filled in solid again -- settled on body/
 hole/tooth-length radii with enough clearance at the (near-floor, ~1.3px) stroke
-thickness this size forces.
+thickness this size forces. Tooth count is 6, not 8 -- the user's reference had
+6 points; `numTeeth`/`toothHalfWidth` are the two constants to change for a
+different count (half-width just needs to stay well under 360°/2/numTeeth).
 
 All five toolbar buttons (`playFromStartButton`/`playButton`/`loopButton`/
 `recordButton`/`toolsButton`) call `setWantsKeyboardFocus(false)`. A mouse
