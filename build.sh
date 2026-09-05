@@ -9,6 +9,10 @@ CONFIG=${1:-Release}
 if [ ! -d JUCE ]; then
     echo "→ cloning JUCE $JUCE_TAG"
     git clone --depth 1 --branch "$JUCE_TAG" https://github.com/juce-framework/JUCE.git
+    echo "→ applying R3WRK patches to JUCE (see patches/README.md)"
+    for p in patches/*.patch; do
+        (cd JUCE && git apply "../$p") || echo "  ! $p didn't apply -- see patches/README.md"
+    done
 fi
 
 command -v cmake >/dev/null || { echo "cmake not found — see BUILD_ON_MACOS.md"; exit 1; }

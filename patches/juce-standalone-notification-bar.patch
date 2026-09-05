@@ -1,0 +1,35 @@
+diff --git a/modules/juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h b/modules/juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h
+index a4ddcf2..d2bd701 100644
+--- a/modules/juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h
++++ b/modules/juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h
+@@ -931,8 +931,15 @@ private:
+             {
+                 setOpaque (true);
+ 
+-                notification.setColour (Label::textColourId, Colours::black);
+-
++                // R3WRK: recoloured to sit quietly alongside the app's own dark UI instead of
++                // JUCE's stock bright-yellow feedback-loop warning banner -- Midnight theme's
++                // panelBg/accent/screenText, hardcoded rather than read live from R3WRK's
++                // ThemeManager (this window lives outside the plugin editor entirely, so it
++                // has no reach into the app's theme system without much deeper wiring).
++                notification.setColour (Label::textColourId, Colour (0xffe0e0e0));
++
++                settingsButton.setColour (TextButton::buttonColourId, Colour (0xff2a2e35));
++                settingsButton.setColour (TextButton::textColourOffId, Colour (0xffe0e0e0));
+                 settingsButton.addListener (settingsButtonListener);
+ 
+                 addAndMakeVisible (notification);
+@@ -943,10 +950,10 @@ private:
+             {
+                 auto r = getLocalBounds();
+ 
+-                g.setColour (Colours::darkgoldenrod);
++                g.setColour (Colour (0xff5ec2ff));
+                 g.fillRect (r.removeFromBottom (1));
+ 
+-                g.setColour (Colours::lightgoldenrodyellow);
++                g.setColour (Colour (0xff17191e));
+                 g.fillRect (r);
+             }
+ 

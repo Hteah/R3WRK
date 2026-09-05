@@ -1218,6 +1218,38 @@ then `killall Finder Dock`. That combination finally produced a correct, freshly
 time.** No source changes beyond the new icon artwork; confirmed via a fresh Finder preview
 screenshot matching the reference exactly. Smoke test passes; all four targets build clean.
 
+## Recoloured the Standalone "audio input muted" banner
+
+User: "Is there anyway you can change the color of the yellow bar with 'audio input is muted to
+avoid feedback loop', or have a way to hide it?" That banner is JUCE's own stock UI, not R3WRK's
+-- `NotificationArea`, a private nested class inside `juce_StandaloneFilterWindow.h`
+(`juce_audio_plugin_client/Standalone/`), hardcoded to `Colours::lightgoldenrodyellow` fill /
+`darkgoldenrod` border / black text, with no exposed customization hook (no virtual paint method,
+no theme injection point) to reach from R3WRK's own source -- it only exists in the Standalone
+build (the window wrapping the plugin editor), never in the VST3/AU, which don't have a
+standalone audio device to worry about feeding back.
+
+Chose recolour over hide: the muting itself is a real safety feature (stops live input feeding
+back into output when they're the same device) worth keeping *visible* that it's active, just not
+in JUCE's jarring stock yellow. Patched `NotificationArea`'s `paint()`/constructor directly in the
+vendored `JUCE/` checkout to use R3WRK's own Midnight-theme colours (`panelBg` 0xff17191e fill,
+`accent` 0xff5ec2ff bottom border, `screenText` 0xffe0e0e0 text, also applied to the "Settings…"
+button) -- hardcoded rather than read live from `ThemeManager`, since this window lives *outside*
+the plugin editor entirely (it wraps the editor, doesn't contain it) and has no reach into the
+app's theme system without much deeper wiring than a cosmetic fix like this warrants.
+
+**Made the edit durable across a fresh JUCE clone.** `JUCE/` is git-ignored and re-cloned fresh by
+both `build.sh` and `BUILD_ON_MACOS.md`'s manual steps (`git clone --depth 1 --branch 8.0.15 ...`)
+-- a hand-edit to the vendored checkout alone would silently vanish the next time someone (or a
+future session) re-clones it. Captured the change as a plain `git diff` from inside the JUCE
+checkout (it's its own git repo, so this was just `git diff > patch-file`), saved as new
+`patches/juce-standalone-notification-bar.patch` (+ `patches/README.md` explaining the mechanism
+and why it's hardcoded rather than theme-aware) -- `build.sh` now applies every `patches/*.patch`
+automatically right after a fresh clone; `BUILD_ON_MACOS.md`'s manual-clone snippet got the same
+loop added inline for anyone not using the script. Smoke test passes; all four targets build
+clean (only the Standalone target actually relinks against the changed header -- VST3/AU are
+unaffected, as expected, since they never build that file at all).
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).

@@ -30,10 +30,12 @@ instead.
 ```bash
 git clone <this repo> R3WRK && cd R3WRK
 git clone --depth 1 --branch 8.0.15 https://github.com/juce-framework/JUCE.git
+for p in patches/*.patch; do (cd JUCE && git apply "../$p"); done
 ```
 
 `JUCE/` must sit next to `Plugin/` (the `CMakeLists.txt` does `add_subdirectory(../JUCE)`).
-It's git-ignored.
+It's git-ignored. `patches/` has small local edits to JUCE itself (see `patches/README.md`) --
+`build.sh` applies them automatically after its own clone; a manual clone needs that last line.
 
 ## 3. Configure and build
 
