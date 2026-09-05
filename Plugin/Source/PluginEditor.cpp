@@ -83,9 +83,6 @@ bool R3WRKAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
     using KP = juce::KeyPress;
     const auto cmd = juce::ModifierKeys::commandModifier;
     const auto cmdShift = cmd | juce::ModifierKeys::shiftModifier;
-    const auto ctrl = juce::ModifierKeys::ctrlModifier;   // literally Control, not ⌘ -- distinct
-                                                          // bits on macOS (unlike Windows/Linux,
-                                                          // where JUCE aliases them)
 
     if (key == KP(juce::KeyPress::spaceKey))  { toolbar.togglePlay(); return true; }
     if (key == KP('z', cmd, 0))               { toolbar.doUndo();     return true; }
@@ -94,23 +91,21 @@ bool R3WRKAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
     if (key == KP('c', cmd, 0))               { toolbar.doCopy();     return true; }
     if (key == KP('v', cmd, 0))               { toolbar.doPaste();    return true; }
 
-    // Zoom the waveform without the mouse. Ctrl+Up/Down are the reliable primary binding: on
-    // macOS, Control held with a *printable symbol* key ("+"/"-"/"=") never reaches this
-    // function at all on a US keyboard -- Control has no defined control-code mapping for
-    // those characters, so Cocoa's own text layer decides there's nothing to insert,
-    // [NSEvent characters] comes back empty, and JUCE's Cocoa backend only calls
-    // handleKeyPress() by iterating that (now-empty) string, so the native event is dropped
-    // before any JUCE KeyPress is ever constructed -- not something fixable by how we match
-    // it here. Arrow keys don't hit that path (Cocoa always reports a non-empty character for
-    // them), so Ctrl+Up/Down get through reliably. Ctrl+"+"/"-" are still matched below too,
-    // in case a different keyboard layout doesn't hit the same snag.
-    if (key == KP(KP::upKey, ctrl, 0))   { waveformDisplay.zoomIn();  return true; }
-    if (key == KP(KP::downKey, ctrl, 0)) { waveformDisplay.zoomOut(); return true; }
-    if (key.getModifiers().isCtrlDown())
-    {
-        const auto ch = key.getTextCharacter();
-        if (ch == '+' || ch == '=') { waveformDisplay.zoomIn();  return true; }
-        if (ch == '-')              { waveformDisplay.zoomOut(); return true; }
-    }
+    // Zoom the waveform without the mouse: the standard Mac convention, ⌘+/⌘- (Safari,
+    // Preview, Xcode, ...). Two earlier attempts used Control instead (per the user's first
+    // request) and both turned out to be dead ends on macOS: Control held with a symbol key
+    // ("+"/"-"/"=") never reaches a JUCE KeyPress at all (Control has no control-code mapping
+    // for those characters, so Cocoa's text layer produces no characters and JUCE's Cocoa
+    // backend drops the event before dispatch), and Control+Up/Down are themselves claimed
+    // system-wide for Mission Control / Application Windows, intercepted before any app sees
+    // them. ⌘ avoids both problems -- matched on keyCode, not the resulting character/text,
+    // same as the ⌘Z/⌘X/⌘C/⌘V shortcuts above: JUCE's Cocoa backend zeroes the text character
+    // for every ⌘ chord (it's a command, not text input), so keyCode is the only thing to
+    // match on. ⌘+ arrives as either Shift-⌘-"=" (cmdShift, the usual case on a US keyboard)
+    // or occasionally its own "+" keycode, so both are matched alongside plain ⌘-"=".
+    if (key == KP('=', cmd, 0) || key == KP('=', cmdShift, 0) || key == KP('+', cmd, 0))
+        { waveformDisplay.zoomIn(); return true; }
+    if (key == KP('-', cmd, 0))
+        { waveformDisplay.zoomOut(); return true; }
     return false;
 }

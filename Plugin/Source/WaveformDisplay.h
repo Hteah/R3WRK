@@ -18,12 +18,12 @@
       - right-click inside the selection body for a context menu
         (Amplify/Reverse/Stretch·Pitch) -- see onSelectionContextMenu.
     Mouse wheel zooms toward the pointer (or into the selection if there is one);
-    horizontal swipe / Shift+wheel pans. Ctrl+Up/Down zoom in/out centred on the current
-    view (see zoomIn()/zoomOut(), wired up in PluginEditor::keyPressed) for zooming
-    without the mouse -- the reliable binding; Ctrl+"+"/"-" are matched too but don't
-    reach the app on a US Mac keyboard (see the comment in PluginEditor::keyPressed).
-    The view also auto-refits after an edit that changes the document's length while
-    showing the whole thing (see refitViewIfContentChanged()).
+    horizontal swipe / Shift+wheel pans. ⌘+/⌘- zoom in/out centred on the current view
+    (see zoomIn()/zoomOut(), wired up in PluginEditor::keyPressed) for zooming without
+    the mouse -- not Control, which turned out to be a dead end on macOS twice over
+    (see the comment in PluginEditor::keyPressed). The view also auto-refits after an
+    edit that changes the document's length while showing the whole thing (see
+    refitViewIfContentChanged()).
 */
 class WaveformDisplay : public juce::Component,
                          public juce::ChangeListener,

@@ -193,15 +193,33 @@ means the loop body never runs, so the native key-down event is dropped
 before any JUCE `KeyPress` is ever constructed. Not fixable by how the
 `KeyPress` is matched in application code (nothing reaches it to match).
 
-Fix: **Ctrl+Up/Ctrl+Down** are the primary binding instead — arrow keys don't
-hit that snag (Cocoa always reports a non-empty character for them, which is
-why JUCE's backend has to explicitly scrub it back out for arrow keys a few
-lines further down, in a switch statement — confirming the loop does run for
-them). Matched the same way the existing ⌘Z/⌘X/⌘C/⌘V shortcuts are
-(`key == KeyPress(KeyPress::upKey, ctrlModifier, 0)`), rather than by
-character. The Ctrl+"+"/"-" character-based match is left in too, in case a
-different keyboard layout doesn't hit the same Cocoa behaviour — harmless if
-it simply never fires on this one.
+Second attempt: **Ctrl+Up/Ctrl+Down** instead — arrow keys don't hit the
+symbol-key snag above (Cocoa always reports a non-empty character for them,
+which is why JUCE's backend has to explicitly scrub it back out for arrow
+keys a few lines further down — confirming the loop does run for them).
+Matched the same way the existing ⌘Z/⌘X/⌘C/⌘V shortcuts are
+(`key == KeyPress(KeyPress::upKey, ctrlModifier, 0)`), not by character. Built,
+shipped — user reported "still not zooming". Root cause this time: Control+Up
+and Control+Down are themselves claimed *system-wide* by macOS by default
+(System Settings → Keyboard → Keyboard Shortcuts → Mission Control —
+"Mission Control" and "Application windows"), intercepted well before any
+app's `NSView` sees the event at all. A second dead end, unrelated to the
+first.
+
+Asked the user how to proceed rather than guess a third Control combo
+(previous two both failed for platform reasons neither could have been
+anticipated without hitting them) — chose **⌘+/⌘-**, the standard Mac zoom
+convention (Safari, Preview, Xcode, ...), which sidesteps both problems: ⌘
+doesn't share Control's missing-control-code-mapping gap, and isn't
+system-reserved on the zoom keys. Matched **by keyCode, not by character** —
+`key == KeyPress('=', commandModifier, 0)` (plus the `cmdShift` variant for
+"+" arriving as Shift-⌘-"=", the usual case on a US keyboard, and a literal
+"+" keycode variant for layouts that report one directly), the same idiom
+the existing ⌘Z/⌘X/⌘C/⌘V shortcuts already use — necessarily so, since JUCE's
+Cocoa backend zeroes the text character for every ⌘ chord (it's a command,
+not text input), so `getTextCharacter()` was never going to work here either.
+The Control-based code from both earlier attempts was removed rather than
+left in as a fallback, since both are now confirmed dead on this platform.
 
 ## Waveform peak cache
 
@@ -489,7 +507,7 @@ current sample rate if they differ, so pitch/speed is correct in your DAW.
   change; fine for typical sample lengths, would want to be a smarter
   incremental/windowed computation for very long recordings.
 - Keyboard shortcuts are limited to the editor essentials (Space, ⌘Z/⌘⇧Z,
-  ⌘X/⌘C/⌘V, Ctrl+Up/Down to zoom the waveform); no user-configurable key map.
+  ⌘X/⌘C/⌘V, ⌘+/⌘- to zoom the waveform); no user-configurable key map.
 - The offline Stretch/Pitch edit (Tools menu / selection right-click) commits
   audio only on Apply — the slider drag previews *visually* (see "Selection
   context menu + live Amplify/Stretch preview" above) but there's no live
