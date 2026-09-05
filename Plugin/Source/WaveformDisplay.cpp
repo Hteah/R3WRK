@@ -695,10 +695,9 @@ void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
     if (document.scrubModeEnabled)
     {
         document.isPlaying = false;   // scrubbing and normal playback don't mix
-        scrubLastSample = xToSample((float) e.x);
-        scrubLastTimeMs = juce::Time::getMillisecondCounterHiRes();
-        document.playhead = scrubLastSample;
-        document.scrubVelocity = 0.0;   // silent until the drag actually moves
+        scrubAnchorX = (float) e.x;   // the shuttle's "centre" -- see mouseDrag()
+        document.playhead = xToSample((float) e.x);
+        document.scrubVelocity = 0.0;   // dead centre -- silent until you pull away from it
         document.isScrubbing = true;
         document.notifyChanged();
         return;
@@ -755,24 +754,25 @@ void WaveformDisplay::mouseDrag(const juce::MouseEvent& e)
         if (! document.isScrubbing.load())
             return;
 
-        const int64_t sample = xToSample((float) e.x);
-        const double now = juce::Time::getMillisecondCounterHiRes();
-        const double dtSec = (now - scrubLastTimeMs) / 1000.0;
+        // Shuttle-style, not speed-of-motion: how *far* you've pulled away from where you
+        // pressed sets the rate (sign = direction), same as a tape deck's shuttle wheel --
+        // not literally "how fast the tape is moving under your finger". So a fast flick to a
+        // modest distance starts just as slow as a careful pull to that same distance, and
+        // holding the pointer still at some distance keeps playing at that rate rather than
+        // decaying to zero -- only *how far*, never *how fast*, matters. (An earlier version
+        // used raw pixel-delta / time-between-events, which blew past the velocity ceiling on
+        // almost any drag once samples-per-pixel was more than tiny -- a several-pixel move
+        // over one ~10ms mouse event is a huge sample delta at any real zoom level.)
+        const float offsetPx = (float) e.x - scrubAnchorX;
+        const float magnitude = juce::jlimit(0.0f, 1.0f,
+            (std::abs(offsetPx) - scrubDeadZonePx) / (scrubMaxDragPx - scrubDeadZonePx));
+        const float curved = magnitude * magnitude;   // slow near the centre, faster further out
 
-        // Skip absurdly tiny/zero intervals (back-to-back events with no real time between
-        // them would otherwise divide-by-near-zero into a spurious huge velocity) --
-        // just wait for the next event instead of updating on this one.
-        if (dtSec > 0.001)
-        {
-            const double sampleRate = juce::jmax(1.0, document.getSampleRate());
-            const double maxVelocity = sampleRate * 12.0;   // generous but finite -- see renderScrub()
-            double velocity = (double) (sample - scrubLastSample) / dtSec;
-            velocity = juce::jlimit(-maxVelocity, maxVelocity, velocity);
+        const double sampleRate = juce::jmax(1.0, document.getSampleRate());
+        const double maxVelocity = sampleRate * 12.0;   // generous but finite -- see renderScrub()
+        const double velocity = (offsetPx < 0.0f ? -1.0 : 1.0) * (double) curved * maxVelocity;
 
-            document.scrubVelocity = velocity;
-            scrubLastSample = sample;
-            scrubLastTimeMs = now;
-        }
+        document.scrubVelocity = velocity;
         return;
     }
 

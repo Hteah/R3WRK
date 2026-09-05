@@ -30,10 +30,10 @@
     whole thing (see refitViewIfContentChanged()).
 
     While the Scrub tool is selected (document.scrubModeEnabled, toggled by
-    EditorToolbar's Scrub button), every mouse gesture here is repurposed: drag across the
-    waveform to play forward or backward at a rate matching how fast you drag, like moving
-    tape past a playback head by hand -- see mouseDown()/mouseDrag()/mouseUp() and
-    PluginProcessor::renderScrub().
+    EditorToolbar's Scrub button), every mouse gesture here is repurposed: press and drag
+    left/right, shuttle-style -- the *distance* you've pulled from where you pressed sets how
+    fast it plays in that direction (not how fast you're moving the mouse), like a tape deck's
+    shuttle wheel -- see mouseDown()/mouseDrag()/mouseUp() and PluginProcessor::renderScrub().
 
     While Speed/Pitch/Stretch are non-identity, the drawn waveform *shape* comes from a real
     offline stretch computed in the background (see WaveformStretchPreview / stretchPreview)
@@ -145,13 +145,15 @@ private:
     static constexpr float edgeTolerancePx = 8.0f;
 
     // Scrub tool (document.scrubModeEnabled) -- entirely separate from the DragKind state
-    // above; a scrub drag never touches the selection. mouseDrag re-derives a velocity
-    // (raw samples/sec, signed) from how far and how fast the sample under the pointer has
-    // moved since the last event, and writes it to document.scrubVelocity for the audio
-    // thread (see PluginProcessor::renderScrub) to integrate -- so the pitch rises and
-    // falls with drag speed, exactly like moving real tape past a playback head by hand.
-    int64_t scrubLastSample = 0;
-    double scrubLastTimeMs = 0.0;
+    // above; a scrub drag never touches the selection. Shuttle-style: mouseDown drops an
+    // anchor at the press point, and mouseDrag derives a velocity (raw samples/sec, signed)
+    // from how far the pointer now sits from that anchor (not how fast it's moving), writing
+    // it to document.scrubVelocity for the audio thread (see PluginProcessor::renderScrub) to
+    // integrate -- slow near the anchor, faster the further you pull, in whichever direction,
+    // held steady for as long as the pointer stays at that distance.
+    float scrubAnchorX = 0.0f;
+    static constexpr float scrubDeadZonePx = 4.0f;    // a press that hasn't moved yet stays silent
+    static constexpr float scrubMaxDragPx  = 160.0f;  // distance from the anchor for full rate
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(WaveformDisplay)
 };

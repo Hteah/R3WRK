@@ -192,8 +192,8 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     playFromStartButton.setTooltip("Play from start");
     playButton.setTooltip("Play the selection (Space)");
     loopButton.setTooltip("Loop");
-    scrubButton.setTooltip("Scrub -- drag across the waveform to play forward/backward at "
-                           "the speed you drag, like moving tape by hand");
+    scrubButton.setTooltip("Scrub -- press and drag left/right; how far you pull sets the "
+                           "speed, like a tape deck's shuttle wheel");
     recordButton.setTooltip("Record");
     toolsButton.setTooltip("Tools");
 

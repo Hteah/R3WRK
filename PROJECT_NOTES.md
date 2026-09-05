@@ -868,6 +868,31 @@ all, consistent with `renderPlaybackDirect`/`renderPlaybackStretched` also
 having no smoke-test coverage — this is real-time audio-thread code exercised
 by ear, not something the headless harness can drive.
 
+**Fixed: velocity model was wrong, redone as a shuttle control.** First test:
+"Right now it's just scrubbing really fast no matter how you pull." The v1
+`mouseDrag` computed velocity as pixel-delta-since-last-event divided by
+time-since-last-event — literal mouse speed. At any real zoom level,
+samples-per-pixel is large enough that even a slow drag's per-event pixel
+delta represents a huge sample delta, and dividing that by a ~10ms
+event-to-event gap produces a velocity far past the ceiling almost
+immediately — reads as "always maxed out" no matter how gently you pull.
+User's clarification of the intended feel: "you put down the mouse pointer
+and drag to the right or left and it starts out slow, no matter how fast you
+pull it. Then once it starts, very slow, you can speed it up by pulling it
+further in either direction" — a shuttle-wheel control (tape deck / NLE JKL
+shuttle), not a literal per-instant drag speed. Redone: `mouseDown` drops an
+anchor (`scrubAnchorX`, screen-space pixels, so it's independent of zoom)
+at the press point; `mouseDrag` now derives velocity purely from *how far*
+the pointer currently sits from that anchor — `magnitude = clamp((|offset|
+- deadZone) / (maxDrag - deadZone), 0, 1)`, squared before scaling to the
+velocity ceiling, so it's slow near the anchor and ramps up (not linearly —
+faster) the further out you go, holding steady at whatever rate corresponds
+to the current distance for as long as you keep the pointer there, in
+either direction depending on which side of the anchor you're on. Because
+it's purely a function of *position*, not motion, a fast flick to a modest
+distance now starts exactly as slow as a careful pull to that same
+distance. Smoke test passes; all four targets build clean.
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).
