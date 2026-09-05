@@ -83,6 +83,11 @@ private:
     void zoomToward(double spanFactor, float pointerX);   // wheel zoom (Sieve model)
     void panByPixels(float dxPixels);
     float currentMouseX() const;   // mouse position in this component's coords, clamped on-screen
+    int64_t maxViewSpan() const;   // largest sensible viewEnd-viewStart, for the current
+                                   // sample count and timeScale -- see .cpp
+    int64_t effectiveSpanFor(int64_t rawTotal, double timeScale) const;   // maxViewSpan(), but
+                                                                          // for a given (e.g. an
+                                                                          // *old*) total/timeScale
 
     AudioDocument& document;
     juce::SharedResourcePointer<ThemeManager> theme;

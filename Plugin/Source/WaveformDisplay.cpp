@@ -31,14 +31,15 @@ bool WaveformDisplay::refitViewIfContentChanged()
     if (version == lastBufferVersion)
         return false;
 
-    const bool wasFullView = viewStart <= 0 && viewEnd >= lastKnownTotal;
+    const bool wasFullView = viewStart <= 0
+                          && viewEnd >= effectiveSpanFor(lastKnownTotal, document.getTimeScale());
     lastBufferVersion = version;
     lastKnownTotal = document.getNumSamples();
 
     if (wasFullView)
     {
         viewStart = 0;
-        viewEnd = juce::jmax((int64_t) 1, lastKnownTotal);
+        viewEnd = juce::jmax((int64_t) 1, maxViewSpan());
     }
     return true;
 }
@@ -50,19 +51,36 @@ void WaveformDisplay::timerCallback()
     // async ChangeBroadcaster, and self-heals any ordering race on first load.
     const bool contentChanged = refitViewIfContentChanged();
 
-    const int64_t total = document.getNumSamples();
-    const bool viewBad = viewEnd <= viewStart || viewEnd > total || viewStart >= juce::jmax((int64_t) 1, total);
+    // Same "was showing everything -> keep showing everything" idea as
+    // refitViewIfContentChanged(), but for the KnobRow's Speed/Pitch/Stretch knobs, which
+    // change getTimeScale() (and so maxViewSpan()) without ever bumping bufferVersion -- a
+    // live playback/visual effect, not an edit. This 30Hz poll is the only place that notices
+    // a knob move at all (KnobRow writes the atomics directly with no change broadcast), so
+    // the refit has to happen here rather than in refitViewIfContentChanged().
     const double timeScale = document.getTimeScale();
-
-    if (contentChanged || viewBad
-        || getWidth() != lastPathWidth || getHeight() != lastPathHeight
-        || std::abs(timeScale - lastTimeScale) > 1.0e-9)
+    const bool timeScaleChanged = std::abs(timeScale - lastTimeScale) > 1.0e-9;
+    if (timeScaleChanged)
     {
+        const bool wasFullView = viewStart <= 0
+                              && viewEnd >= effectiveSpanFor(document.getNumSamples(), lastTimeScale);
         lastTimeScale = timeScale;
-        if (viewBad)   // refitViewIfContentChanged() already handled the "was showing everything" case
+        if (wasFullView)
         {
             viewStart = 0;
-            viewEnd = juce::jmax((int64_t) 1, total);
+            viewEnd = juce::jmax((int64_t) 1, maxViewSpan());
+        }
+    }
+
+    const int64_t maxSpan = maxViewSpan();
+    const bool viewBad = viewEnd <= viewStart || viewEnd > maxSpan || viewStart >= juce::jmax((int64_t) 1, maxSpan);
+
+    if (contentChanged || timeScaleChanged || viewBad
+        || getWidth() != lastPathWidth || getHeight() != lastPathHeight)
+    {
+        if (viewBad)   // refits above already handled the "was showing everything" cases
+        {
+            viewStart = 0;
+            viewEnd = juce::jmax((int64_t) 1, maxSpan);
         }
         rebuildWaveformPath();
     }
@@ -93,10 +111,31 @@ float WaveformDisplay::sampleToX(int64_t sample) const
     return (float) ((double) (sample - viewStart) / samplesPerPixel);
 }
 
+// The largest view span ("zoomed all the way out") worth allowing. At getTimeScale() <= 1
+// this is just the raw sample count, same as always. At > 1 it has to be *wider* than the
+// raw count: rebuildWaveformPath()/xToSample() divide samples-per-pixel by timeScale, so a
+// view of exactly [0, rawTotal) only actually *renders* [0, rawTotal/timeScale) -- the render
+// loop reaches the component's fixed pixel width well before it has consumed all of
+// rawTotal's samples, silently leaving the rest completely unreachable no matter how far out
+// you zoom. Widening the span to rawTotal*timeScale fixes that: the far end past the real
+// audio renders as blank space (the render loop already clamps s0/s1 to the real sample
+// count, same as the already-correct getTimeScale() < 1 case, which already shows blank
+// space at the *sped-up* end) rather than the rest of the audio just never being drawn.
+int64_t WaveformDisplay::effectiveSpanFor(int64_t rawTotal, double timeScale) const
+{
+    timeScale = juce::jmax(0.0001, timeScale);
+    return (int64_t) ((double) rawTotal * juce::jmax(1.0, timeScale));
+}
+
+int64_t WaveformDisplay::maxViewSpan() const
+{
+    return effectiveSpanFor(document.getNumSamples(), document.getTimeScale());
+}
+
 void WaveformDisplay::zoomToFit()
 {
     viewStart = 0;
-    viewEnd = juce::jmax((int64_t) 1, document.getNumSamples());
+    viewEnd = juce::jmax((int64_t) 1, maxViewSpan());
     rebuildWaveformPath();
     repaint();
 }
@@ -132,7 +171,7 @@ void WaveformDisplay::zoomToward(double spanFactor, float pointerX)
 
     spanFactor = juce::jlimit(0.5, 2.0, spanFactor);
     const int64_t curLen = juce::jmax((int64_t) 1, viewEnd - viewStart);
-    const int64_t newLen = (int64_t) juce::jlimit(16.0, (double) total, (double) curLen * spanFactor);
+    const int64_t newLen = (int64_t) juce::jlimit(16.0, (double) maxViewSpan(), (double) curLen * spanFactor);
     const double timeScale = juce::jmax(0.0001, document.getTimeScale());
 
     // anchorFrac is a fraction of the pixel width; convert it to a raw-sample offset via
@@ -141,7 +180,7 @@ void WaveformDisplay::zoomToward(double spanFactor, float pointerX)
     auto applyView = [&](int64_t anchorSample, double anchorFrac)
     {
         int64_t newStart = anchorSample - (int64_t) (anchorFrac * (double) newLen / timeScale);
-        newStart = juce::jlimit((int64_t) 0, juce::jmax((int64_t) 0, total - newLen), newStart);
+        newStart = juce::jlimit((int64_t) 0, juce::jmax((int64_t) 0, maxViewSpan() - newLen), newStart);
         viewStart = newStart;
         viewEnd = newStart + newLen;
         rebuildWaveformPath();
@@ -195,15 +234,14 @@ void WaveformDisplay::zoomToward(double spanFactor, float pointerX)
 
 void WaveformDisplay::panByPixels(float dxPixels)
 {
-    const int64_t total = document.getNumSamples();
     const int64_t len = viewEnd - viewStart;
-    if (len <= 0 || len >= total)
+    if (len <= 0 || len >= maxViewSpan())
         return;
 
     const double framesPerPixel = (double) len / (double) juce::jmax(1, getWidth())
                                  / juce::jmax(0.0001, document.getTimeScale());
     int64_t newStart = viewStart - (int64_t) (dxPixels * framesPerPixel);
-    newStart = juce::jlimit((int64_t) 0, total - len, newStart);
+    newStart = juce::jlimit((int64_t) 0, juce::jmax((int64_t) 0, maxViewSpan() - len), newStart);
     viewStart = newStart;
     viewEnd = newStart + len;
     rebuildWaveformPath();
@@ -777,11 +815,12 @@ void WaveformDisplay::changeListenerCallback(juce::ChangeBroadcaster*)
     // changed -- otherwise a selection drag would rescan the whole buffer every message loop.
     const bool contentChanged = refitViewIfContentChanged();
 
-    const bool viewBad = viewEnd <= viewStart || viewEnd > document.getNumSamples();
+    const int64_t maxSpan = maxViewSpan();
+    const bool viewBad = viewEnd <= viewStart || viewEnd > maxSpan;
     if (viewBad)
     {
         viewStart = 0;
-        viewEnd = juce::jmax((int64_t) 1, document.getNumSamples());
+        viewEnd = juce::jmax((int64_t) 1, maxSpan);
     }
 
     if (viewBad || contentChanged)

@@ -103,6 +103,50 @@ they're generated as output-time values first, which come out
 timescale-invariant for a given raw view window (worked out algebraically —
 `x = outputTime · sr · width / rangeLen`, independent of `timeScale`).
 
+**Bug: "can't zoom out to see the whole file" at a large Stretch/Speed.** Two
+rounds fixing the same user report. The first round (`cdbc1c4`) assumed the
+problem was `viewStart`/`viewEnd` not re-expanding after an edit that grows the
+document (an extreme *destructive* Stretch/Pitch, via Tools ▾ / a selection
+right-click) — real, and fixed, but the user was actually driving the
+**KnobRow's** live Stretch knob (0.25–50×, non-destructive, no document-length
+change at all), which that fix didn't touch. Turned out there's a second,
+independent bug underneath: dividing samples-per-pixel by `timeScale` (above)
+means a view of exactly `[0, rawTotal)` only actually *renders*
+`[0, rawTotal/timeScale)` — the render loop reaches the component's fixed
+pixel width well before it has consumed all of `rawTotal`'s raw samples, so
+the rest is silently never drawn, **no matter how far out you "zoom"** (every
+zoom/pan clamp capped the view span at `rawTotal`, which was never wide enough
+to begin with once `timeScale > 1`). Confirmed by deriving the pixel math by
+hand and cross-checking a real, timeScale=18.5 session (a restored-on-relaunch
+standalone with a leftover 18.5× Stretch, `getTimeScale()` persists via plugin
+state) via screenshot: before this fix, only the first ~5% of that clip's
+audio would ever have rendered, filling the whole width; the time ruler's
+labels — genuinely timescale-invariant, unaffected by any of this — read out
+to 8s × 18.5 ≈ 2:28, confirming what *should* be visible.
+
+Fix: `WaveformDisplay::maxViewSpan()` (`effectiveSpanFor(rawTotal, timeScale)`,
+`= rawTotal · max(1, timeScale)`) replaces plain `document.getNumSamples()`
+everywhere a **view span or its upper bound** is computed — `zoomToFit()`,
+`zoomToward()`'s span clamp and its `applyView` position clamp, `panByPixels()`
+(also fixed a live `jlimit(low, high)` with `high < low` once span could
+exceed `rawTotal` — was one dropped frame from an assert/UB), and the
+`viewBad`/full-view-refit checks in `timerCallback()`/`changeListenerCallback()`.
+Sample-*indexing* uses (`xToSample()`'s clamp, `setSelection(0, getNumSamples())`
+for select-all) are deliberately untouched — you still can't select or seek
+past real audio, only the *view* can extend into blank space beyond it,
+mirroring the already-correct `timeScale < 1` case (a view of `[0, rawTotal)`
+there already shows real content only part-way across, blank for the rest —
+this just extends that same idea, symmetrically, to the other side).
+
+The KnobRow case needed one more piece: turning a knob writes straight to an
+atomic (`document.playbackStretch.store(v)`, no change broadcast), so
+`WaveformDisplay`'s 30 Hz timer poll is the *only* place a knob move is ever
+noticed at all — `timerCallback()` now also re-runs the "was showing
+everything, so keep showing everything" check whenever `getTimeScale()`
+itself changes (not just when `bufferVersion` does), using `lastTimeScale`
+(already tracked, previously only used to know a rebuild was needed) alongside
+the *old* `maxViewSpan()` for the comparison.
+
 ## Selection context menu + live Amplify/Stretch preview
 
 Right-clicking inside a selection (`WaveformDisplay::onSelectionContextMenu`,

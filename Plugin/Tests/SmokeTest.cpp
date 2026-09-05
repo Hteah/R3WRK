@@ -223,6 +223,41 @@ int main()
                   "document grew by (stretched length - original selection length)");
     }
 
+    // --- bufferVersion bumps once, so WaveformDisplay can refit the view after a
+    // length-growing edit (WaveformDisplay itself isn't reachable from this headless
+    // target, so this mirrors its refitViewIfContentChanged() logic against the real
+    // AudioDocument/EditActions behaviour instead) --------------------------
+    {
+        std::cout << "-- bufferVersion / view-refit contract (extreme Stretch) --" << std::endl;
+        AudioDocument doc;
+        setDocumentContent(doc, makeSineBuffer(1, 1000, sr, 440.0, 0.3f), sr);
+        doc.setSelection(0, 1000);   // stretch the whole (tiny) clip, like an extreme Stretch
+
+        const int versionBefore = doc.getBufferVersion();
+        const int64_t totalBefore = doc.getNumSamples();
+        // Simulate WaveformDisplay's view having been zoomed all the way out beforehand
+        // (viewStart=0, viewEnd=totalBefore), same as after zoomToFit() on file load.
+        const int64_t viewStartBefore = 0, viewEndBefore = totalBefore;
+
+        juce::AudioBuffer<float> region(1, 1000);
+        region.copyFrom(0, 0, doc.getBuffer(), 0, 0, 1000);
+        auto stretched = TimeStretchEngine::process(region, sr, 4.0, 0.0);   // panel's max ratio
+        EditActions::replaceRangeWith(doc, { (int64_t) 0, (int64_t) 1000 }, stretched, "Time Stretch/Pitch");
+
+        const int versionAfter = doc.getBufferVersion();
+        const int64_t totalAfter = doc.getNumSamples();
+        check(versionAfter == versionBefore + 1, "one Stretch/Pitch apply bumps bufferVersion by exactly 1");
+        check(totalAfter > totalBefore, "an extreme Stretch actually grew the document");
+
+        // refitViewIfContentChanged()'s own condition, literally: was the view covering
+        // [0, totalBefore) just before this version change?
+        const bool wasFullView = viewStartBefore <= 0 && viewEndBefore >= totalBefore;
+        check(wasFullView, "the pre-edit view (0, totalBefore) reads as \"was showing everything\"");
+        const int64_t refitViewEnd = wasFullView ? juce::jmax((int64_t) 1, totalAfter) : viewEndBefore;
+        check(refitViewEnd == totalAfter,
+              "so the view refits to (0, totalAfter) -- the whole, now-longer document");
+    }
+
     // --- save / load round trip, plus resample-on-load ----------------------
     {
         std::cout << "-- save/load round trip + resample-on-load --" << std::endl;
