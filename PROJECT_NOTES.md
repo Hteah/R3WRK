@@ -296,16 +296,21 @@ text for a drawn icon (`iconTools`), in the same 28×28 outlined-circle treatmen
 Play-from-start. First pass was a crossed screwdriver + open-end wrench (from a
 user-supplied reference image) -- rejected ("don't like the way that looks") after
 looking like a scribble even simplified down to one terminal shape per tool.
-Replaced with a plain gear/cog: one filled `Path`, traced as a single polygon
-around the body+teeth perimeter (`Point::getPointOnCircumference` at each tooth's
-left/right edge and the gap after it, walking monotonically around the circle so
-consecutive teeth share their boundary point with no unioning needed), plus a
-centre-hole circle subpath punched out via even-odd fill
-(`Path::setUsingNonZeroWinding(false)`). Getting it legible at 28px took one
-iteration: 8 teeth at ~24° half-width (vs a 22.5° half-step) overlapped into a
-plain octagon with barely-visible seams; narrowing to 13° half-width, shrinking
-the body radius, and lengthening the teeth gave 8 clearly separated teeth around a
-visible centre hole.
+Replaced with a plain gear/cog: one `Path`, traced as a single polygon around the
+body+teeth perimeter (`Point::getPointOnCircumference` at each tooth's left/right
+edge and the gap after it, walking monotonically around the circle so consecutive
+teeth share their boundary point with no unioning needed). First pass filled the
+polygon solid with the centre hole punched out via even-odd fill
+(`Path::setUsingNonZeroWinding(false)`); the user then supplied a reference gear
+glyph in a thinner, hollow line-icon style, so it's now **stroked** instead
+(`PathStrokeType::curved` rounds the tooth corners for free) with a separately
+stroked circle standing in for the hole. Getting it legible at 28px took two
+rounds of screenshot+zoom iteration: 8 teeth at a half-width too close to the
+22.5° half-step first overlapped into a solid octagon; once switched to the
+stroked style, the ring band between body and hole radius also needed to be
+wider than the stroke thickness or it filled in solid again -- settled on body/
+hole/tooth-length radii with enough clearance at the (near-floor, ~1.3px) stroke
+thickness this size forces.
 
 All five toolbar buttons (`playFromStartButton`/`playButton`/`loopButton`/
 `recordButton`/`toolsButton`) call `setWantsKeyboardFocus(false)`. A mouse

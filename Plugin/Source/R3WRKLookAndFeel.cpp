@@ -41,31 +41,29 @@ namespace
         g.fillPath(heads);
     }
 
-    // Tools: a plain gear/cog -- simpler and clearer at 28px than the crossed
-    // wrench+screwdriver this replaced (that one read as a scribble this small).
-    // One filled path, traced as a single polygon around the body/teeth perimeter,
-    // plus a centre-hole subpath punched out via even-odd fill -- no separate pieces
-    // to union or align.
+    // Tools: a plain gear/cog, line-icon style (stroked outline, hollow) to match a
+    // reference glyph the user supplied -- same body+teeth silhouette as before, but
+    // stroked with rounded joints instead of filled, so the tooth corners come out
+    // rounded for free (PathStrokeType::curved), and a separate stroked circle stands
+    // in for the centre hole instead of an even-odd punch-out.
     void drawGearIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
     {
-        auto area = bounds.reduced(bounds.getHeight() * 0.20f);
+        auto area = bounds.reduced(bounds.getHeight() * 0.14f);   // as large as the button allows
         const float R = juce::jmin(area.getWidth(), area.getHeight()) * 0.5f;
         const auto  centre = area.getCentre();
+        const float thickness = juce::jmax(1.3f, R * 0.15f);
 
-        const float bodyR   = R * 0.50f;   // radius to the tooth root
-        const float toothLen = R * 0.44f;  // tooth radial length
-        const float holeR   = R * 0.28f;   // centre hole radius
+        const float bodyR   = R * 0.44f;   // radius to the tooth root
+        const float toothLen = R * 0.30f;  // tooth radial length
+        const float holeR   = R * 0.30f;   // centre hole radius -- comfortably inside bodyR so
+                                            // the ring band reads as hollow, not solid, once stroked
         const int   numTeeth = 8;
         // Half-step for 8 teeth is 22.5deg -- keep well under that so each tooth stays a
-        // distinct block with a clear gap either side, rather than merging into a ring
-        // (the first pass used 24deg here, which overlapped adjacent teeth into a plain
-        // octagon with barely-visible seams instead of a recognisable gear).
-        const float toothHalfWidth = juce::degreesToRadians(13.0f);
+        // distinct block with a clear gap either side, rather than merging into a ring.
+        const float toothHalfWidth = juce::degreesToRadians(12.0f);
         const float step = juce::MathConstants<float>::twoPi / (float) numTeeth;
 
         juce::Path gear;
-        gear.setUsingNonZeroWinding(false);   // even-odd, so the centre-hole subpath knocks out
-
         bool first = true;
         for (int i = 0; i < numTeeth; ++i)
         {
@@ -89,10 +87,10 @@ namespace
         }
         gear.closeSubPath();
 
-        gear.addEllipse(centre.x - holeR, centre.y - holeR, holeR * 2.0f, holeR * 2.0f);
-
         g.setColour(ink);
-        g.fillPath(gear);
+        g.strokePath(gear, juce::PathStrokeType(thickness, juce::PathStrokeType::curved,
+                                                juce::PathStrokeType::rounded));
+        g.drawEllipse(centre.x - holeR, centre.y - holeR, holeR * 2.0f, holeR * 2.0f, thickness);
     }
 }
 
