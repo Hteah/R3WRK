@@ -183,6 +183,24 @@ namespace
         g.setColour(ink);
         g.fillPath(arrow);
     }
+
+    // Clear: a plain X, traced from a reference icon the user supplied -- two crossing
+    // diagonal strokes, rounded caps, same weight as the gear/reel icons' stroked lines.
+    void drawClearIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
+    {
+        auto area = bounds.reduced(bounds.getHeight() * 0.30f);
+        const float thickness = juce::jmax(1.8f, area.getHeight() * 0.20f);
+
+        juce::Path x;
+        x.startNewSubPath(area.getX(), area.getY());
+        x.lineTo(area.getRight(), area.getBottom());
+        x.startNewSubPath(area.getRight(), area.getY());
+        x.lineTo(area.getX(), area.getBottom());
+
+        g.setColour(ink);
+        g.strokePath(x, juce::PathStrokeType(thickness, juce::PathStrokeType::curved,
+                                             juce::PathStrokeType::rounded));
+    }
 }
 
 void R3WRKLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int width, int height,
@@ -265,7 +283,7 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     const auto text = button.getButtonText();
     if (text != iconPlay && text != iconStop && text != iconLoop
         && text != iconPlayFromStart && text != iconTools && text != iconScrub
-        && text != iconReverse)
+        && text != iconReverse && text != iconClear)
     {
         juce::LookAndFeel_V4::drawButtonText(g, button, isMouseOverButton, isButtonDown);
         return;
@@ -295,6 +313,11 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     if (text == iconReverse)
     {
         drawReverseIcon(g, bounds, ink);
+        return;
+    }
+    if (text == iconClear)
+    {
+        drawClearIcon(g, bounds, ink);
         return;
     }
 

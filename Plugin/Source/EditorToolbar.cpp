@@ -184,6 +184,7 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     addAndMakeVisible(recordButton);
     addAndMakeVisible(toolsButton);
     addAndMakeVisible(reverseButton);
+    addAndMakeVisible(clearButton);
 
     timeLabel.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::plain));
     timeLabel.setJustificationType(juce::Justification::centredRight);
@@ -198,9 +199,10 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     recordButton.setTooltip("Record");
     toolsButton.setTooltip("Tools");
     reverseButton.setTooltip("Reverse the selection (or the whole clip, if nothing's selected)");
+    clearButton.setTooltip("Clear -- empties the waveform and resets Pitch/Speed/Stretch/Start/End");
 
     for (auto* b : { &playFromStartButton, &playButton, &loopButton, &scrubButton, &recordButton,
-                     &toolsButton, &reverseButton })
+                     &toolsButton, &reverseButton, &clearButton })
     {
         b->setLookAndFeel(&toolbarLnF);
 
@@ -238,6 +240,22 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
         document.notifyChanged();
     };
     reverseButton.onClick = [this] { EditActions::reverse(document); };
+    clearButton.onClick = [this]
+    {
+        if (document.isPlaying.load())
+            processor.stopPlayback();
+
+        // Keep the current channel count/sample rate (this isn't "close the file", just
+        // "start over with a blank canvas") -- newEmptyDocument() already resets
+        // Pitch/Speed/Stretch and the selection/loop/playhead to identity, the same reset a
+        // freshly loaded or recorded file gets.
+        const int numCh = document.getBuffer().getNumChannels() > 0 ? document.getBuffer().getNumChannels() : 2;
+        const double sr = document.getSampleRate() > 0 ? document.getSampleRate() : 44100.0;
+        document.newEmptyDocument(numCh, sr);
+
+        if (onSourceNameChanged) onSourceNameChanged({});
+        if (onStatusMessage) onStatusMessage("Cleared");
+    };
 
     applyTheme();
     document.changeBroadcaster.addChangeListener(this);
@@ -249,7 +267,7 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
 EditorToolbar::~EditorToolbar()
 {
     for (auto* b : { &playFromStartButton, &playButton, &loopButton, &scrubButton, &recordButton,
-                     &toolsButton, &reverseButton })
+                     &toolsButton, &reverseButton, &clearButton })
         b->setLookAndFeel(nullptr);   // detach before toolbarLnF is destroyed
     theme->removeChangeListener(this);
     document.changeBroadcaster.removeChangeListener(this);
@@ -295,6 +313,12 @@ void EditorToolbar::applyTheme()
     // Tools/Play-from-start.
     reverseButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
     reverseButton.setColour(juce::TextButton::textColourOffId, pal.screenText);
+
+    // Clear discards audio, so its X is inked in the same red as the record button rather
+    // than the neutral screenText every other outlined icon uses -- a quiet "careful, this
+    // one's destructive" cue, still just an outline rather than a filled warning circle.
+    clearButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+    clearButton.setColour(juce::TextButton::textColourOffId, pal.recordButton);
 
     // timeLabel's colour flips to pal.playhead while recording -- see timerCallback().
     timeLabel.setColour(juce::Label::textColourId, pal.screenTextDim);
@@ -515,6 +539,7 @@ void EditorToolbar::updateTransportButtonText()
     recordButton.setEnabled(! playing || rec);
     scrubButton.setEnabled(! rec);
     reverseButton.setEnabled(! rec);
+    clearButton.setEnabled(! rec);
 }
 
 void EditorToolbar::timerCallback()
@@ -619,7 +644,7 @@ void EditorToolbar::chooseOutputFolder()
 void EditorToolbar::resized()
 {
     auto row = getLocalBounds().reduced(8, 5);   // inset so pills clear the band's rounded corners
-    const int gap = 4;
+    const int gap = 16;   // trying wider spacing between the transport buttons
 
     juce::FlexBox fb;
     fb.flexDirection = juce::FlexBox::Direction::row;
@@ -629,7 +654,7 @@ void EditorToolbar::resized()
                          .withMargin(juce::FlexItem::Margin(0, (float) gap, 0, 0)));
     };
     // Left-grouped, matching the mockup: Play/Loop/Record/Tools together, time pinned right.
-    // Scrub and Reverse sit last, at the right-hand end of the button cluster -- round like
+    // Scrub/Reverse/Clear sit last, at the right-hand end of the button cluster -- round like
     // every other icon button here (the reel-hub icon reads better in a circle than the
     // earlier rectangular cassette-body version did).
     add(playFromStartButton, 28);
@@ -639,6 +664,7 @@ void EditorToolbar::resized()
     add(toolsButton, 28);
     add(scrubButton, 28);
     add(reverseButton, 28);
+    add(clearButton, 28);
     fb.items.add(juce::FlexItem().withFlex(1.0f));
     add(timeLabel, 150);
     fb.performLayout(row);

@@ -10,7 +10,7 @@
 /**
     A single control strip below the waveform:
 
-        ⏮ Play · Loop · Record · Tools · Scrub · Reverse    ···    time
+        ⏮ Play · Loop · Record · Tools · Scrub · Reverse · Clear    ···    time
 
     Everything else — file ops, clipboard, region processing, stretch/pitch,
     export selection, undo/redo — lives in the "Tools" pop-up menu.
@@ -87,6 +87,8 @@ private:
     juce::TextButton toolsButton   { R3WRKLookAndFeel::iconTools };    // opens the Tools ▾ pop-up menu
     juce::TextButton reverseButton { R3WRKLookAndFeel::iconReverse };  // runs immediately, like Tools ▾'s
                                                                        // own Reverse item -- not a toggle
+    juce::TextButton clearButton   { R3WRKLookAndFeel::iconClear };    // empties the waveform and resets
+                                                                       // Pitch/Speed/Stretch/Start/End
 
     std::unique_ptr<juce::FileChooser> fileChooser;
 

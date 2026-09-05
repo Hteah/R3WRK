@@ -958,6 +958,29 @@ deliberately a *drawn arrow*, not a plain mirrored copy of Play's triangle, so i
 "play backwards" (a different, not-implemented feature) at a glance. Smoke test passes; all four
 targets build clean.
 
+## Clear button
+
+User: "Now make a clear waveform (which sets all parameter's back to default). Use this for the
+button" -- supplied a reference image (a red X in a circle, the familiar macOS "clear field"/
+close glyph). `AudioDocument::newEmptyDocument()` already did almost exactly this (empties the
+buffer, resets Speed/Pitch/Stretch to identity, clears selection/loop/playhead, clears undo
+history) -- it just wasn't reachable from anywhere except indirectly (a fresh recording, or
+loading a new file, calls it internally). New `clearButton`, last in the row after Reverse:
+`onClick` stops playback if running, then calls `newEmptyDocument()` with the *current* channel
+count/sample rate (this is "start over with a blank canvas", not "close the file" -- unlike a
+`Cmd+N`-style "new project" flow that resets to a fixed default channel count/rate), then fires
+`onSourceNameChanged({})` (the same "" a fresh recording sends) so the header goes back to
+showing an untitled/unsaved state. New `drawClearIcon`: two crossing diagonal strokes, rounded
+caps, at the gear/reel icons' stroke weight -- and since Clear is destructive (no confirmation
+dialog today), its ink uses the same red as the record button rather than the neutral
+screenText every other outlined icon gets, a quiet "careful" cue without going as far as a
+filled warning circle. Disabled while recording, same as Scrub/Reverse. Smoke test passes; all
+four targets build clean.
+
+(Also carried over from a still-open, unconfirmed experiment: the transport row's inter-button
+gap is currently 16px, up from the original 4px, tried live at the user's request to preview
+wider spacing -- not yet explicitly confirmed as final.)
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).
