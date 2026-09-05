@@ -211,29 +211,56 @@ background `juce::Thread`, and delivers the result back for
   pitch` converts between them — so the preview matches what you'll actually
   hear, not merely something in the same direction.
 - `WaveformDisplay::rebuildWaveformPath()` change is small: a raw sample
-  position `s` (still computed exactly as before) maps to processed-buffer
+  position `s` (still computed exactly as before) maps to processed-domain
   index `s * timeScale` when a preview is available (same factor that already
-  rescales the view span itself, see `effectiveSpanFor()` above) and the peaks
-  are read directly from the processed buffer instead of the raw
-  peak-cache/deep-zoom-copy path — `xToSample()`/`sampleToX()` (selection,
-  playhead, loop) are completely untouched, since those are raw-sample
-  concepts independent of which buffer supplies the drawn shape.
+  rescales the view span itself, see `effectiveSpanFor()` above), reading
+  peaks via `stretchPreview.getPeakRange()` instead of the raw peak-cache/
+  deep-zoom-copy path — `xToSample()`/`sampleToX()` (selection, playhead,
+  loop) are completely untouched, since those are raw-sample concepts
+  independent of which buffer supplies the drawn shape.
 - Verified end-to-end with a real regression test (`SmokeTest.cpp`,
   `WaveformStretchPreview` now also linked into the headless `R3WRKSmokeTest`
   target — it's pure `juce_core`/`juce_events` logic, no GUI dependency)
-  exercising the actual debounce → background thread → RubberBand → delivery
-  pipeline, not just the math: identity knobs never produce a preview; a real
-  Stretch=3x eventually delivers a processed buffer ~3x as long with the
-  channel count preserved; returning to identity clears it again.
+  exercising the actual debounce → background thread → RubberBand → peak-cache
+  → delivery pipeline, not just the math: identity knobs never produce a
+  preview; a real Stretch=3x eventually delivers a preview ~3x as long, with
+  the channel count preserved and the peak cache holding real (non-silent)
+  signal; returning to identity clears it again.
 
-Known limitation, accepted for v1: the destructor blocks (`stopThread(10000)`)
-waiting for an in-flight RubberBand pass to finish rather than force-killing
-it, since there's no cancellation hook — a real risk only for a very long
-clip at an extreme ratio outliving the editor being closed, which isn't the
-expected use case for a sample editor. No separate peak cache for the
-processed buffer either (unlike the raw path) — it's rebuilt from scratch on
-every settle, so it's always a direct scan; fine for typical clip lengths,
-would want revisiting for very long recordings at extreme ratios.
+**Bug found immediately after shipping the first version**: the user reported
+that once the preview appeared (after the expected multi-second wait for the
+background RubberBand pass, which they were fine with), they could no longer
+make selections, and repeatedly pressing Play-from-start sounded like
+playback just kept going rather than restarting. Root cause: the *first*
+version handed the raw processed `AudioBuffer` back to the message thread,
+which then scanned it directly (a plain `findMinAndMax` per pixel column,
+same as the existing deep-zoom fallback) inside `rebuildWaveformPath()` —
+fine for the original few-second test file, but at an extreme ratio on a
+longer clip the processed buffer can run to tens of millions of samples per
+channel, and scanning that synchronously **on the message thread** blocks
+mouse-event dispatch and click handling for as long as the scan takes, on
+top of the RubberBand pass itself. That single blocking scan is consistent
+with both symptoms: a drag-to-select straddling that window reads as "can't
+select", and a Play-from-start click landing inside it reads as "didn't
+restart" (the click is delayed/queued behind the block, not lost, but it
+certainly doesn't feel like a restart).
+
+Fixed by moving the peak-binning onto the **background thread**, right after
+the RubberBand pass, mirroring `WaveformDisplay::rebuildPeakCache()`'s
+approach for the raw buffer (`WaveformStretchPreview::peakBinSize`, matching
+`WaveformDisplay`'s own constant): the worker delivers a compact min/max
+cache (`getPeakRange()`), not the raw processed audio, and the *raw processed
+buffer is discarded* once binned rather than kept around (real memory
+savings too, at an extreme ratio). The message-thread side of a rebuild is
+now the same bounded cost as the already-fine raw-buffer path, however long
+the actual processed audio is — mouse/UI events are never blocked by it,
+whatever the stretch ratio.
+
+Known limitation, accepted for v1: the destructor still blocks
+(`stopThread(10000)`) waiting for an in-flight RubberBand pass to finish
+rather than force-killing it, since there's no cancellation hook — a real
+risk only for a very long clip at an extreme ratio outliving the editor
+being closed, which isn't the expected use case for a sample editor.
 
 ## Selection context menu + live Amplify/Stretch preview
 

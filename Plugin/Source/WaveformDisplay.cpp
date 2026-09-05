@@ -315,12 +315,11 @@ void WaveformDisplay::rebuildWaveformPath()
     const double samplesPerPixel = (double) rangeLen / (double) w / timeScale;
 
     // While Speed/Pitch/Stretch are non-identity and settled, draw the *real* processed
-    // shape instead of the stored audio rescaled -- see WaveformStretchPreview. Its buffer
-    // is the actual RubberBand output for the whole document at the current knob position, so
-    // a raw sample position s maps to preview-buffer index s*timeScale (the same factor
-    // rescales the view span itself, see effectiveSpanFor()/maxViewSpan() above).
-    const auto& preview = stretchPreview.getProcessedBuffer();
-    const bool usePreview = preview.getNumSamples() > 0 && preview.getNumChannels() > 0;
+    // shape instead of the stored audio rescaled -- see WaveformStretchPreview. Its peak
+    // cache covers the actual RubberBand output for the whole document at the current knob
+    // position, so a raw sample position s maps to processed-domain index s*timeScale (the
+    // same factor rescales the view span itself, see effectiveSpanFor()/maxViewSpan() above).
+    const bool usePreview = stretchPreview.hasPreview();
 
     // Deep zoom (fewer than one peak bin per pixel): copy just the actually-visible span
     // (w * samplesPerPixel raw samples -- bounded even at extreme Stretch, unlike the full
@@ -364,18 +363,11 @@ void WaveformDisplay::rebuildWaveformPath()
                 s1 = juce::jmin(total, s0 + 1);
 
             float mn = 0.0f, mx = 0.0f;
-            if (usePreview && ch < preview.getNumChannels())
+            if (usePreview && ch < stretchPreview.getNumChannels())
             {
-                const int64_t previewLen = preview.getNumSamples();
-                int64_t p0 = juce::jlimit((int64_t) 0, previewLen, (int64_t) ((double) s0 * timeScale));
-                int64_t p1 = juce::jlimit(p0, previewLen, (int64_t) ((double) s1 * timeScale));
-                if (p1 > p0)
-                {
-                    const auto r = juce::FloatVectorOperations::findMinAndMax(preview.getReadPointer(ch) + p0,
-                                                                             (int) (p1 - p0));
-                    mn = r.getStart();
-                    mx = r.getEnd();
-                }
+                const int64_t p0 = (int64_t) ((double) s0 * timeScale);
+                const int64_t p1 = (int64_t) ((double) s1 * timeScale);
+                stretchPreview.getPeakRange(ch, p0, p1, mn, mx);
             }
             else
             {

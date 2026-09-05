@@ -46,9 +46,11 @@ bool WaveformStretchPreview::update()
     {
         // Nothing to preview -- the caller should just draw the stored buffer, rescaled.
         waitingToSettle = false;
-        if (delivered.getNumSamples() > 0)
+        if (! peakMin.empty())
         {
-            delivered.setSize(0, 0);
+            peakMin.clear();
+            peakMax.clear();
+            processedLength = 0;
             return true;
         }
         return false;
@@ -63,10 +65,39 @@ bool WaveformStretchPreview::update()
     if (resultReady.exchange(false))
     {
         const juce::ScopedLock sl(resultLock);
-        delivered = std::move(pendingResult);
+        peakMin = std::move(pendingResult.peakMin);
+        peakMax = std::move(pendingResult.peakMax);
+        processedLength = pendingResult.length;
         return true;
     }
     return false;
+}
+
+void WaveformStretchPreview::getPeakRange(int channel, int64_t p0, int64_t p1, float& outMin, float& outMax) const
+{
+    outMin = 0.0f;
+    outMax = 0.0f;
+    if (channel < 0 || channel >= (int) peakMin.size())
+        return;
+
+    const auto& mn = peakMin[(size_t) channel];
+    const auto& mx = peakMax[(size_t) channel];
+    const int nBins = (int) mn.size();
+    if (nBins <= 0)
+        return;
+
+    p0 = juce::jlimit((int64_t) 0, processedLength, p0);
+    p1 = juce::jlimit(p0, processedLength, p1);
+    if (p1 <= p0)
+        return;
+
+    const int b0 = juce::jlimit(0, nBins - 1, (int) (p0 / peakBinSize));
+    const int b1 = juce::jlimit(b0, nBins - 1, (int) ((p1 - 1) / peakBinSize));
+    for (int b = b0; b <= b1; ++b)
+    {
+        outMin = juce::jmin(outMin, mn[(size_t) b]);
+        outMax = juce::jmax(outMax, mx[(size_t) b]);
+    }
 }
 
 void WaveformStretchPreview::kickOffJob(double speed, double pitch, double stretch)
@@ -119,10 +150,42 @@ void WaveformStretchPreview::run()
         const double semitones = 12.0 * std::log2(juce::jmax(0.0001, speed)) + pitch;
         auto processed = TimeStretchEngine::process(raw, sr, timeRatio, semitones);
 
-        if (processed.getNumSamples() > 0)
+        if (processed.getNumSamples() <= 0)
+            continue;
+
+        // Bin into a peak (min/max per peakBinSize samples) cache here, on this thread, same
+        // approach as WaveformDisplay::rebuildPeakCache() -- see the class comment for why:
+        // the processed buffer itself can be huge at an extreme ratio, and the message thread
+        // must never be the one scanning it.
+        Result result;
+        const int numCh = processed.getNumChannels();
+        const int64_t total = processed.getNumSamples();
+        const int nBins = (int) ((total + peakBinSize - 1) / peakBinSize);
+        result.length = total;
+        result.peakMin.assign((size_t) numCh, std::vector<float>((size_t) juce::jmax(0, nBins), 0.0f));
+        result.peakMax.assign((size_t) numCh, std::vector<float>((size_t) juce::jmax(0, nBins), 0.0f));
+
+        for (int ch = 0; ch < numCh; ++ch)
+        {
+            const float* d = processed.getReadPointer(ch);
+            auto& mn = result.peakMin[(size_t) ch];
+            auto& mx = result.peakMax[(size_t) ch];
+            for (int b = 0; b < nBins; ++b)
+            {
+                const int64_t s0 = (int64_t) b * peakBinSize;
+                const int64_t s1 = juce::jmin(total, s0 + peakBinSize);
+                const auto r = juce::FloatVectorOperations::findMinAndMax(d + s0, (int) (s1 - s0));
+                mn[(size_t) b] = r.getStart();
+                mx[(size_t) b] = r.getEnd();
+            }
+
+            if (threadShouldExit())   // shutting down mid-binning -- don't bother delivering
+                return;
+        }
+
         {
             const juce::ScopedLock sl(resultLock);
-            pendingResult = std::move(processed);
+            pendingResult = std::move(result);
             resultReady = true;
         }
     }

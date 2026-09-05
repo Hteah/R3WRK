@@ -274,26 +274,30 @@ int main()
         for (int i = 0; i < 5; ++i)
             sawChange |= preview.update();
         check(! sawChange, "identity knobs never produce a preview");
-        check(preview.getProcessedBuffer().getNumSamples() == 0, "processed buffer stays empty at identity");
+        check(! preview.hasPreview(), "no preview available at identity");
 
         // Turn the (equivalent of the) Stretch knob to 3x and wait for the debounced
-        // background job to settle and finish.
+        // background job to settle, finish, and bin its output into a peak cache.
         doc.playbackStretch = 3.0;
         bool gotResult = false;
         auto deadline = juce::Time::getCurrentTime() + juce::RelativeTime::seconds(10.0);
         while (juce::Time::getCurrentTime() < deadline)
         {
-            if (preview.update() && preview.getProcessedBuffer().getNumSamples() > 0)
+            if (preview.update() && preview.hasPreview())
             {
                 gotResult = true;
                 break;
             }
             juce::Thread::sleep(20);
         }
-        check(gotResult, "a non-identity Stretch eventually produces a real processed buffer");
-        checkNear((double) preview.getProcessedBuffer().getNumSamples(), sr * 3.0, sr * 0.1,
-                  "the processed buffer is roughly 3x as long, matching the real offline stretch");
-        check(preview.getProcessedBuffer().getNumChannels() == 2, "processed buffer kept the channel count");
+        check(gotResult, "a non-identity Stretch eventually produces a real preview");
+        checkNear((double) preview.getProcessedLength(), sr * 3.0, sr * 0.1,
+                  "the processed length is roughly 3x, matching the real offline stretch");
+        check(preview.getNumChannels() == 2, "preview kept the channel count");
+
+        float mn = 0.0f, mx = 0.0f;
+        preview.getPeakRange(0, 0, preview.getProcessedLength(), mn, mx);
+        check(mx > 0.05f && mn < -0.05f, "the peak cache holds real (non-silent) signal, not just zeros");
 
         // Back to identity: the preview should clear.
         doc.playbackStretch = 1.0;
@@ -303,12 +307,12 @@ int main()
         {
             if (preview.update())
             {
-                cleared = preview.getProcessedBuffer().getNumSamples() == 0;
+                cleared = ! preview.hasPreview();
                 break;
             }
             juce::Thread::sleep(20);
         }
-        check(cleared, "returning to identity clears the processed buffer");
+        check(cleared, "returning to identity clears the preview");
     }
 
     // --- save / load round trip, plus resample-on-load ----------------------
