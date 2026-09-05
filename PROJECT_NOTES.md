@@ -943,6 +943,21 @@ Scrub-specific shallow-corner-radius exception entirely — the reel-hub icon re
 circle than the cassette-body icon did. Stayed last in the row (that part of the prior feedback
 holds). Smoke test passes; all four targets build clean.
 
+## Reverse button
+
+User: "Can you make a button for reverse? Round button with arrow going to the left."
+`EditActions::reverse()` already existed (reverses `getEffectiveRange()` -- the selection, or
+the whole clip if there's none -- used by Tools ▾'s "Reverse" item and the selection right-click
+menu), so this is purely a new toolbar shortcut to it: a round icon button, last in the row after
+Scrub, same outlined (not filled/toggling) treatment as Tools/Play-from-start since it's a
+one-shot action with no on/off state of its own. `onClick` just calls
+`EditActions::reverse(document)` directly -- no extra `notifyChanged()` needed,
+`AudioDocument::commitChange()` already broadcasts the change. Disabled while recording, same as
+Scrub. New `drawReverseIcon`: a triangular arrowhead at the left joined to a horizontal shaft --
+deliberately a *drawn arrow*, not a plain mirrored copy of Play's triangle, so it doesn't read as
+"play backwards" (a different, not-implemented feature) at a glance. Smoke test passes; all four
+targets build clean.
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).

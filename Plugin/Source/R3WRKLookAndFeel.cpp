@@ -160,6 +160,29 @@ namespace
         g.setColour(ink);
         g.fillPath(full);
     }
+
+    // Reverse: a plain leftward arrow -- a triangular head at the left end joined to a
+    // horizontal shaft, distinct from Play's plain triangle (which points the other way and
+    // already means something else) so the two aren't mistaken for mirror images of the
+    // same action.
+    void drawReverseIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
+    {
+        auto area = bounds.reduced(bounds.getHeight() * 0.28f);
+        const float shaftThickness = juce::jmax(1.6f, area.getHeight() * 0.28f);
+        const float headLen        = area.getWidth() * 0.55f;
+        const float headHalfHeight = area.getHeight() * 0.5f;
+
+        juce::Path arrow;
+        arrow.addTriangle(area.getX(),                area.getCentreY(),
+                          area.getX() + headLen,      area.getCentreY() - headHalfHeight,
+                          area.getX() + headLen,      area.getCentreY() + headHalfHeight);
+        // Overlaps the head slightly so the join reads as one continuous arrow, not two shapes.
+        arrow.addRectangle(area.getX() + headLen * 0.55f, area.getCentreY() - shaftThickness * 0.5f,
+                           area.getRight() - (area.getX() + headLen * 0.55f), shaftThickness);
+
+        g.setColour(ink);
+        g.fillPath(arrow);
+    }
 }
 
 void R3WRKLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int width, int height,
@@ -241,7 +264,8 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
 {
     const auto text = button.getButtonText();
     if (text != iconPlay && text != iconStop && text != iconLoop
-        && text != iconPlayFromStart && text != iconTools && text != iconScrub)
+        && text != iconPlayFromStart && text != iconTools && text != iconScrub
+        && text != iconReverse)
     {
         juce::LookAndFeel_V4::drawButtonText(g, button, isMouseOverButton, isButtonDown);
         return;
@@ -266,6 +290,11 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     if (text == iconScrub)
     {
         drawScrubIcon(g, bounds, ink);
+        return;
+    }
+    if (text == iconReverse)
+    {
+        drawReverseIcon(g, bounds, ink);
         return;
     }
 

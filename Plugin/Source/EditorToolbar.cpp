@@ -183,6 +183,7 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     addAndMakeVisible(timeLabel);
     addAndMakeVisible(recordButton);
     addAndMakeVisible(toolsButton);
+    addAndMakeVisible(reverseButton);
 
     timeLabel.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::plain));
     timeLabel.setJustificationType(juce::Justification::centredRight);
@@ -196,8 +197,10 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
                            "speed, like a tape deck's shuttle wheel");
     recordButton.setTooltip("Record");
     toolsButton.setTooltip("Tools");
+    reverseButton.setTooltip("Reverse the selection (or the whole clip, if nothing's selected)");
 
-    for (auto* b : { &playFromStartButton, &playButton, &loopButton, &scrubButton, &recordButton, &toolsButton })
+    for (auto* b : { &playFromStartButton, &playButton, &loopButton, &scrubButton, &recordButton,
+                     &toolsButton, &reverseButton })
     {
         b->setLookAndFeel(&toolbarLnF);
 
@@ -234,6 +237,7 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
         }
         document.notifyChanged();
     };
+    reverseButton.onClick = [this] { EditActions::reverse(document); };
 
     applyTheme();
     document.changeBroadcaster.addChangeListener(this);
@@ -244,7 +248,8 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
 
 EditorToolbar::~EditorToolbar()
 {
-    for (auto* b : { &playFromStartButton, &playButton, &loopButton, &scrubButton, &recordButton, &toolsButton })
+    for (auto* b : { &playFromStartButton, &playButton, &loopButton, &scrubButton, &recordButton,
+                     &toolsButton, &reverseButton })
         b->setLookAndFeel(nullptr);   // detach before toolbarLnF is destroyed
     theme->removeChangeListener(this);
     document.changeBroadcaster.removeChangeListener(this);
@@ -285,6 +290,11 @@ void EditorToolbar::applyTheme()
 
     toolsButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
     toolsButton.setColour(juce::TextButton::textColourOffId, pal.screenText);
+
+    // Reverse runs immediately (no on/off state of its own), same outlined treatment as
+    // Tools/Play-from-start.
+    reverseButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+    reverseButton.setColour(juce::TextButton::textColourOffId, pal.screenText);
 
     // timeLabel's colour flips to pal.playhead while recording -- see timerCallback().
     timeLabel.setColour(juce::Label::textColourId, pal.screenTextDim);
@@ -504,6 +514,7 @@ void EditorToolbar::updateTransportButtonText()
     loopButton.setToggleState(document.loopEnabled.load(), juce::dontSendNotification);
     recordButton.setEnabled(! playing || rec);
     scrubButton.setEnabled(! rec);
+    reverseButton.setEnabled(! rec);
 }
 
 void EditorToolbar::timerCallback()
@@ -618,15 +629,16 @@ void EditorToolbar::resized()
                          .withMargin(juce::FlexItem::Margin(0, (float) gap, 0, 0)));
     };
     // Left-grouped, matching the mockup: Play/Loop/Record/Tools together, time pinned right.
-    // Scrub sits last, at the right-hand end of the button cluster -- round like every other
-    // icon button here (the reel-hub icon reads better in a circle than the earlier
-    // rectangular cassette-body version did).
+    // Scrub and Reverse sit last, at the right-hand end of the button cluster -- round like
+    // every other icon button here (the reel-hub icon reads better in a circle than the
+    // earlier rectangular cassette-body version did).
     add(playFromStartButton, 28);
     add(playButton, 28);
     add(loopButton, 28);
     add(recordButton, 28);
     add(toolsButton, 28);
     add(scrubButton, 28);
+    add(reverseButton, 28);
     fb.items.add(juce::FlexItem().withFlex(1.0f));
     add(timeLabel, 150);
     fb.performLayout(row);
