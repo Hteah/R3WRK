@@ -301,6 +301,33 @@ the same `zoomToward()` the wheel uses, it gets the framing behaviour *and*
 the pointer-anchored zoom that follows it for free, both now centred on the
 selection instead of an incidental mouse position, at every zoom level.
 
+**Deliberate zoom-out direction around a selection.** User: zooming in on a
+selection "zooms in from the left, then when I get close... zooms really
+fast to the selection. Then when I zoom out, it zooms back out to the left,
+no matter if my mouse pointer is on the left or right" — wanted to be able
+to reveal either side of a selection just by choosing where to point before
+scrolling out. Root cause: the bracket-grab lock-on (pin whichever selection
+edge is within 12px of the pointer, at a fraction *derived from that same
+on-screen position*, clamped to at least 0.15) used to fire for **both** zoom
+directions. Zooming in near an edge, that's the intended precision-dive
+behaviour ("so the wheel pulls you into it"); but once it had you hugging the
+left bracket and you reversed to zoom back out without moving the mouse
+(which hadn't needed to move — it was already sitting right at that edge),
+the *same* "near the left bracket" case kept re-triggering and re-pinning
+that edge near the left of the screen again, regardless of intent — the
+"drifts left no matter where the pointer is" the user described, since once
+the case matches, the pointer's exact position barely changes the outcome.
+
+Fixed by gating bracket-grab (and the "frame the whole selection" step after
+it) to zoom-**in** only (`spanFactor < 1.0`), and giving zoom-out its own,
+deliberate branch instead: with a selection present and not zooming in, pin
+whichever *edge* is nearer the pointer's screen **half** (not its exact
+position, so it can't degenerate into the same edge-hugging problem) at a
+fixed 0.7/0.3 fraction of the width — pointer on the left keeps the selection
+start pinned there and opens up what's *before* it as you keep scrolling out;
+right does the same for the selection end and what's *after* it. Deterministic
+and repeatable on every wheel notch, not just a one-time jump.
+
 ## Selection context menu + live Amplify/Stretch preview
 
 Right-clicking inside a selection (`WaveformDisplay::onSelectionContextMenu`,
