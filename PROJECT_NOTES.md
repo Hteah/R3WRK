@@ -221,10 +221,13 @@ not text input), so `getTextCharacter()` was never going to work here either.
 The Control-based code from both earlier attempts was removed rather than
 left in as a fallback, since both are now confirmed dead on this platform.
 
-Two follow-up refinements once ⌘+/⌘- actually reached the app: (1) each press
-zoomed by a full ±2× (halving/doubling the view) — too coarse for a single
-keypress, cut to a gentler ±(0.8/1.25) pair (inverse of each other, so
-zooming in then out returns to the same span); (2) made keyboard zoom behave
+Three follow-up refinements once ⌘+/⌘- actually reached the app: (1) each
+press zoomed by a full ±2× (halving/doubling the view) — too coarse for a
+single keypress, cut to a gentler ±(0.8/1.25) pair; (1b) still too much —
+cut again to ±(0.9/1÷0.9) (`keyboardZoomStep` in `WaveformDisplay.cpp`, the
+one constant to retune if a different step is ever wanted). Each pair is an
+exact inverse of the other, so zooming in then out returns to the same
+span; (2) made keyboard zoom behave
 exactly like one mouse-wheel notch, not just a plain center-of-view zoom —
 `zoomIn()`/`zoomOut()` now call the *same* `zoomToward()` the wheel handler
 does, at the current mouse position (`currentMouseX()`, clamped onto the

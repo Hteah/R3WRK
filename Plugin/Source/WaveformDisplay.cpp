@@ -107,9 +107,11 @@ void WaveformDisplay::zoomToFit()
 // selection if the view is wider than it, and hovering near a selection edge pins and zooms
 // into that edge specifically, left or right. The factor is gentler than a wheel notch can
 // be (that one scales with how hard/fast the user scrolls, up to +/-2x) -- fixed, modest
-// steps here so repeated presses zoom in comfortably small increments.
-void WaveformDisplay::zoomIn()  { zoomToward(0.8,  currentMouseX()); }
-void WaveformDisplay::zoomOut() { zoomToward(1.25, currentMouseX()); }
+// steps here so repeated presses zoom in comfortably small increments. Kept as an exact
+// inverse pair (0.9 and 1/0.9) so zooming in then out lands back on the same span.
+static constexpr double keyboardZoomStep = 0.9;
+void WaveformDisplay::zoomIn()  { zoomToward(keyboardZoomStep,       currentMouseX()); }
+void WaveformDisplay::zoomOut() { zoomToward(1.0 / keyboardZoomStep, currentMouseX()); }
 
 float WaveformDisplay::currentMouseX() const
 {
