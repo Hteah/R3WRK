@@ -1186,6 +1186,38 @@ icon cache (needed deleting the cache file itself, not just restarting the proce
 changes this round -- purely an OS/build-cache issue, confirmed resolved by direct visual
 inspection of the live Dock.
 
+## Icon inverted: white ring + hub on black, "a tape player part"
+
+User: "can you replace it with this? It looks more like a Tape player part" -- supplied a new
+reference: the same reel-hub concept, but inverted (white on black) and constructed differently --
+not a single filled ring-with-a-notched-hole like the previous version, but an **outer thin ring
+(stroked circle) separated by a dark gap from a solid, filled 6-notch hub** sitting inside it --
+closer to what an actual tape reel's rim + drive-hub look like photographed against black.
+Ray-cast the reference the same way as every other traced icon this session: outer ring spans
+`0.865x`-`1.0x` of the overall radius (a stroked annulus); the inner hub is solid from centre out
+to `0.676x` between notches, cut inward to `0.541x` at each of the same 6 notches (60° spacing,
+9° half-width) used throughout. Rebuilt `Plugin/Resources/AppIcon.png` as a plain black
+1024×1024 canvas with a white annulus (two concentric filled circles, outer minus inner) for the
+ring and a separately-filled notched-star polygon for the hub -- reconfigured (the icon-generation
+gotcha from `1bd2777` applies to every source-image edit, not just the first one) and rebuilt.
+
+**Confirming this one took three separate cache-clears, all three of the layers found so far were
+already stale simultaneously**: deleted the Dock's on-disk icon cache (`com.apple.dock.iconcache`)
+*proactively* this time (learned from the last round), but Finder's "reveal" preview panel *still*
+showed the old icon after that plus a plain `killall Finder`. Root cause: a fourth layer below
+both Dock's and Finder's own caches -- **`iconservicesagent`** (`/System/Library/CoreServices/
+iconservicesagent`, a per-user background daemon; there's also a system-level `iconservicesd`
+running as `_iconservices`, left alone since killing it needs root and wasn't necessary) with its
+own persistent cache directories under `/private/var/folders/.../C/com.apple.iconservices*`. Fix:
+`kill -9` the agent process, delete those two cache directories (no sudo needed, they're
+per-user), `qlmanage -r` / `qlmanage -r cache` to reset the QuickLook daemon too for good measure,
+then `killall Finder Dock`. That combination finally produced a correct, freshly-rendered preview.
+**Updated rule of thumb: a stubborn stale-icon report needs clearing *all four* layers to be sure
+-- reconfigure (source `.icns` generation), Finder cache, Dock's on-disk cache, and
+`iconservicesagent`'s cache -- not just the first one or two that happen to fix it most of the
+time.** No source changes beyond the new icon artwork; confirmed via a fresh Finder preview
+screenshot matching the reference exactly. Smoke test passes; all four targets build clean.
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).
