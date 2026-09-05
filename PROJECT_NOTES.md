@@ -241,10 +241,21 @@ and `timeLabel` sit on it, so they use `screenText`/`screenTextDim` rather than
 directly), so the one shared instance works for buttons in either context
 without knowing which it's in.
 
+`WaveformDisplay` and `TimeRuler` both clip their `paint()` to a rounded
+rectangle (`Path::addRoundedRectangle` + `Graphics::reduceClipRegion`, radius
+10, matching the control band) — the waveform's own rendering is otherwise
+untouched, only the panel's outer shape rounds. The transport row groups
+Play/Loop/Record/Tools on the left with the time readout pinned to the right
+(dropped the separate "● REC" label; `timeLabel` carries that text and turns
+`playhead`-coloured while recording instead).
+
+The plugin's own outer window/editor bounds are **not** rounded and won't be —
+in a host the editor is a plain rectangle the host draws its own frame around,
+and reshaping an actual OS window for the standalone isn't worth the
+fragility. Only panels drawn by R3WRK itself can round, and now do.
+
 Not yet covered: `ComboBox`/`PopupMenu` (ThemeEditor's preset picker, the Tools
-menu's own popup) still use the default JUCE look, and the waveform/ruler
-panels are still square-cornered (left that way deliberately — the waveform
-itself was asked to stay untouched).
+menu's own popup) still use the default JUCE look.
 
 ## Theming
 
