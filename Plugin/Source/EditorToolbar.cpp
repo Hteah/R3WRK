@@ -153,13 +153,13 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
 
     timeLabel.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::plain));
     timeLabel.setJustificationType(juce::Justification::centredRight);
-    toolsButton.setButtonText(juce::String::fromUTF8("Tools \xe2\x96\xbe"));   // Tools ▾
     loopButton.setClickingTogglesState(true);
 
     playFromStartButton.setTooltip("Play from start");
     playButton.setTooltip("Play the selection (Space)");
     loopButton.setTooltip("Loop");
     recordButton.setTooltip("Record");
+    toolsButton.setTooltip("Tools");
 
     for (auto* b : { &playFromStartButton, &playButton, &loopButton, &recordButton, &toolsButton })
     {
@@ -536,7 +536,7 @@ void EditorToolbar::resized()
     add(playButton, 28);
     add(loopButton, 28);
     add(recordButton, 28);
-    add(toolsButton, 84);
+    add(toolsButton, 28);
     fb.items.add(juce::FlexItem().withFlex(1.0f));
     add(timeLabel, 150);
     fb.performLayout(row);

@@ -291,6 +291,19 @@ snap then lands it at the start of whatever's actually playing -- the
 selection if there is one, else the loop range, else sample 0 -- with
 no extra region-lookup logic duplicated in the toolbar.
 
+`toolsButton` (still opens the same Tools ▾ pop-up menu) also dropped its "Tools ▾"
+text for a drawn icon (`iconTools`) -- a crossed screwdriver and open-end wrench,
+from a user-supplied reference image, in the same 28×28 outlined-circle treatment
+as Play-from-start. Simplified from the reference to one terminal shape per tool
+(a single open jaw on the wrench, a single filled-capsule handle on the
+screwdriver, not a symmetric two-ended version of each) -- a first pass with both
+ends detailed on both tools looked like a tangled scribble at 28px; halving the
+shape count per tool reads far more clearly at that size. The wrench's jaw reuses
+the loop icon's addCentredArc-with-a-gap technique, with a wide (~120°) gap so it
+reads as an open hook rather than a near-closed ring; the screwdriver's handle is
+a small filled rounded-rect rather than an outline, since a solid block reads
+better than a thin stroke at this size.
+
 All five toolbar buttons (`playFromStartButton`/`playButton`/`loopButton`/
 `recordButton`/`toolsButton`) call `setWantsKeyboardFocus(false)`. A mouse
 click always leaves keyboard focus sitting on whichever button was

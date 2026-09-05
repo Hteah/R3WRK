@@ -10,7 +10,7 @@
 /**
     A single control strip below the waveform:
 
-        ⏮ Play · Loop · time    ···    ● REC m:ss · Record · Tools ▾
+        ⏮ Play · Loop · time    ···    ● REC m:ss · Record · Tools
 
     Everything else — file ops, clipboard, region processing, stretch/pitch,
     export selection, undo/redo — lives in the "Tools" pop-up menu.
@@ -74,7 +74,7 @@ private:
                                                                     // -- a toggling pill, not a checkbox
     juce::Label timeLabel;   // also carries the "● REC m:ss" elapsed time while recording
     juce::TextButton recordButton;
-    juce::TextButton toolsButton  { "Tools" };
+    juce::TextButton toolsButton  { R3WRKLookAndFeel::iconTools };   // opens the Tools ▾ pop-up menu
 
     std::unique_ptr<juce::FileChooser> fileChooser;
 

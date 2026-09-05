@@ -40,6 +40,58 @@ namespace
         addLoopArrowhead(heads, centre, radius, 340.0f, radius * 0.55f);
         g.fillPath(heads);
     }
+
+    // Tools: a crossed open-end wrench and flathead screwdriver, drawn as line art
+    // (stroked outlines, nothing filled) to match the reference icon rather than the
+    // solid-fill style of Play/Stop -- built in local (0,0)-centred coordinates with
+    // the long axis along +x, then rotated into place, the same way as the rotary
+    // knob's pointer tick.
+    void drawToolsIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
+    {
+        // Small (28px) icon, so this simplifies the reference glyph to one terminal
+        // shape per tool rather than two -- a single-jaw wrench and a plain-handled
+        // screwdriver read far more clearly at this size than a fully symmetric,
+        // four-shape version does.
+        auto area = bounds.reduced(bounds.getHeight() * 0.22f);
+        const float R = juce::jmin(area.getWidth(), area.getHeight()) * 0.5f;
+        const auto  centre = area.getCentre();
+        const float thickness = juce::jmax(1.6f, R * 0.24f);
+        const float armLen = R * 1.6f;
+
+        // Wrench: a shaft ending in one open ("C") jaw, gap facing outward -- same
+        // addCentredArc-with-a-gap technique as the loop icon's arcs, but with a wide
+        // (~120deg) gap so it reads as a clear open hook rather than a near-closed ring.
+        juce::Path wrench;
+        wrench.startNewSubPath(-armLen * 0.5f, 0.0f);
+        wrench.lineTo(armLen * 0.30f, 0.0f);
+
+        const float headR = R * 0.36f;
+        const float gapHalf = 60.0f;
+        const float from = juce::degreesToRadians(90.0f + gapHalf);
+        const float to   = juce::degreesToRadians(90.0f + gapHalf + (360.0f - 2.0f * gapHalf));
+        wrench.addCentredArc(armLen * 0.5f, 0.0f, headR, headR, 0.0f, from, to, true);
+
+        wrench.applyTransform(juce::AffineTransform::rotation(juce::degreesToRadians(45.0f)).translated(centre));
+        g.setColour(ink);
+        g.strokePath(wrench, juce::PathStrokeType(thickness, juce::PathStrokeType::curved,
+                                                  juce::PathStrokeType::rounded));
+
+        // Screwdriver: a shaft running to a point (the blade) plus a solid, filled
+        // capsule handle at the other end -- a filled block reads more clearly than a
+        // thin outline at this size.
+        juce::Path driver;
+        driver.startNewSubPath(-armLen * 0.5f, 0.0f);
+        driver.lineTo(armLen * 0.14f, 0.0f);
+        driver.applyTransform(juce::AffineTransform::rotation(juce::degreesToRadians(-45.0f)).translated(centre));
+        g.strokePath(driver, juce::PathStrokeType(thickness * 0.85f, juce::PathStrokeType::curved,
+                                                  juce::PathStrokeType::rounded));
+
+        juce::Rectangle<float> handle(armLen * 0.12f, -R * 0.30f, armLen * 0.42f, R * 0.60f);
+        juce::Path handlePath;
+        handlePath.addRoundedRectangle(handle, R * 0.20f);
+        handlePath.applyTransform(juce::AffineTransform::rotation(juce::degreesToRadians(-45.0f)).translated(centre));
+        g.fillPath(handlePath);
+    }
 }
 
 void R3WRKLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int width, int height,
@@ -120,7 +172,8 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
                                       bool isMouseOverButton, bool isButtonDown)
 {
     const auto text = button.getButtonText();
-    if (text != iconPlay && text != iconStop && text != iconLoop && text != iconPlayFromStart)
+    if (text != iconPlay && text != iconStop && text != iconLoop
+        && text != iconPlayFromStart && text != iconTools)
     {
         juce::LookAndFeel_V4::drawButtonText(g, button, isMouseOverButton, isButtonDown);
         return;
@@ -135,6 +188,11 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     if (text == iconLoop)
     {
         drawLoopIcon(g, bounds, ink);
+        return;
+    }
+    if (text == iconTools)
+    {
+        drawToolsIcon(g, bounds, ink);
         return;
     }
 
