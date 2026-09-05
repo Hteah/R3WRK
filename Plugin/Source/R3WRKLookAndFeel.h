@@ -4,8 +4,10 @@
 
 /**
     The shared custom look: rotary knobs (a flat disc, a thin outline, a single pointer
-    line -- no value-arc, Eurorack/VCV-module-inspired) and pill-shaped buttons (fully
-    rounded, filled when "on" or accent-primary, outlined/transparent otherwise).
+    line -- no value-arc, Eurorack/VCV-module-inspired), pill-shaped buttons (fully
+    rounded, filled when "on" or accent-primary, outlined/transparent otherwise), and a
+    handful of drawn transport icons in place of button text (play triangle, stop square,
+    loop's two-arrow circle) -- see drawButtonText().
     Reads live from the shared theme, so it stays in sync with theme changes the same way
     the rest of the UI does.
 
@@ -25,6 +27,16 @@ public:
 
     void drawButtonBackground(juce::Graphics&, juce::Button&, const juce::Colour& backgroundColour,
                               bool shouldDrawButtonAsHighlighted, bool shouldDrawButtonAsDown) override;
+
+    // A button whose text is one of the "icon:..." markers below (see EditorToolbar) gets a
+    // drawn vector icon instead of literal text; anything else falls back to the normal
+    // JUCE text rendering, so this is safe to use on every button, not just the transport.
+    static constexpr const char* iconPlay  = "icon:play";
+    static constexpr const char* iconStop  = "icon:stop";
+    static constexpr const char* iconLoop  = "icon:loop";
+
+    void drawButtonText(juce::Graphics&, juce::TextButton&,
+                       bool isMouseOverButton, bool isButtonDown) override;
 
 private:
     juce::SharedResourcePointer<ThemeManager> theme;

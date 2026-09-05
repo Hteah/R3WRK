@@ -155,6 +155,10 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     toolsButton.setButtonText(juce::String::fromUTF8("Tools \xe2\x96\xbe"));   // Tools ▾
     loopButton.setClickingTogglesState(true);
 
+    playButton.setTooltip("Play the selection (Space)");
+    loopButton.setTooltip("Loop");
+    recordButton.setTooltip("Record");
+
     for (auto* b : { &playButton, &loopButton, &recordButton, &toolsButton })
         b->setLookAndFeel(&toolbarLnF);
 
@@ -197,6 +201,7 @@ void EditorToolbar::applyTheme()
     loopButton.setColour(juce::TextButton::textColourOnId, pal.windowBg);
 
     recordButton.setColour(juce::TextButton::buttonColourId, pal.recordButton);
+    recordButton.setColour(juce::TextButton::textColourOffId, juce::Colours::white);   // the stop-square ink while recording
 
     toolsButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
     toolsButton.setColour(juce::TextButton::textColourOffId, pal.screenText);
@@ -369,8 +374,8 @@ void EditorToolbar::updateTransportButtonText()
 {
     const bool rec = document.isRecording.load();
     const bool playing = document.isPlaying.load();
-    recordButton.setButtonText(rec ? "Stop Rec" : "Record");
-    playButton.setButtonText(playing ? "Stop" : "Play");
+    recordButton.setButtonText(rec ? R3WRKLookAndFeel::iconStop : juce::String());
+    playButton.setButtonText(playing ? R3WRKLookAndFeel::iconStop : R3WRKLookAndFeel::iconPlay);
     loopButton.setToggleState(document.loopEnabled.load(), juce::dontSendNotification);
     recordButton.setEnabled(! playing || rec);
 }
@@ -487,9 +492,9 @@ void EditorToolbar::resized()
                          .withMargin(juce::FlexItem::Margin(0, (float) gap, 0, 0)));
     };
     // Left-grouped, matching the mockup: Play/Loop/Record/Tools together, time pinned right.
-    add(playButton, 58);
-    add(loopButton, 56);
-    add(recordButton, 80);
+    add(playButton, 28);
+    add(loopButton, 28);
+    add(recordButton, 28);
     add(toolsButton, 84);
     fb.items.add(juce::FlexItem().withFlex(1.0f));
     add(timeLabel, 150);

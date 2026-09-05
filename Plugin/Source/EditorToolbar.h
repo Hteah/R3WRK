@@ -63,11 +63,15 @@ private:
     R3WRKLookAndFeel toolbarLnF;
     Clipboard clipboard;
 
-    juce::TextButton playButton   { "Play" };
-    juce::TextButton loopButton   { "Loop" };   // setClickingTogglesState(true) -- a toggling
-                                                // pill, not a checkbox, to match Play/Record/Tools
+    // Play/Loop/Record are drawn as icons (see R3WRKLookAndFeel::drawButtonText) on square
+    // (so pill-radius-as-circle) buttons -- a play triangle, a loop/repeat glyph, and (for
+    // Record) no icon at all while idle, since a plain red circular button already reads as
+    // "record" on its own; a stop square appears on it once recording.
+    juce::TextButton playButton   { R3WRKLookAndFeel::iconPlay };
+    juce::TextButton loopButton   { R3WRKLookAndFeel::iconLoop };   // setClickingTogglesState(true)
+                                                                    // -- a toggling pill, not a checkbox
     juce::Label timeLabel;   // also carries the "● REC m:ss" elapsed time while recording
-    juce::TextButton recordButton { "Record" };
+    juce::TextButton recordButton;
     juce::TextButton toolsButton  { "Tools" };
 
     std::unique_ptr<juce::FileChooser> fileChooser;

@@ -257,6 +257,30 @@ fragility. Only panels drawn by R3WRK itself can round, and now do.
 Not yet covered: `ComboBox`/`PopupMenu` (ThemeEditor's preset picker, the Tools
 menu's own popup) still use the default JUCE look.
 
+### Transport icons (Play/Loop/Record)
+
+Play, Loop and Record are now square (28×28) icon buttons instead of wide
+text pills — square bounds mean `drawButtonBackground`'s existing
+`radius = height/2` pill formula draws a true circle, so no new
+background-drawing code was needed, just narrower `resized()` widths.
+
+The icons themselves are hand-drawn vector paths, not font glyphs — most
+"two arrows in a circle" Unicode loop glyphs (🔁/🔄) render as fixed-colour
+emoji and ignore `Graphics::setColour`/JUCE text-colour, which would break
+per-theme tinting. Instead `R3WRKLookAndFeel::drawButtonText` checks the
+button's text against three sentinel marker strings (`iconPlay`/`iconStop`/
+`iconLoop`, static constants on the class) and draws a path instead of text
+when it matches, falling back to normal JUCE text rendering for anything
+else (so the one override is safe for every button, e.g. `toolsButton`'s
+literal "Tools ▾"). `playButton`/`loopButton` swap between the play-triangle
+and stop-square markers depending on transport state; `recordButton` carries
+no icon at all while idle — a plain red circle already reads as "record" —
+and shows the stop-square once recording starts.
+
+The loop icon is two ~140° arcs (`Path::addCentredArc`) with gaps between
+them, each ending in a small triangular arrowhead computed from
+`Point::getPointOnCircumference` plus the tangent/normal at that angle.
+
 ## Theming
 
 `Source/Theme.{h,cpp}` — `Palette` is 11 `juce::Colour`s (window/panel bg,
