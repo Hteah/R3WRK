@@ -174,14 +174,34 @@ now-*shorter* buffer, e.g. after Trim) still runs afterward, unchanged.
 **Keyboard zoom.** `WaveformDisplay::zoomIn()`/`zoomOut()` (centred on the
 current view, same ±2× step as one mouse-wheel notch) existed but were
 unreachable from the UI since the header's Fit/zoom buttons were removed
-(`63aa955`) — `PluginEditor::keyPressed` now wires **Ctrl+**/**Ctrl-** to them,
-for zooming without a mouse. Matched on the resulting character
-(`KeyPress::getTextCharacter()` — `'+'`/`'='`/`'-'`) rather than a specific
-keyCode+shift combo, so it doesn't matter whether "+" arrives as its own key
-or as Shift-"=" (the usual case on a US keyboard). Deliberately the literal
-Control key, not ⌘ — `ModifierKeys::ctrlModifier` and `commandModifier` are
-distinct bits on macOS (unlike Windows/Linux, where JUCE aliases them), so
-`isCtrlDown()` doesn't fire for ⌘.
+(`63aa955`) — `PluginEditor::keyPressed` wires them to a Control shortcut, for
+zooming without a mouse. Deliberately the literal Control key, not ⌘ —
+`ModifierKeys::ctrlModifier` and `commandModifier` are distinct bits on macOS
+(unlike Windows/Linux, where JUCE aliases them).
+
+First attempt matched **Ctrl+"+"/Ctrl+"-"** on the resulting character
+(`KeyPress::getTextCharacter()`) — built and shipped, then the user reported
+"doesn't work". Root cause (read from JUCE's Cocoa backend,
+`juce_NSViewComponentPeer_mac.mm::handleKeyEvent`): on a US Mac keyboard,
+Control held with a *symbol* key never reaches `Component::keyPressed` at
+all. Control has a defined control-code mapping for letters and a handful of
+punctuation keys (`[`/`]`/`\`, etc.) but not for `-`/`=`/`+`, so Cocoa's own
+text-input layer decides there's nothing to insert; `[NSEvent characters]`
+comes back an empty string; and JUCE's handler only calls `handleKeyPress()`
+(and even `handleKeyUpOrDown()`) by iterating *that* string — zero characters
+means the loop body never runs, so the native key-down event is dropped
+before any JUCE `KeyPress` is ever constructed. Not fixable by how the
+`KeyPress` is matched in application code (nothing reaches it to match).
+
+Fix: **Ctrl+Up/Ctrl+Down** are the primary binding instead — arrow keys don't
+hit that snag (Cocoa always reports a non-empty character for them, which is
+why JUCE's backend has to explicitly scrub it back out for arrow keys a few
+lines further down, in a switch statement — confirming the loop does run for
+them). Matched the same way the existing ⌘Z/⌘X/⌘C/⌘V shortcuts are
+(`key == KeyPress(KeyPress::upKey, ctrlModifier, 0)`), rather than by
+character. The Ctrl+"+"/"-" character-based match is left in too, in case a
+different keyboard layout doesn't hit the same Cocoa behaviour — harmless if
+it simply never fires on this one.
 
 ## Waveform peak cache
 
@@ -469,7 +489,7 @@ current sample rate if they differ, so pitch/speed is correct in your DAW.
   change; fine for typical sample lengths, would want to be a smarter
   incremental/windowed computation for very long recordings.
 - Keyboard shortcuts are limited to the editor essentials (Space, ⌘Z/⌘⇧Z,
-  ⌘X/⌘C/⌘V, Ctrl+/Ctrl- to zoom the waveform); no user-configurable key map.
+  ⌘X/⌘C/⌘V, Ctrl+Up/Down to zoom the waveform); no user-configurable key map.
 - The offline Stretch/Pitch edit (Tools menu / selection right-click) commits
   audio only on Apply — the slider drag previews *visually* (see "Selection
   context menu + live Amplify/Stretch preview" above) but there's no live
