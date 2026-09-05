@@ -246,32 +246,17 @@ void WaveformDisplay::zoomToward(double spanFactor, float pointerX)
                 applyView(edge, frac);
                 return;
             }
-
-            // Not near an edge: frame the whole selection while it's still narrower than
-            // the view, so the wheel pulls you into it. Anchored on the pointer's actual
-            // position when it's inside the selection, not always the exact midpoint --
-            // otherwise every zoom-in step snaps to the same fixed point regardless of
-            // where within the selection you're pointing, which reads as "it still wants
-            // to come from one side or the other" no matter where you aim. Pointer outside
-            // the selection (zooming in on it from elsewhere) still centres on the midpoint,
-            // since there's no more specific spot within it to prefer.
-            const int64_t selLen = selEnd - selStart;
-            if (selLen > 0 && curLen > selLen)
-            {
-                const int64_t framedLen = juce::jmax((int64_t) 16, juce::jmin(newLen, selLen + selLen / 5));
-                const bool pointerInsideSelection = pointerX >= sx && pointerX <= ex;
-                const int64_t anchor = pointerInsideSelection ? xToSample(pointerX) : (selStart + selEnd) / 2;
-                const double anchorFrac = pointerInsideSelection
-                    ? juce::jlimit(0.0, 1.0, (double) pointerX / (double) juce::jmax(1, getWidth()))
-                    : 0.5;
-                int64_t newStart = anchor - (int64_t) (anchorFrac * (double) framedLen / timeScale);
-                newStart = juce::jlimit((int64_t) 0, juce::jmax((int64_t) 0, total - framedLen), newStart);
-                viewStart = newStart;
-                viewEnd = newStart + framedLen;
-                rebuildWaveformPath();
-                repaint();
-                return;
-            }
+            // Not near an edge: no special selection handling here any more -- falls
+            // through to the plain pointer-anchored zoom at the bottom of the function,
+            // same as zooming anywhere else. There used to be a "frame the whole selection"
+            // step here (jump straight to a view sized to fit it, the moment the current
+            // view was wider than the selection), but that condition was true for nearly
+            // the *entire* zoomed-out range for a small selection in a longer file, not just
+            // the last step before naturally reaching that size -- so the very first zoom-in
+            // tick from anywhere zoomed out would jump straight to "just the selection"
+            // instead of zooming in gradually. The plain pointer-anchored zoom already tracks
+            // the pointer correctly whether it's inside the selection or not (see xToSample()
+            // below), which is all "zoom toward the selection" ever really needed.
         }
         else if (selEnd > selStart)
         {
@@ -887,13 +872,20 @@ void WaveformDisplay::mouseWheelMove(const juce::MouseEvent& e, const juce::Mous
         return;
     }
 
+    // Lock the zoom anchor to wherever this gesture started, not the live pointer x on every
+    // notch -- see the member comment on wheelGestureAnchorX for why.
+    const uint32_t now = juce::Time::getMillisecondCounter();
+    if (now - lastWheelEventMs > wheelGestureGapMs)
+        wheelGestureAnchorX = (float) e.x;
+    lastWheelEventMs = now;
+
     // dy>0 (wheel up) => zoom in. Was jlimit(0.5, 2.0, exp(-dy*1.4)) -- a single wheel event
     // could as much as halve or double the view, which on a trackpad's usual burst of
     // events per swipe added up to "jumps quickly to a very small bit" long before the
     // gesture felt finished. Both the per-event ceiling and the dy sensitivity are gentler
     // now (0.8/1.25 is an exact inverse pair, same idea as the keyboard zoom step).
     const double factor = juce::jlimit(0.8, 1.25, std::exp(-dy * 0.6));
-    zoomToward(factor, (float) e.x);
+    zoomToward(factor, wheelGestureAnchorX);
 }
 
 void WaveformDisplay::changeListenerCallback(juce::ChangeBroadcaster*)

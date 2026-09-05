@@ -121,6 +121,17 @@ private:
 
     WaveformStretchPreview stretchPreview { document };   // background real-stretch preview
 
+    // A scroll/trackpad gesture sends a rapid burst of small wheel events; re-reading the
+    // pointer's exact x on every single one means incidental mouse jitter during the gesture
+    // (nobody's hand is perfectly still) nudges the zoom anchor a little each time, drifting
+    // away from wherever you actually meant to zoom in on by the time a many-notch gesture is
+    // done. Locking the anchor x to wherever the gesture *started* and reusing it for the
+    // whole burst -- see mouseWheelMove() -- fixes that; a pause longer than
+    // wheelGestureGapMs starts a fresh gesture (and a fresh anchor) on the next notch.
+    static constexpr uint32_t wheelGestureGapMs = 400;
+    uint32_t lastWheelEventMs = 0;
+    float wheelGestureAnchorX = 0.0f;
+
     enum class DragKind { none, newSelection, resizeStart, resizeEnd, dragOut };
     DragKind dragKind = DragKind::none;
     int64_t dragAnchor = 0;          // fixed frame: press frame (new) or the opposite edge (resize)

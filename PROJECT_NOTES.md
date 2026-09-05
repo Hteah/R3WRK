@@ -352,6 +352,39 @@ other. Also, please slow down the speed of zooming."
    is an exact inverse pair, same idea as `keyboardZoomStep`). Keyboard zoom
    (⌘+/⌘-) already had its own separate, gentler step and wasn't touched.
 
+**Still not right — the actual bug was the "frame the selection" jump.**
+User: "I can't figure this out. If I put my mouse pointer in the middle of
+the selection from a zoomed out position and zoom in a tiny bit, jumps into
+full zoom of the selection." The zoom-in framing step (previous entry) keyed
+off `curLen > selLen` — true for nearly the *entire* zoomed-out range above
+a small selection in a longer file, not just the last step before naturally
+reaching that size — so `framedLen = jmin(newLen, selLen*1.2)` picked
+`selLen*1.2` immediately on the very first zoom-in tick, however far zoomed
+out the view started. **Removed the special "frame the selection" branch on
+zoom-in entirely** rather than re-tuning its trigger again: it now falls
+through to the same plain pointer-anchored zoom used everywhere else, which
+(per the fix directly above) already tracks the pointer correctly whether
+it's inside the selection or not — gradual and predictable, matching how
+zoom behaves everywhere else in the app, with no special case left to get
+the threshold wrong a third time. Bracket-grab (zooming in right at an edge)
+is untouched; zoom-out's deliberate side-of-selection anchoring is untouched.
+
+**Locking the zoom anchor for the whole gesture.** Follow-up ask: "I
+understand that if I zoom in that the mouse pointer is going to change
+location, but isn't there a way where it can remember that I wanted to zoom
+into the place I wanted to zoom in in the beginning?" A trackpad/wheel
+gesture sends a rapid burst of small events, and `zoomToward()` was reading
+the pointer's live x on every single one — incidental mouse jitter during
+the gesture (no one's hand is perfectly still) nudged the anchor a little
+each notch, so a many-notch zoom could drift from where the gesture actually
+started by the time it finished. `WaveformDisplay` now locks
+`wheelGestureAnchorX` to wherever the pointer was when a gesture *starts*
+(no wheel event for more than `wheelGestureGapMs` = 400 ms) and reuses that
+same x for every notch until the next pause, rather than re-reading `e.x`
+each time — `zoomToward()` itself is unchanged, it just always receives a
+steady anchor for the duration of one gesture instead of a jittery one.
+Panning (horizontal swipe) has no anchor concept and isn't affected.
+
 ## Selection context menu + live Amplify/Stretch preview
 
 Right-clicking inside a selection (`WaveformDisplay::onSelectionContextMenu`,
