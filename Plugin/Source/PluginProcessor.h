@@ -77,5 +77,16 @@ private:
                                   int64_t& pos, int64_t regionStart, int64_t regionEnd, bool loop,
                                   double speed, double pitch, double stretch);
 
+    // Scrub tool: a plain variable-rate (and reversible) read of the stored audio, driven by
+    // AudioDocument::scrubVelocity -- see the class comment there. Deliberately *not* run
+    // through RubberBand: pitch tracking speed/direction one-to-one is the point (a real
+    // tape or turntable does the same), not a separate DSP mode to maintain.
+    double scrubReadPos = 0.0;     // audio-thread-only fractional read cursor, raw samples
+    bool wasScrubbing = false;     // edge-detect scrub start, so scrubReadPos picks up from
+                                   // document.playhead (wherever the drag began) rather than
+                                   // continuing from a stale previous position
+    void renderScrub(juce::AudioBuffer<float>& out, int numCh, int numSamples,
+                     const juce::AudioBuffer<float>& docBuf);
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(R3WRKAudioProcessor)
 };

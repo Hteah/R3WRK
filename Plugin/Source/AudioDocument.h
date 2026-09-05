@@ -62,6 +62,23 @@ public:
     std::atomic<bool> loopEnabled { false };
 
     //==============================================================================
+    // Scrub tool: drag across the waveform to play forward or backward at a rate matching
+    // how fast you drag -- like moving tape past a playback head by hand, or a turntable
+    // under a stylus. Pitch rises and falls with speed (this is a plain variable-rate read,
+    // no RubberBand correction), which is the whole point -- that's the "tape speeding up
+    // and slowing down" sound, not a clean speed change.
+    //   scrubModeEnabled : the *tool* being selected (EditorToolbar's Scrub toggle) --
+    //                      message-thread only, like previewActive, so a plain bool.
+    //   isScrubbing      : true only while actually dragging; the audio thread reads this
+    //                      every block, so atomic.
+    //   scrubVelocity    : current rate in raw samples per second, signed (negative =
+    //                      backward), written by WaveformDisplay on every drag move,
+    //                      read by the audio thread each block.
+    bool scrubModeEnabled = false;
+    std::atomic<bool> isScrubbing { false };
+    std::atomic<double> scrubVelocity { 0.0 };
+
+    //==============================================================================
     // Live playback knobs (KnobRow writes these; the audio thread reads them every block
     // to drive a real-time RubberBand stretcher -- see PluginProcessor). Live here, not on
     // the processor, so the views (WaveformDisplay, TimeRuler) can read them too, for the

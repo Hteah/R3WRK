@@ -10,7 +10,7 @@
 /**
     A single control strip below the waveform:
 
-        ⏮ Play · Loop · time    ···    ● REC m:ss · Record · Tools
+        ⏮ Play · Loop · Scrub · time    ···    ● REC m:ss · Record · Tools
 
     Everything else — file ops, clipboard, region processing, stretch/pitch,
     export selection, undo/redo — lives in the "Tools" pop-up menu.
@@ -78,6 +78,10 @@ private:
     juce::TextButton playButton   { R3WRKLookAndFeel::iconPlay };
     juce::TextButton loopButton   { R3WRKLookAndFeel::iconLoop };   // setClickingTogglesState(true)
                                                                     // -- a toggling pill, not a checkbox
+    juce::TextButton scrubButton  { R3WRKLookAndFeel::iconScrub };  // setClickingTogglesState(true)
+                                                                    // -- toggles the scrub *tool*;
+                                                                    // WaveformDisplay does the actual
+                                                                    // dragging once it's on
     juce::Label timeLabel;   // also carries the "● REC m:ss" elapsed time while recording
     juce::TextButton recordButton;
     juce::TextButton toolsButton  { R3WRKLookAndFeel::iconTools };   // opens the Tools ▾ pop-up menu

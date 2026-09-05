@@ -46,6 +46,7 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     wasPlaying = false;
     stretcherPrimed = false;
     rtFinished = false;
+    wasScrubbing = false;
 }
 
 void R3WRKAudioProcessor::releaseResources()
@@ -54,6 +55,7 @@ void R3WRKAudioProcessor::releaseResources()
     wasPlaying = false;
     stretcherPrimed = false;
     rtFinished = false;
+    wasScrubbing = false;
 }
 
 bool R3WRKAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
@@ -191,6 +193,49 @@ void R3WRKAudioProcessor::renderPlaybackStretched(juce::AudioBuffer<float>& out,
     document.playhead.store(pos, std::memory_order_relaxed);
 }
 
+// Scrub tool: a linear-interpolated, variable-rate (and reversible) read of the stored
+// audio, at whatever rate WaveformDisplay's drag handling last computed from mouse
+// velocity. No RubberBand involved -- pitch rising/falling with speed, and playing
+// backwards cleanly at a negative rate, is exactly the point (a physical tape or turntable
+// does the same); this is a much simpler DSP path than the pitch-corrected knobs.
+void R3WRKAudioProcessor::renderScrub(juce::AudioBuffer<float>& out, int numCh, int numSamples,
+                                      const juce::AudioBuffer<float>& docBuf)
+{
+    const int64_t docLen = docBuf.getNumSamples();
+    if (docLen <= 1 || docBuf.getNumChannels() <= 0)
+        return;
+
+    // Defence in depth -- WaveformDisplay already clamps, but a stale or wild value here
+    // would otherwise be audible as a shriek or a runaway read position.
+    constexpr double maxSamplesPerSec = 44100.0 * 12.0;
+    const double velocity = juce::jlimit(-maxSamplesPerSec, maxSamplesPerSec,
+                                         document.scrubVelocity.load(std::memory_order_relaxed));
+    const double perSample = velocity / juce::jmax(1.0, currentSampleRate);
+
+    double pos = scrubReadPos;
+    for (int i = 0; i < numSamples; ++i)
+    {
+        if (pos >= 0.0 && pos < (double) (docLen - 1))
+        {
+            const int64_t i0 = (int64_t) pos;
+            const float frac = (float) (pos - (double) i0);
+            for (int ch = 0; ch < numCh; ++ch)
+            {
+                const int srcCh = juce::jmin(ch, docBuf.getNumChannels() - 1);
+                const float* d = docBuf.getReadPointer(srcCh);
+                out.setSample(ch, i, d[i0] + (d[i0 + 1] - d[i0]) * frac);
+            }
+        }
+        // else: past either end -- leave this sample silent (buffer is already cleared)
+        pos += perSample;
+    }
+
+    // Clamp so the cursor doesn't run away to +/-infinity while scrubbing off one end with
+    // the mouse still held and moving.
+    scrubReadPos = juce::jlimit(0.0, (double) (docLen - 1), pos);
+    document.playhead.store((int64_t) scrubReadPos, std::memory_order_relaxed);
+}
+
 void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
     juce::ScopedNoDenormals noDenormals;
@@ -226,6 +271,24 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         wasPlaying = false;
         return; // pass input through unchanged so the user can monitor while recording
     }
+
+    if (document.isScrubbing.load(std::memory_order_relaxed))
+    {
+        buffer.clear();
+
+        const juce::CriticalSection::ScopedTryLockType stl(document.getLock());
+        if (stl.isLocked())
+        {
+            if (! wasScrubbing)   // just started -- pick up from wherever the drag began
+                scrubReadPos = (double) document.playhead.load(std::memory_order_relaxed);
+            renderScrub(buffer, numCh, numSamples, document.getBuffer());
+        }
+
+        wasScrubbing = true;
+        wasPlaying = false;   // so normal playback resets the stretcher cleanly if it resumes
+        return;
+    }
+    wasScrubbing = false;
 
     if (document.isPlaying.load(std::memory_order_relaxed))
     {

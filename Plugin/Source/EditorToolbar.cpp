@@ -179,6 +179,7 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     addAndMakeVisible(playFromStartButton);
     addAndMakeVisible(playButton);
     addAndMakeVisible(loopButton);
+    addAndMakeVisible(scrubButton);
     addAndMakeVisible(timeLabel);
     addAndMakeVisible(recordButton);
     addAndMakeVisible(toolsButton);
@@ -186,14 +187,17 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     timeLabel.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::plain));
     timeLabel.setJustificationType(juce::Justification::centredRight);
     loopButton.setClickingTogglesState(true);
+    scrubButton.setClickingTogglesState(true);
 
     playFromStartButton.setTooltip("Play from start");
     playButton.setTooltip("Play the selection (Space)");
     loopButton.setTooltip("Loop");
+    scrubButton.setTooltip("Scrub -- drag across the waveform to play forward/backward at "
+                           "the speed you drag, like moving tape by hand");
     recordButton.setTooltip("Record");
     toolsButton.setTooltip("Tools");
 
-    for (auto* b : { &playFromStartButton, &playButton, &loopButton, &recordButton, &toolsButton })
+    for (auto* b : { &playFromStartButton, &playButton, &loopButton, &scrubButton, &recordButton, &toolsButton })
     {
         b->setLookAndFeel(&toolbarLnF);
 
@@ -211,6 +215,25 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     playFromStartButton.onClick = [this] { playFromStart(); };
     loopButton.onClick          = [this] { document.loopEnabled = loopButton.getToggleState(); };
     toolsButton.onClick         = [this] { showToolsMenu(); };
+    scrubButton.onClick         = [this]
+    {
+        document.scrubModeEnabled = scrubButton.getToggleState();
+        if (document.scrubModeEnabled)
+        {
+            // Scrubbing and normal playback are mutually exclusive -- entering the tool
+            // stops any ongoing playback, same as starting a recording already does.
+            if (document.isPlaying.load())
+                processor.stopPlayback();
+        }
+        else
+        {
+            // Leaving the tool mid-drag (e.g. the button toggled off from elsewhere) should
+            // silence immediately, not leave the audio thread reading at a stale velocity.
+            document.isScrubbing = false;
+            document.scrubVelocity = 0.0;
+        }
+        document.notifyChanged();
+    };
 
     applyTheme();
     document.changeBroadcaster.addChangeListener(this);
@@ -221,7 +244,7 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
 
 EditorToolbar::~EditorToolbar()
 {
-    for (auto* b : { &playFromStartButton, &playButton, &loopButton, &recordButton, &toolsButton })
+    for (auto* b : { &playFromStartButton, &playButton, &loopButton, &scrubButton, &recordButton, &toolsButton })
         b->setLookAndFeel(nullptr);   // detach before toolbarLnF is destroyed
     theme->removeChangeListener(this);
     document.changeBroadcaster.removeChangeListener(this);
@@ -249,6 +272,13 @@ void EditorToolbar::applyTheme()
     loopButton.setColour(juce::TextButton::buttonOnColourId, pal.accent);
     loopButton.setColour(juce::TextButton::textColourOffId, pal.screenText);
     loopButton.setColour(juce::TextButton::textColourOnId, pal.windowBg);
+
+    // Scrub is a toggling tool, same treatment as Loop: outlined while off, filled while the
+    // tool is selected.
+    scrubButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+    scrubButton.setColour(juce::TextButton::buttonOnColourId, pal.accent);
+    scrubButton.setColour(juce::TextButton::textColourOffId, pal.screenText);
+    scrubButton.setColour(juce::TextButton::textColourOnId, pal.windowBg);
 
     recordButton.setColour(juce::TextButton::buttonColourId, pal.recordButton);
     recordButton.setColour(juce::TextButton::textColourOffId, juce::Colours::white);   // the stop-square ink while recording
@@ -473,6 +503,7 @@ void EditorToolbar::updateTransportButtonText()
     playButton.setButtonText(playing ? R3WRKLookAndFeel::iconStop : R3WRKLookAndFeel::iconPlay);
     loopButton.setToggleState(document.loopEnabled.load(), juce::dontSendNotification);
     recordButton.setEnabled(! playing || rec);
+    scrubButton.setEnabled(! rec);
 }
 
 void EditorToolbar::timerCallback()
@@ -590,6 +621,7 @@ void EditorToolbar::resized()
     add(playFromStartButton, 28);
     add(playButton, 28);
     add(loopButton, 28);
+    add(scrubButton, 28);
     add(recordButton, 28);
     add(toolsButton, 28);
     fb.items.add(juce::FlexItem().withFlex(1.0f));

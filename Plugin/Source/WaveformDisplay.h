@@ -29,6 +29,12 @@
     also auto-refits after an edit that changes the document's length while showing the
     whole thing (see refitViewIfContentChanged()).
 
+    While the Scrub tool is selected (document.scrubModeEnabled, toggled by
+    EditorToolbar's Scrub button), every mouse gesture here is repurposed: drag across the
+    waveform to play forward or backward at a rate matching how fast you drag, like moving
+    tape past a playback head by hand -- see mouseDown()/mouseDrag()/mouseUp() and
+    PluginProcessor::renderScrub().
+
     While Speed/Pitch/Stretch are non-identity, the drawn waveform *shape* comes from a real
     offline stretch computed in the background (see WaveformStretchPreview / stretchPreview)
     rather than the stored audio simply rescaled -- so it actually shows how the audio's
@@ -137,6 +143,15 @@ private:
     int64_t dragAnchor = 0;          // fixed frame: press frame (new) or the opposite edge (resize)
     bool dragOutStarted = false;     // the native file drag for this gesture has been kicked off
     static constexpr float edgeTolerancePx = 8.0f;
+
+    // Scrub tool (document.scrubModeEnabled) -- entirely separate from the DragKind state
+    // above; a scrub drag never touches the selection. mouseDrag re-derives a velocity
+    // (raw samples/sec, signed) from how far and how fast the sample under the pointer has
+    // moved since the last event, and writes it to document.scrubVelocity for the audio
+    // thread (see PluginProcessor::renderScrub) to integrate -- so the pitch rises and
+    // falls with drag speed, exactly like moving real tape past a playback head by hand.
+    int64_t scrubLastSample = 0;
+    double scrubLastTimeMs = 0.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(WaveformDisplay)
 };

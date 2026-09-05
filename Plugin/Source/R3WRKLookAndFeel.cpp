@@ -96,6 +96,31 @@ namespace
         g.setColour(ink);
         g.fillPath(gear);
     }
+
+    // Scrub: a cassette tape, traced from a reference icon the user supplied -- a rounded
+    // rectangle body, two reels sitting toward the bottom, and the tape strung between
+    // them along the reels' lower tangent (not through their centres). Stroked outline,
+    // matching the gear icon's line-icon style.
+    void drawScrubIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
+    {
+        auto area = bounds.reduced(bounds.getHeight() * 0.20f);
+        const float thickness = juce::jmax(1.3f, area.getHeight() * 0.11f);
+
+        juce::Path body;
+        body.addRoundedRectangle(area, area.getHeight() * 0.24f);
+        g.setColour(ink);
+        g.strokePath(body, juce::PathStrokeType(thickness, juce::PathStrokeType::curved,
+                                                juce::PathStrokeType::rounded));
+
+        const float reelR   = area.getHeight() * 0.27f;
+        const float reelCy  = area.getBottom() - reelR * 1.2f;
+        const float leftCx  = area.getX() + area.getWidth() * 0.30f;
+        const float rightCx = area.getRight() - area.getWidth() * 0.30f;
+
+        g.drawEllipse(leftCx - reelR, reelCy - reelR, reelR * 2.0f, reelR * 2.0f, thickness);
+        g.drawEllipse(rightCx - reelR, reelCy - reelR, reelR * 2.0f, reelR * 2.0f, thickness);
+        g.drawLine(leftCx, reelCy + reelR, rightCx, reelCy + reelR, thickness);
+    }
 }
 
 void R3WRKLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int width, int height,
@@ -177,7 +202,7 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
 {
     const auto text = button.getButtonText();
     if (text != iconPlay && text != iconStop && text != iconLoop
-        && text != iconPlayFromStart && text != iconTools)
+        && text != iconPlayFromStart && text != iconTools && text != iconScrub)
     {
         juce::LookAndFeel_V4::drawButtonText(g, button, isMouseOverButton, isButtonDown);
         return;
@@ -197,6 +222,11 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     if (text == iconTools)
     {
         drawGearIcon(g, bounds, ink);
+        return;
+    }
+    if (text == iconScrub)
+    {
+        drawScrubIcon(g, bounds, ink);
         return;
     }
 

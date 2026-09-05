@@ -692,6 +692,18 @@ WaveformDisplay::EdgeHit WaveformDisplay::hitEdge(float pressX, float startX, fl
 
 void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
 {
+    if (document.scrubModeEnabled)
+    {
+        document.isPlaying = false;   // scrubbing and normal playback don't mix
+        scrubLastSample = xToSample((float) e.x);
+        scrubLastTimeMs = juce::Time::getMillisecondCounterHiRes();
+        document.playhead = scrubLastSample;
+        document.scrubVelocity = 0.0;   // silent until the drag actually moves
+        document.isScrubbing = true;
+        document.notifyChanged();
+        return;
+    }
+
     if (e.mods.isPopupMenu() && document.hasSelection())
     {
         const float sx = sampleToX(document.getSelectionStart());
@@ -738,6 +750,32 @@ void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
 
 void WaveformDisplay::mouseDrag(const juce::MouseEvent& e)
 {
+    if (document.scrubModeEnabled)
+    {
+        if (! document.isScrubbing.load())
+            return;
+
+        const int64_t sample = xToSample((float) e.x);
+        const double now = juce::Time::getMillisecondCounterHiRes();
+        const double dtSec = (now - scrubLastTimeMs) / 1000.0;
+
+        // Skip absurdly tiny/zero intervals (back-to-back events with no real time between
+        // them would otherwise divide-by-near-zero into a spurious huge velocity) --
+        // just wait for the next event instead of updating on this one.
+        if (dtSec > 0.001)
+        {
+            const double sampleRate = juce::jmax(1.0, document.getSampleRate());
+            const double maxVelocity = sampleRate * 12.0;   // generous but finite -- see renderScrub()
+            double velocity = (double) (sample - scrubLastSample) / dtSec;
+            velocity = juce::jlimit(-maxVelocity, maxVelocity, velocity);
+
+            document.scrubVelocity = velocity;
+            scrubLastSample = sample;
+            scrubLastTimeMs = now;
+        }
+        return;
+    }
+
     if (dragKind == DragKind::none)
         return;
 
@@ -763,6 +801,14 @@ void WaveformDisplay::mouseDrag(const juce::MouseEvent& e)
 
 void WaveformDisplay::mouseUp(const juce::MouseEvent& e)
 {
+    if (document.scrubModeEnabled)
+    {
+        document.isScrubbing = false;
+        document.scrubVelocity = 0.0;
+        document.notifyChanged();   // repaint the playhead at wherever the drag ended
+        return;
+    }
+
     const DragKind kind = dragKind;
     dragKind = DragKind::none;
     if (kind == DragKind::none)
@@ -809,6 +855,12 @@ void WaveformDisplay::mouseUp(const juce::MouseEvent& e)
 
 void WaveformDisplay::mouseMove(const juce::MouseEvent& e)
 {
+    if (document.scrubModeEnabled)
+    {
+        setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);   // "drag left/right to scrub"
+        return;
+    }
+
     auto cursor = juce::MouseCursor::NormalCursor;
     if (document.hasSelection())
     {
@@ -826,6 +878,9 @@ void WaveformDisplay::mouseMove(const juce::MouseEvent& e)
 
 void WaveformDisplay::mouseDoubleClick(const juce::MouseEvent&)
 {
+    if (document.scrubModeEnabled)
+        return;   // scrubbing repurposes every mouse gesture here; no select-all mid-scrub
+
     document.setSelection(0, document.getNumSamples());
     if (onSelectionCommitted)
         onSelectionCommitted();

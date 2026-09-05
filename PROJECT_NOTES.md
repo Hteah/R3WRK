@@ -800,6 +800,74 @@ The document stores audio at whatever rate it was recorded or loaded at.
 Loading a file resamples it (via `juce::LagrangeInterpolator`) to the host's
 current sample rate if they differ, so pitch/speed is correct in your DAW.
 
+## Scrub tool
+
+User: "I'd like for you to add a function to R3WRK that when you press a
+button, you can scrub through the waveform with your mouse and it goes
+forward or back depending on where you scrub through. I want the sound to be
+like a tape player speeding up and slowing down, depending on how fast you are
+scrubbing through." A toggle button (`EditorToolbar::scrubButton`, cassette-
+tape icon, styled/behaved exactly like the Loop toggle) puts the waveform into
+a mode where every mouse gesture there is repurposed for scrubbing instead of
+selection editing.
+
+**Deliberately not RubberBand.** Every other rate/pitch-changing feature in
+R3WRK (Speed/Pitch/Stretch, the offline Stretch/Pitch edit) goes through
+RubberBand specifically to *decouple* pitch from rate. Scrub is the opposite
+ask — the pitch rising and falling with drag speed *is* the effect being
+asked for, the same way a real tape or turntable does it under your hand — so
+`PluginProcessor::renderScrub()` is a plain linear-interpolated, variable-rate,
+reversible read of the stored buffer: `document.scrubVelocity` (signed, raw
+samples/sec) is integrated into a fractional read cursor (`perSample =
+velocity / sampleRate` per output sample), with linear interpolation between
+the two neighbouring samples at each fractional position. No separate DSP
+mode to maintain, no RubberBand latency, and it's exactly the analog behaviour
+being asked for rather than an approximation of it.
+
+**Where the velocity comes from.** `WaveformDisplay` re-derives velocity on
+every `mouseDrag`: the sample under the pointer now, minus the sample under
+the pointer at the last event, divided by the wall-clock time between them
+(`juce::Time::getMillisecondCounterHiRes()`), clamped to a generous but finite
+±12 seconds-per-second-of-audio ceiling so a fast flick can't send the read
+cursor rocketing off in one block. `mouseDown` seeds `document.playhead` at
+the press point and starts silent (`scrubVelocity = 0`) until the drag
+actually moves; `mouseUp` stops it dead. `mouseMove` (not dragging) just shows
+a left/right-resize cursor as a "drag to scrub" affordance; `mouseDoubleClick`
+is a no-op while scrubbing is the active tool, since select-all doesn't mean
+anything here.
+
+**Wiring into `processBlock`.** A new priority tier sits between recording and
+normal playback: `document.isScrubbing` (true only while the mouse is actually
+down and dragging, distinct from `document.scrubModeEnabled`, which just means
+the tool is selected) short-circuits the block to `renderScrub()` and returns,
+so normal playback and scrubbing never run in the same block. Edge-detection
+(`wasScrubbing`, mirroring the existing `wasPlaying` pattern) re-seeds
+`scrubReadPos` from `document.playhead` the instant a drag begins, so each new
+drag gesture starts from wherever it was pressed rather than continuing from
+the last gesture's end point. Turning the tool off (un-toggling the button)
+clears `isScrubbing`/`scrubVelocity`; toggling it *on* stops any normal
+playback in progress first, since the two don't mix.
+
+**Icon.** Initially planned as a double-headed arrow; the user sent a
+reference image ("this is the icon for the button") of a cassette tape, so
+`drawScrubIcon()` traces that instead — a stroked rounded-rectangle body with
+two reel circles sitting toward the bottom and the tape strung along their
+lower tangent, matching the gear icon's stroked-line style rather than a
+filled glyph. (Briefly worried, from a small screenshot crop, that the button
+was rendering "filled" instead of the outlined style Tools/Play-from-start
+use — pixel-sampled the actual rendered button to check rather than trust the
+eyeball: the sampled centre colour matched Play-from-start's exactly,
+confirming the toggle/colour code — copied from the already-correct Loop
+button — was fine all along; what read as "filled" at a glance was just the
+icon's own stroke lines sitting dense inside a small circle, not a background-
+colour bug.)
+
+Not unit-tested in `SmokeTest.cpp`: `PluginProcessor` (and so
+`renderScrub()`) isn't linked into the headless `R3WRKSmokeTest` target at
+all, consistent with `renderPlaybackDirect`/`renderPlaybackStretched` also
+having no smoke-test coverage — this is real-time audio-thread code exercised
+by ear, not something the headless harness can drive.
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).
