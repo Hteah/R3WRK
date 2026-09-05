@@ -328,6 +328,30 @@ start pinned there and opens up what's *before* it as you keep scrolling out;
 right does the same for the selection end and what's *after* it. Deterministic
 and repeatable on every wheel notch, not just a one-time jump.
 
+**Two follow-ups from trying the above**: "It's kind of working... Could you
+make it so when I put my mouse pointer in the middle of the selection, it
+zooms into that mouse pointer. It still wants to come from one side or the
+other. Also, please slow down the speed of zooming."
+
+1. The zoom-*in* "frame the whole selection" step (above) always centred on
+   the selection's exact midpoint, regardless of where the pointer actually
+   was within it — so every zoom-in step (there are several before the view
+   gets narrower than the selection) snapped to the same fixed point no
+   matter where you aimed, reading as "it still wants to come from one side
+   or the other". Now anchored on the pointer's actual position
+   (`xToSample(pointerX)`) whenever it's inside the selection's bounds, only
+   falling back to the exact midpoint when the pointer is outside it (zooming
+   in on the selection from elsewhere, where there's no more specific spot to
+   prefer).
+2. Wheel-zoom sensitivity (`mouseWheelMove()`) was
+   `jlimit(0.5, 2.0, exp(-dy*1.4))` — a single wheel event could as much as
+   halve or double the view, which on a trackpad's usual burst of events per
+   swipe added up to "jumps quickly to a very small bit" long before the
+   gesture felt finished. Tightened to `jlimit(0.8, 1.25, exp(-dy*0.6))` —
+   both the per-event ceiling and the `dy` sensitivity are gentler (0.8/1.25
+   is an exact inverse pair, same idea as `keyboardZoomStep`). Keyboard zoom
+   (⌘+/⌘-) already had its own separate, gentler step and wasn't touched.
+
 ## Selection context menu + live Amplify/Stretch preview
 
 Right-clicking inside a selection (`WaveformDisplay::onSelectionContextMenu`,

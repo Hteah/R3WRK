@@ -248,14 +248,24 @@ void WaveformDisplay::zoomToward(double spanFactor, float pointerX)
             }
 
             // Not near an edge: frame the whole selection while it's still narrower than
-            // the view, so the wheel pulls you into it.
+            // the view, so the wheel pulls you into it. Anchored on the pointer's actual
+            // position when it's inside the selection, not always the exact midpoint --
+            // otherwise every zoom-in step snaps to the same fixed point regardless of
+            // where within the selection you're pointing, which reads as "it still wants
+            // to come from one side or the other" no matter where you aim. Pointer outside
+            // the selection (zooming in on it from elsewhere) still centres on the midpoint,
+            // since there's no more specific spot within it to prefer.
             const int64_t selLen = selEnd - selStart;
             if (selLen > 0 && curLen > selLen)
             {
                 const int64_t framedLen = juce::jmax((int64_t) 16, juce::jmin(newLen, selLen + selLen / 5));
-                const int64_t mid = (selStart + selEnd) / 2;
-                int64_t newStart = juce::jlimit((int64_t) 0, juce::jmax((int64_t) 0, total - framedLen),
-                                                mid - framedLen / 2);
+                const bool pointerInsideSelection = pointerX >= sx && pointerX <= ex;
+                const int64_t anchor = pointerInsideSelection ? xToSample(pointerX) : (selStart + selEnd) / 2;
+                const double anchorFrac = pointerInsideSelection
+                    ? juce::jlimit(0.0, 1.0, (double) pointerX / (double) juce::jmax(1, getWidth()))
+                    : 0.5;
+                int64_t newStart = anchor - (int64_t) (anchorFrac * (double) framedLen / timeScale);
+                newStart = juce::jlimit((int64_t) 0, juce::jmax((int64_t) 0, total - framedLen), newStart);
                 viewStart = newStart;
                 viewEnd = newStart + framedLen;
                 rebuildWaveformPath();
@@ -877,7 +887,12 @@ void WaveformDisplay::mouseWheelMove(const juce::MouseEvent& e, const juce::Mous
         return;
     }
 
-    const double factor = juce::jlimit(0.5, 2.0, std::exp(-dy * 1.4));   // dy>0 (wheel up) => zoom in
+    // dy>0 (wheel up) => zoom in. Was jlimit(0.5, 2.0, exp(-dy*1.4)) -- a single wheel event
+    // could as much as halve or double the view, which on a trackpad's usual burst of
+    // events per swipe added up to "jumps quickly to a very small bit" long before the
+    // gesture felt finished. Both the per-event ceiling and the dy sensitivity are gentler
+    // now (0.8/1.25 is an exact inverse pair, same idea as the keyboard zoom step).
+    const double factor = juce::jlimit(0.8, 1.25, std::exp(-dy * 0.6));
     zoomToward(factor, (float) e.x);
 }
 
