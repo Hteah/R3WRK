@@ -83,6 +83,7 @@ target_sources(R3WRK
         Source/Theme.cpp
         Source/ThemeEditor.cpp
         Source/OutputSettings.cpp
+        Source/OctatrackOtFile.cpp
         Source/StandaloneWindowShape.mm)
 
 target_compile_definitions(R3WRK
@@ -116,6 +117,7 @@ target_sources(R3WRKSmokeTest
     PRIVATE
         Source/AudioDocument.cpp
         Source/EditActions.cpp
+        Source/OctatrackOtFile.cpp
         Source/TimeStretchEngine.cpp
         Source/WaveformStretchPreview.cpp
         Tests/SmokeTest.cpp)

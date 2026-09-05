@@ -94,6 +94,7 @@ private:
     void paintRecordingScope(juce::Graphics&);
     void paintSelectionPreview(juce::Graphics&);   // live Amplify/Stretch preview overlay, see .cpp
     void beginSelectionDragExport();   // native file drag of the selection to Ableton / Finder
+    void showSliceMarkerMenu(const juce::MouseEvent&);   // right-click: add / delete / clear slice markers
     void rebuildPeakCache();           // scan the buffer once per content change (holds the lock briefly)
     void rebuildWaveformPath();        // build the display path from the cache (no lock) per view change
     void zoomToward(double spanFactor, float pointerX);   // wheel zoom (Sieve model)

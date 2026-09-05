@@ -56,6 +56,24 @@ public:
     juce::Range<int64_t> getEffectiveRange() const;
 
     //==============================================================================
+    // Slice markers: sample positions the user drops by right-clicking the waveform, used by
+    // Tools ▾ -> "Slice to Folder" / "Export Octatrack Chain". Message-thread only (the audio
+    // thread doesn't touch them -- there's no slice *playback*, just export), always kept
+    // sorted + de-duplicated + strictly inside (0, getNumSamples()). Persisted in plugin
+    // state; NOT part of the undo snapshot -- and any edit that changes the sample length
+    // (trim/cut/stretch/...) clears them, since their absolute positions would no longer line
+    // up with the audio (see restoreSnapshot()).
+    void addSliceMarker (int64_t sample);
+    void removeSliceMarker (int index);                       // no-op if out of range
+    void clearSliceMarkers();
+    const std::vector<int64_t>& getSliceMarkers() const { return sliceMarkers; }
+    int findSliceMarkerNear (int64_t sample, int64_t tolerance) const;   // nearest within tolerance, else -1
+
+    // The regions between markers: [0, m0), [m0, m1), ..., [mLast, len). Empty when there are
+    // no markers (nothing to slice). k markers -> k+1 regions.
+    std::vector<juce::Range<int64_t>> getSliceRegions() const;
+
+    //==============================================================================
     std::atomic<int64_t> playhead { 0 };
     std::atomic<bool> isPlaying { false };
     std::atomic<bool> isRecording { false };
@@ -202,6 +220,9 @@ private:
     double sampleRate = 44100.0;
     std::atomic<uint64_t> selPacked { 0 };   // (uint32 start << 32) | uint32 end -- see getSelection()
     int bufferVersion = 0;
+
+    std::vector<int64_t> sliceMarkers;   // see the slice-marker section above
+    void normaliseSliceMarkers();        // sort + dedupe + drop anything not strictly inside (0, len)
 
     juce::AudioBuffer<float> originalBuffer;   // see markAsOriginal()/revertToOriginal() above
 

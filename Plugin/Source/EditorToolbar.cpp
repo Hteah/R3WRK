@@ -470,11 +470,13 @@ void EditorToolbar::showToolsMenu()
            idTrim, idDelete, idSilence,
            idNormalize, idAmplify, idFadeIn, idFadeOut, idReverse,
            idStretch, idExportSel,
+           idSliceToFolder, idExportOt,
            idOutputFolder, idTheme, idAutoRecordThreshold,
            idUndo, idRedo };
 
-    const bool empty   = document.isEmpty();
-    const bool sel     = document.hasSelection();
+    const bool empty      = document.isEmpty();
+    const bool sel        = document.hasSelection();
+    const bool hasSlices  = ! document.getSliceMarkers().empty();
     const bool clip    = clipboard.hasContent();
     const bool canUndo = document.undoManager.canUndo();
     const bool canRedo = document.undoManager.canRedo();
@@ -510,6 +512,9 @@ void EditorToolbar::showToolsMenu()
     m.addItem(idStretch,   juce::String::fromUTF8("Stretch / Pitch\xE2\x80\xA6"), ! empty);
     m.addItem(idExportSel, "Export Selection to Folder", sel);
     m.addSeparator();
+    m.addItem(idSliceToFolder, juce::String::fromUTF8("Slice to Folder\xE2\x80\xA6"), ! empty && hasSlices);
+    m.addItem(idExportOt,      juce::String::fromUTF8("Export Octatrack Chain (.wav + .ot)\xE2\x80\xA6"), ! empty);
+    m.addSeparator();
     m.addItem(idOutputFolder, juce::String::fromUTF8("Output Folder\xE2\x80\xA6"));
     m.addItem(idTheme,        juce::String::fromUTF8("Theme\xE2\x80\xA6"));
     m.addItem(idAutoRecordThreshold, juce::String::fromUTF8("Auto-Record Threshold\xE2\x80\xA6"));
@@ -537,6 +542,8 @@ void EditorToolbar::showToolsMenu()
             case idReverse:   EditActions::reverse(document); break;
             case idStretch:      showStretchCallout(toolsButton.getScreenBounds()); break;
             case idExportSel:    exportSelectionToFolder(); break;
+            case idSliceToFolder: sliceToFolder();          break;
+            case idExportOt:      exportOctatrackChain();    break;
             case idOutputFolder: chooseOutputFolder();      break;
             case idTheme:        showThemeCallout();        break;
             case idAutoRecordThreshold: showAutoRecordThresholdCallout(); break;
@@ -716,6 +723,46 @@ void EditorToolbar::exportSelectionToFolder()
     else if (onStatusMessage)
     {
         onStatusMessage("Couldn't export to " + file.getParentDirectory().getFileName());
+    }
+}
+
+void EditorToolbar::sliceToFolder()
+{
+    const int regionCount = (int) document.getSliceRegions().size();
+    if (regionCount <= 0)
+        return;
+
+    const auto baseName = juce::Time::getCurrentTime().formatted("R3WRK %Y-%m-%d %H.%M.%S");
+    const auto dir = outputSettings->folder().getChildFile(baseName + " slices").getNonexistentSibling();
+
+    const int written = EditActions::sliceToFolder(document, dir, baseName);
+    if (onStatusMessage)
+        onStatusMessage(written > 0 ? "Sliced " + juce::String(written) + " to " + dir.getFileName()
+                                    : "Couldn't write slices to " + dir.getFileName());
+}
+
+void EditorToolbar::exportOctatrackChain()
+{
+    if (document.isEmpty())
+        return;
+
+    const auto baseName = juce::Time::getCurrentTime().formatted("R3WRK %Y-%m-%d %H.%M.%S");
+    const auto wav = outputSettings->folder().getChildFile(baseName + ".wav").getNonexistentSibling();
+
+    const int regionCount = juce::jmax(1, (int) document.getSliceRegions().size());
+    const bool truncated  = regionCount > 64;
+
+    if (EditActions::exportOctatrackChain(document, wav, 120.0))
+    {
+        juce::String msg = "Exported " + wav.getFileNameWithoutExtension() + ".wav + .ot ("
+                         + juce::String(juce::jmin(64, regionCount)) + " slices)";
+        if (truncated)
+            msg << " -- capped at 64";
+        if (onStatusMessage) onStatusMessage(msg);
+    }
+    else if (onStatusMessage)
+    {
+        onStatusMessage("Couldn't export Octatrack chain to " + wav.getParentDirectory().getFileName());
     }
 }
 

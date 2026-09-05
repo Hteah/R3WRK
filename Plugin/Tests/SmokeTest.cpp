@@ -247,6 +247,82 @@ int main()
         out.deleteFile();
     }
 
+    // --- slice markers + slice/Octatrack export ----------------------------
+    {
+        std::cout << "-- slice markers + slice / Octatrack export --" << std::endl;
+        AudioDocument doc;
+        setDocumentContent(doc, makeSineBuffer(1, 10000, sr, 440.0, 0.4f), sr);   // 10000 samples
+
+        doc.addSliceMarker(2500);
+        doc.addSliceMarker(7000);
+        doc.addSliceMarker(2500);   // dupe -- should collapse
+        doc.addSliceMarker(0);      // at the edge -- should be dropped
+        doc.addSliceMarker(99999);  // past the end -- should be dropped
+        check((int) doc.getSliceMarkers().size() == 2, "markers de-dupe and drop out-of-range");
+
+        const auto regions = doc.getSliceRegions();
+        check((int) regions.size() == 3, "2 markers -> 3 regions");
+        check(regions[0].getStart() == 0 && regions[0].getEnd() == 2500, "first region is [0, m0)");
+        check(regions[1].getStart() == 2500 && regions[1].getEnd() == 7000, "middle region is [m0, m1)");
+        check(regions[2].getStart() == 7000 && regions[2].getEnd() == 10000, "last region is [m1, len)");
+
+        // A length-changing edit clears the markers.
+        doc.setSelection(0, 4000);
+        EditActions::trimToSelection(doc);
+        check(doc.getSliceMarkers().empty(), "a length-changing edit (trim) clears slice markers");
+
+        // Re-mark on the trimmed 4000-sample clip and slice to a folder.
+        doc.addSliceMarker(1000);
+        doc.addSliceMarker(2000);
+        auto dir = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("r3wrk_slices_test");
+        dir.deleteRecursively();
+        const int written = EditActions::sliceToFolder(doc, dir, "chunk");
+        check(written == 3, "sliceToFolder wrote one WAV per region (3)");
+        check(dir.getChildFile("chunk 01.wav").existsAsFile()
+              && dir.getChildFile("chunk 02.wav").existsAsFile()
+              && dir.getChildFile("chunk 03.wav").existsAsFile(), "slice files are 01/02/03-numbered");
+        {
+            juce::AudioFormatManager fm; fm.registerBasicFormats();
+            std::unique_ptr<juce::AudioFormatReader> r(fm.createReaderFor(dir.getChildFile("chunk 02.wav")));
+            check(r != nullptr && r->lengthInSamples == 1000, "middle slice is exactly [1000, 2000)");
+        }
+        dir.deleteRecursively();
+
+        // Octatrack chain: <name>.wav + <name>.ot.
+        auto wav = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("r3wrk_ot_test.wav");
+        auto ot  = wav.withFileExtension("ot");
+        wav.deleteFile(); ot.deleteFile();
+        check(EditActions::exportOctatrackChain(doc, wav, 120.0), "exportOctatrackChain succeeded");
+        check(wav.existsAsFile() && ot.existsAsFile(), "chain wrote both .wav and .ot");
+
+        juce::MemoryBlock otBytes;
+        ot.loadFileAsData(otBytes);
+        check(otBytes.getSize() == 832, "the .ot is exactly 832 bytes");
+        const auto* b = static_cast<const uint8_t*>(otBytes.getData());
+        check(b[0]==0x46 && b[1]==0x4F && b[2]==0x52 && b[3]==0x4D
+              && b[8]==0x44 && b[9]==0x50 && b[10]==0x53 && b[11]==0x31
+              && b[12]==0x53 && b[13]==0x4D && b[14]==0x50 && b[15]==0x41, "the .ot header is FORM....DPS1SMPA");
+
+        const auto be32 = [b](int off)
+        {
+            return ((uint32_t) b[off] << 24) | ((uint32_t) b[off+1] << 16)
+                 | ((uint32_t) b[off+2] << 8) | (uint32_t) b[off+3];
+        };
+        check(be32(0x17) == (uint32_t) (120 * 24), "tempo field is BPM*24");
+        check(be32(0x2E) == 0 && be32(0x32) == 4000, "trim_start=0, trim_end=totalSamples");
+        check(be32(0x33A) == 3, "slice_count is 3");
+        check(be32(0x3A) == 0 && be32(0x3A + 4) == 1000, "slice 0 spans [0, 1000)");
+        check(be32(0x3A + 12) == 1000 && be32(0x3A + 16) == 2000, "slice 1 spans [1000, 2000)");
+        check(be32(0x3A + 24) == 2000 && be32(0x3A + 28) == 4000, "slice 2 spans [2000, 4000)");
+
+        uint32_t sum = 0;
+        for (int i = 0x10; i <= 0x33D; ++i) sum += b[i];
+        const uint16_t storedChecksum = (uint16_t) (((uint32_t) b[0x33E] << 8) | b[0x33F]);
+        check(storedChecksum == (uint16_t) (sum & 0xFFFF), "the .ot trailing checksum matches the summed body");
+
+        wav.deleteFile(); ot.deleteFile();
+    }
+
     // --- time-stretch / pitch-shift ------------------------------------------
     {
         std::cout << "-- time-stretch / pitch-shift (RubberBand) --" << std::endl;

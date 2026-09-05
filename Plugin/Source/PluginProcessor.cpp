@@ -5,7 +5,7 @@
 
 namespace
 {
-    constexpr int kStateMagic = 0x52335734;   // 'R3W4' - session-state format tag
+    constexpr int kStateMagic = 0x52335735;   // 'R3W5' - session-state format tag
     constexpr int kMaxStateChannels = 32;
 }
 
@@ -454,6 +454,12 @@ void R3WRKAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     auto& buf = document.getBuffer();
     for (int ch = 0; ch < buf.getNumChannels(); ++ch)
         out.write(buf.getReadPointer(ch), (size_t) buf.getNumSamples() * sizeof(float));
+
+    // Slice markers last, after the (variable-length) audio -- count then each int64.
+    const auto& marks = document.getSliceMarkers();
+    out.writeInt((int) marks.size());
+    for (int64_t m : marks)
+        out.writeInt64(m);
 }
 
 void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
@@ -486,6 +492,16 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     for (int ch = 0; ch < numCh; ++ch)
         in.read(loaded.getWritePointer(ch), (int) ((size_t) numSamples * sizeof(float)));
 
+    // Slice markers trail the audio; tolerate an older/shorter blob that doesn't have them.
+    std::vector<int64_t> markers;
+    if (in.getNumBytesRemaining() >= 4)
+    {
+        const int mc = in.readInt();
+        if (mc >= 0 && mc <= 4096 && in.getNumBytesRemaining() >= (int64_t) mc * 8)
+            for (int i = 0; i < mc; ++i)
+                markers.push_back(in.readInt64());
+    }
+
     document.newEmptyDocument(numCh, sr);
     document.beginChange();
     document.commitChange(std::move(loaded), "Load State");
@@ -498,6 +514,11 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     document.playbackPitch.store(juce::jlimit(AudioDocument::kMinPitch, AudioDocument::kMaxPitch, pch));
     document.playbackStretch.store(juce::jlimit(AudioDocument::kMinStretch, AudioDocument::kMaxStretch, str > 0.0 ? str : 1.0));
     document.autoRecordThresholdDb.store(juce::jlimit(-60.0, 0.0, thresh));
+
+    document.clearSliceMarkers();
+    for (int64_t m : markers)
+        document.addSliceMarker(m);   // each call re-normalises against the loaded length
+
     document.markAsOriginal();   // the restored session is the new "Revert to Original" baseline
 }
 

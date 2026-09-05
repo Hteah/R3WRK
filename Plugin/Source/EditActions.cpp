@@ -1,4 +1,5 @@
 #include "EditActions.h"
+#include "OctatrackOtFile.h"
 
 namespace
 {
@@ -235,6 +236,44 @@ bool exportSelection(const AudioDocument& doc, const juce::File& file)
         return false;
 
     return writeWav(file, extractRange(doc.getBuffer(), range.getStart(), range.getEnd()), doc.getSampleRate());
+}
+
+int sliceToFolder(const AudioDocument& doc, const juce::File& folder, const juce::String& baseName)
+{
+    const auto regions = doc.getSliceRegions();
+    if (regions.empty())
+        return 0;
+
+    folder.createDirectory();
+    const auto name = baseName.isNotEmpty() ? baseName : juce::String("slice");
+
+    int written = 0;
+    for (int i = 0; i < (int) regions.size(); ++i)
+    {
+        const auto file = folder.getChildFile(name + " " + juce::String(i + 1).paddedLeft('0', 2) + ".wav");
+        if (writeWav(file, extractRange(doc.getBuffer(), regions[(size_t) i].getStart(), regions[(size_t) i].getEnd()),
+                     doc.getSampleRate()))
+            ++written;
+    }
+    return written;
+}
+
+bool exportOctatrackChain(const AudioDocument& doc, const juce::File& wavFile, double bpm)
+{
+    const int64_t len = doc.getNumSamples();
+    if (len <= 0)
+        return false;
+
+    auto regions = doc.getSliceRegions();
+    if (regions.empty())
+        regions.push_back({ (int64_t) 0, len });          // no markers -> one whole-clip slice
+    if ((int) regions.size() > OctatrackOtFile::kMaxSlices)
+        regions.resize(OctatrackOtFile::kMaxSlices);        // Octatrack's hard limit
+
+    if (! writeWav(wavFile, extractRange(doc.getBuffer(), 0, len), doc.getSampleRate()))
+        return false;
+
+    return OctatrackOtFile::writeToFile(wavFile.withFileExtension("ot"), len, regions, bpm);
 }
 
 } // namespace EditActions

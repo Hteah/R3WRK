@@ -1,4 +1,5 @@
 #include "AudioDocument.h"
+#include <algorithm>
 
 namespace
 {
@@ -74,6 +75,7 @@ void AudioDocument::newEmptyDocument(int numChannels, double sr)
     // instance.)
     playbackSpeed = 1.0; playbackPitch = 0.0; playbackStretch = 1.0;
     previewActive = false; previewGainLinear = 1.0f; previewStretchRatio = 1.0;
+    sliceMarkers.clear();
     undoManager.clearUndoHistory();
     markAsOriginal();
     ++bufferVersion;
@@ -122,6 +124,7 @@ bool AudioDocument::loadFromFile(const juce::File& file, double resampleToRate)
     loopEnabled = false;
     playbackSpeed = 1.0; playbackPitch = 0.0; playbackStretch = 1.0;   // see newEmptyDocument()
     previewActive = false; previewGainLinear = 1.0f; previewStretchRatio = 1.0;
+    sliceMarkers.clear();
     undoManager.clearUndoHistory();
     markAsOriginal();
     ++bufferVersion;
@@ -224,6 +227,7 @@ void AudioDocument::revertToOriginal()
 
 void AudioDocument::restoreSnapshot(const juce::AudioBuffer<float>& newBuffer, int64_t newSelStart, int64_t newSelEnd)
 {
+    const int64_t oldLen = getNumSamples();
     {
         const juce::ScopedLock sl(bufferLock);
         buffer.makeCopyOf(newBuffer);
@@ -232,6 +236,88 @@ void AudioDocument::restoreSnapshot(const juce::AudioBuffer<float>& newBuffer, i
     playhead = juce::jlimit((int64_t) 0, getNumSamples(), playhead.load());
     loopStart = juce::jlimit((int64_t) 0, getNumSamples(), loopStart.load());
     loopEnd = juce::jlimit((int64_t) 0, getNumSamples(), loopEnd.load());
+
+    // A length-changing edit (trim/cut/paste/stretch/...) invalidates every slice marker's
+    // absolute position, so drop them rather than leave them silently pointing at the wrong
+    // audio. Edits that keep the length (amplify, normalize, fade, reverse, silence) keep
+    // them. Not restored by undo -- markers aren't in the snapshot.
+    if (getNumSamples() != oldLen)
+        sliceMarkers.clear();
+
     ++bufferVersion;
     notifyChanged();
+}
+
+void AudioDocument::normaliseSliceMarkers()
+{
+    const int64_t n = getNumSamples();
+    for (auto& m : sliceMarkers)
+        m = juce::jlimit((int64_t) 0, n, m);
+
+    std::sort(sliceMarkers.begin(), sliceMarkers.end());
+    sliceMarkers.erase(std::unique(sliceMarkers.begin(), sliceMarkers.end()), sliceMarkers.end());
+
+    // markers at 0 or at the very end aren't real cut points (they'd make an empty region).
+    sliceMarkers.erase(std::remove_if(sliceMarkers.begin(), sliceMarkers.end(),
+                                      [n](int64_t m) { return m <= 0 || m >= n; }),
+                       sliceMarkers.end());
+}
+
+void AudioDocument::addSliceMarker(int64_t sample)
+{
+    sliceMarkers.push_back(sample);
+    normaliseSliceMarkers();
+    notifyChanged();
+}
+
+void AudioDocument::removeSliceMarker(int index)
+{
+    if (index >= 0 && index < (int) sliceMarkers.size())
+    {
+        sliceMarkers.erase(sliceMarkers.begin() + index);
+        notifyChanged();
+    }
+}
+
+void AudioDocument::clearSliceMarkers()
+{
+    if (! sliceMarkers.empty())
+    {
+        sliceMarkers.clear();
+        notifyChanged();
+    }
+}
+
+int AudioDocument::findSliceMarkerNear(int64_t sample, int64_t tolerance) const
+{
+    int best = -1;
+    int64_t bestDist = tolerance + 1;
+    for (int i = 0; i < (int) sliceMarkers.size(); ++i)
+    {
+        const int64_t diff = sliceMarkers[(size_t) i] - sample;
+        const int64_t d = diff < 0 ? -diff : diff;
+        if (d <= tolerance && d < bestDist)
+        {
+            best = i;
+            bestDist = d;
+        }
+    }
+    return best;
+}
+
+std::vector<juce::Range<int64_t>> AudioDocument::getSliceRegions() const
+{
+    std::vector<juce::Range<int64_t>> regions;
+    if (sliceMarkers.empty())
+        return regions;
+
+    const int64_t n = getNumSamples();
+    int64_t prev = 0;
+    for (int64_t m : sliceMarkers)   // already sorted/unique/in-range
+    {
+        regions.push_back({ prev, m });
+        prev = m;
+    }
+    regions.push_back({ prev, n });
+    return regions;
 }

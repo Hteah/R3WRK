@@ -1305,6 +1305,63 @@ Verified by zooming into a fresh screenshot of the actual corner -- clearly roun
 visible through the corner, no artefacts. 12px radius, matching roughly what modern macOS's own
 standard titled windows use. Smoke test passes; all four targets build clean.
 
+## Slice markers + Slice / Octatrack export
+
+User's plan: right-click the waveform to drop slice markers, then two Tools ▾ actions -- slice
+each region to its own file in a folder, and export the slices as an Octatrack ".ot" file for
+their hardware sampler.
+
+**Data model (`AudioDocument`).** `std::vector<int64_t> sliceMarkers` -- message-thread only
+(there's no slice *playback*, the audio thread never touches them), kept sorted +
+de-duplicated + strictly inside `(0, getNumSamples())` by `normaliseSliceMarkers()`, which runs
+after every add. `getSliceRegions()` turns k markers into the k+1 half-open ranges between `0`,
+the markers, and the clip end (empty when there are no markers). Persisted in plugin state
+(state tag bumped `'R3W4'` -> `'R3W5'`), written *after* the variable-length audio so an older
+blob without them still loads. **Deliberately not in the undo snapshot** -- and any edit that
+changes the sample length (trim/cut/paste/stretch/...) clears them, since their absolute
+positions would no longer line up with the audio (see `restoreSnapshot()` comparing old vs new
+length). Non-length-changing edits (amplify/normalize/fade/reverse/silence) keep them. `Clear`
+and load/record clear them too.
+
+**Right-click UI (`WaveformDisplay`).** The popup-menu `mouseDown` path now branches: inside a
+selection body -> the existing Amplify/Reverse/Stretch menu (unchanged); anywhere else ->
+`showSliceMarkerMenu()`, a small inline `PopupMenu` -- "Add slice marker" (or "Delete slice
+marker" when the click lands within ~6 screen px of one, via `findSliceMarkerNear()` in
+sample-space) plus "Clear all slice markers" when any exist. Markers draw in `paint()` as a
+1px accent line with a small downward triangle flag at the top edge, so they read as markers
+rather than selection brackets, and clip out cleanly when scrolled off-view.
+
+**`.ot` writer (`OctatrackOtFile.{h,cpp}`, kept free of AudioDocument/GUI types so the headless
+SmokeTest exercises it directly).** Matches the layout the open-source **OctaChainer** tool
+writes (which the user has installed and which the Octatrack loads): exactly **832 bytes**,
+every multi-byte integer **big-endian** --
+`FORM\0\0\0\0DPS1SMPA` magic + 7 reserved bytes `00 00 00 00 00 02 00`, then tempo (BPM*24),
+`trim_len`/`loop_len` (= whole-clip sample count), stretch/loop mode (both off), gain `0x30` (0
+dB), trig quantize `0xFF`, `trim_start` 0 / `trim_end` = sample count / `loop_point` 0, then
+**64 fixed slice slots** of `{ uint32 start, uint32 end, uint32 loopPoint }` (used slots get
+`loopPoint = 0xFFFFFFFF` "no loop", unused slots all-zero), then `uint32 slice_count`, then a
+`uint16` checksum = `(sum of every byte from offset 0x10 to 0x33D) & 0xFFFF`. The slice
+start/end offsets are exact sample positions; `bpm` (default 120, hardcoded for now -- R3WRK
+tracks no BPM) only feeds the tempo field. **Flagged to the user as needing a hardware check:**
+`trim_len`/`loop_len` units and the per-slice loop-point sentinel are the fields carried over
+from OctaChainer's convention that I'm least certain of -- everything structural (size, magic,
+offsets, checksum, slice offsets, slice count) is covered by a real SmokeTest section that
+asserts the byte layout.
+
+**Export (`EditActions` + Tools ▾).** `sliceToFolder(doc, folder, baseName)` writes each region
+as `"<baseName> NN.wav"` (24-bit, zero-padded index) into a `"<timestamp> slices"` subfolder of
+the output folder; `exportOctatrackChain(doc, wavFile, bpm)` writes `<name>.wav` (whole clip)
+plus a sibling `<name>.ot`, falling back to a single whole-clip slice if there are no markers
+and capping at the Octatrack's 64-slice limit (the toolbar reports the count and whether it was
+capped via the header status line). Tools ▾ gains "Slice to Folder…" (enabled only with markers
+present) and "Export Octatrack Chain (.wav + .ot)…" (enabled with any audio).
+
+**Not interactively verified end-to-end** -- no way to script a right-click / menu-pick / mark
+placement in this environment; the marker maths, region computation, slice-file output and the
+full `.ot` byte layout (including the checksum) are covered by the new SmokeTest section, and
+the app builds + launches clean, but the actual right-click feel and the .ot loading on the
+Octatrack itself are for the user to confirm. Smoke test passes; all four targets build clean.
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).

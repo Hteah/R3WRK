@@ -69,6 +69,8 @@ private:
     void showAutoRecordThresholdCallout();
     void chooseOutputFolder();
     void exportSelectionToFolder();
+    void sliceToFolder();          // Tools: write each region between slice markers as its own WAV
+    void exportOctatrackChain();   // Tools: write <name>.wav + <name>.ot with the slice points
     void autoSaveRecording();
 
     R3WRKAudioProcessor& processor;
