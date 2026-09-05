@@ -5,6 +5,7 @@
 #include "PluginProcessor.h"
 #include "Theme.h"
 #include "OutputSettings.h"
+#include "R3WRKLookAndFeel.h"
 
 /**
     A single control strip below the waveform:
@@ -58,10 +59,12 @@ private:
     AudioDocument& document;
     juce::SharedResourcePointer<ThemeManager> theme;
     juce::SharedResourcePointer<OutputSettings> outputSettings;
+    R3WRKLookAndFeel toolbarLnF;
     Clipboard clipboard;
 
     juce::TextButton playButton   { "Play" };
-    juce::ToggleButton loopButton { "Loop" };
+    juce::TextButton loopButton   { "Loop" };   // setClickingTogglesState(true) -- a toggling
+                                                // pill, not a checkbox, to match Play/Record/Tools
     juce::Label timeLabel;
     juce::Label recLabel;   // "● REC m:ss" while recording, right-aligned
     juce::TextButton recordButton { "Record" };

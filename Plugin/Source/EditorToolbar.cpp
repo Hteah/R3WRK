@@ -154,6 +154,10 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     timeLabel.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::plain));
     recLabel.setJustificationType(juce::Justification::centredRight);
     toolsButton.setButtonText(juce::String::fromUTF8("Tools \xe2\x96\xbe"));   // Tools ▾
+    loopButton.setClickingTogglesState(true);
+
+    for (auto* b : { &playButton, &loopButton, &recordButton, &toolsButton })
+        b->setLookAndFeel(&toolbarLnF);
 
     recordButton.onClick = [this] { toggleTransport(); };
     playButton.onClick   = [this] { togglePlay(); };
@@ -169,6 +173,8 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
 
 EditorToolbar::~EditorToolbar()
 {
+    for (auto* b : { &playButton, &loopButton, &recordButton, &toolsButton })
+        b->setLookAndFeel(nullptr);   // detach before toolbarLnF is destroyed
     theme->removeChangeListener(this);
     document.changeBroadcaster.removeChangeListener(this);
 }
@@ -176,7 +182,23 @@ EditorToolbar::~EditorToolbar()
 void EditorToolbar::applyTheme()
 {
     const auto& pal = theme->palette();
+
+    // Play and Record are always filled (primary actions); Loop fills only when on;
+    // Tools stays outlined. A fully transparent buttonColourId is R3WRKLookAndFeel's cue
+    // to draw the outline style instead of a solid pill -- see drawButtonBackground().
+    playButton.setColour(juce::TextButton::buttonColourId, pal.accent);
+    playButton.setColour(juce::TextButton::textColourOffId, pal.windowBg);
+
+    loopButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+    loopButton.setColour(juce::TextButton::buttonOnColourId, pal.accent);
+    loopButton.setColour(juce::TextButton::textColourOffId, pal.text);
+    loopButton.setColour(juce::TextButton::textColourOnId, pal.windowBg);
+
     recordButton.setColour(juce::TextButton::buttonColourId, pal.recordButton);
+
+    toolsButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+    toolsButton.setColour(juce::TextButton::textColourOffId, pal.text);
+
     timeLabel.setColour(juce::Label::textColourId, pal.textDim);
     recLabel.setColour(juce::Label::textColourId, pal.playhead);
     repaint();
