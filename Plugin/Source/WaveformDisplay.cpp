@@ -101,31 +101,20 @@ void WaveformDisplay::zoomToFit()
     repaint();
 }
 
-void WaveformDisplay::zoomBy(double factor, int64_t centerSample)
+// Keyboard zoom (⌘+/⌘-, see PluginEditor::keyPressed) -- routes through the exact same
+// zoomToward() the mouse wheel uses, at the current mouse position (clamped onto the
+// component), so a keypress behaves exactly like one wheel notch: zooming in frames the
+// selection if the view is wider than it, and hovering near a selection edge pins and zooms
+// into that edge specifically, left or right. The factor is gentler than a wheel notch can
+// be (that one scales with how hard/fast the user scrolls, up to +/-2x) -- fixed, modest
+// steps here so repeated presses zoom in comfortably small increments.
+void WaveformDisplay::zoomIn()  { zoomToward(0.8,  currentMouseX()); }
+void WaveformDisplay::zoomOut() { zoomToward(1.25, currentMouseX()); }
+
+float WaveformDisplay::currentMouseX() const
 {
-    int64_t len = juce::jmax((int64_t) 1, viewEnd - viewStart);
-    int64_t newLen = (int64_t) juce::jlimit(200.0, (double) juce::jmax((int64_t) 200, document.getNumSamples()),
-                                             (double) len * factor);
-    double centerFrac = len > 0 ? (double) (centerSample - viewStart) / (double) len : 0.5;
-    int64_t newStart = centerSample - (int64_t) (centerFrac * (double) newLen);
-    int64_t newEnd = newStart + newLen;
-
-    if (newStart < 0) { newEnd -= newStart; newStart = 0; }
-    if (newEnd > document.getNumSamples())
-    {
-        int64_t over = newEnd - document.getNumSamples();
-        newEnd = document.getNumSamples();
-        newStart = juce::jmax((int64_t) 0, newStart - over);
-    }
-
-    viewStart = newStart;
-    viewEnd = newEnd;
-    rebuildWaveformPath();
-    repaint();
+    return juce::jlimit(0.0f, (float) juce::jmax(1, getWidth()), (float) getMouseXYRelative().x);
 }
-
-void WaveformDisplay::zoomIn()  { zoomBy(0.5, (viewStart + viewEnd) / 2); }
-void WaveformDisplay::zoomOut() { zoomBy(2.0, (viewStart + viewEnd) / 2); }
 
 // Sieve-style editor zoom: `spanFactor` multiplies the visible span (<1 = zoom in).
 //   - pointer near a selection bracket -> pin that bracket and zoom into it (no span limit),

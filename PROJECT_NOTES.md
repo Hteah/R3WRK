@@ -221,6 +221,21 @@ not text input), so `getTextCharacter()` was never going to work here either.
 The Control-based code from both earlier attempts was removed rather than
 left in as a fallback, since both are now confirmed dead on this platform.
 
+Two follow-up refinements once ⌘+/⌘- actually reached the app: (1) each press
+zoomed by a full ±2× (halving/doubling the view) — too coarse for a single
+keypress, cut to a gentler ±(0.8/1.25) pair (inverse of each other, so
+zooming in then out returns to the same span); (2) made keyboard zoom behave
+exactly like one mouse-wheel notch, not just a plain center-of-view zoom —
+`zoomIn()`/`zoomOut()` now call the *same* `zoomToward()` the wheel handler
+does, at the current mouse position (`currentMouseX()`, clamped onto the
+component via `getMouseXYRelative()`). That gets `zoomToward()`'s existing
+selection-aware behaviour for free: zooming in frames the whole selection
+while the view is wider than it, and hovering near a selection edge pins and
+zooms into *that* edge specifically — left or right, whichever the pointer
+is nearest. The old plain `zoomBy(factor, centerSample)` (fixed at the view's
+midpoint, no selection awareness) was removed as dead code once nothing
+called it any more.
+
 ## Waveform peak cache
 
 `WaveformDisplay` keeps a peak cache — one min/max per 64 source samples per

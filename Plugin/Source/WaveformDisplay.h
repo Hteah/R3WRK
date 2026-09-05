@@ -18,12 +18,12 @@
       - right-click inside the selection body for a context menu
         (Amplify/Reverse/Stretch·Pitch) -- see onSelectionContextMenu.
     Mouse wheel zooms toward the pointer (or into the selection if there is one);
-    horizontal swipe / Shift+wheel pans. ⌘+/⌘- zoom in/out centred on the current view
-    (see zoomIn()/zoomOut(), wired up in PluginEditor::keyPressed) for zooming without
-    the mouse -- not Control, which turned out to be a dead end on macOS twice over
-    (see the comment in PluginEditor::keyPressed). The view also auto-refits after an
-    edit that changes the document's length while showing the whole thing (see
-    refitViewIfContentChanged()).
+    horizontal swipe / Shift+wheel pans. ⌘+/⌘- (see zoomIn()/zoomOut(), wired up in
+    PluginEditor::keyPressed) zoom without the mouse, behaving exactly like one wheel
+    notch at the current pointer position -- not Control, which turned out to be a dead
+    end on macOS twice over (see the comment in PluginEditor::keyPressed). The view also
+    auto-refits after an edit that changes the document's length while showing the whole
+    thing (see refitViewIfContentChanged()).
 */
 class WaveformDisplay : public juce::Component,
                          public juce::ChangeListener,
@@ -80,9 +80,9 @@ private:
     void beginSelectionDragExport();   // native file drag of the selection to Ableton / Finder
     void rebuildPeakCache();           // scan the buffer once per content change (holds the lock briefly)
     void rebuildWaveformPath();        // build the display path from the cache (no lock) per view change
-    void zoomBy(double factor, int64_t centerSample);
     void zoomToward(double spanFactor, float pointerX);   // wheel zoom (Sieve model)
     void panByPixels(float dxPixels);
+    float currentMouseX() const;   // mouse position in this component's coords, clamped on-screen
 
     AudioDocument& document;
     juce::SharedResourcePointer<ThemeManager> theme;
