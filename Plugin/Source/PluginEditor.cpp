@@ -41,6 +41,9 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
         toolbar.showSelectionContextMenu(screenPos);
     };
 
+    // Slice tool: clicking a slice has already set the selection + playhead; kick off playback.
+    waveformDisplay.onSlicePlay = [this] { processorRef.startPlayback(); };
+
     theme->addChangeListener(this);
 
     setWantsKeyboardFocus(true);

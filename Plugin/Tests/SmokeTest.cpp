@@ -266,6 +266,15 @@ int main()
         check(regions[1].getStart() == 2500 && regions[1].getEnd() == 7000, "middle region is [m0, m1)");
         check(regions[2].getStart() == 7000 && regions[2].getEnd() == 10000, "last region is [m1, len)");
 
+        // moveSliceMarker: reposition, reorder past a neighbour, merge onto another.
+        // (markers are 2500, 7000 at this point)
+        check(doc.moveSliceMarker(0, 500) == 0 && doc.getSliceMarkers()[0] == 500,
+              "moveSliceMarker repositions, keeps order");
+        check(doc.moveSliceMarker(0, 8000) == 1 && doc.getSliceMarkers()[1] == 8000,
+              "moveSliceMarker past a neighbour reorders and returns the new index");
+        check(doc.moveSliceMarker(1, 7000) == 0 && (int) doc.getSliceMarkers().size() == 1,
+              "moveSliceMarker exactly onto another marker merges the two to one");
+
         // A length-changing edit clears the markers.
         doc.setSelection(0, 4000);
         EditActions::trimToSelection(doc);

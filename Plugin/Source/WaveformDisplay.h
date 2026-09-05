@@ -82,6 +82,10 @@ public:
     /// (Amplify/Reverse/Stretch·Pitch) at the given screen position.
     std::function<void(juce::Point<int> screenPosition)> onSelectionContextMenu;
 
+    /// Slice tool: clicking a slice body has set the selection to that region and dropped the
+    /// playhead at its start -- the owner should start playback (PluginEditor -> processor).
+    std::function<void()> onSlicePlay;
+
     /// Which drag a press begins, given the press x and the selection-edge x's (pixels).
     /// Pure + static so it can be unit-tested. `newSelection` when neither edge is within
     /// `tolerance`, otherwise the nearer edge.
@@ -94,7 +98,8 @@ private:
     void paintRecordingScope(juce::Graphics&);
     void paintSelectionPreview(juce::Graphics&);   // live Amplify/Stretch preview overlay, see .cpp
     void beginSelectionDragExport();   // native file drag of the selection to Ableton / Finder
-    void showSliceMarkerMenu(const juce::MouseEvent&);   // right-click: add / delete / clear slice markers
+    int64_t sliceHitTolerance() const;         // ~6 screen px in samples, for hitting a marker
+    void    playSliceAt(int64_t sample);       // Slice tool: play the region containing `sample`
     void rebuildPeakCache();           // scan the buffer once per content change (holds the lock briefly)
     void rebuildWaveformPath();        // build the display path from the cache (no lock) per view change
     void zoomToward(double spanFactor, float pointerX);   // wheel zoom (Sieve model)
@@ -155,6 +160,13 @@ private:
     float scrubAnchorX = 0.0f;
     static constexpr float scrubDeadZonePx = 4.0f;    // a press that hasn't moved yet stays silent
     static constexpr float scrubMaxDragPx  = 400.0f;  // distance from the anchor for full rate
+
+    // Slice tool (document.sliceModeEnabled) -- mouseDown records which marker (if any) the
+    // press landed on; the drag moves it, a clean click on it deletes it, a clean click in a
+    // slice body plays that region, a double-click anywhere-but-a-marker adds one.
+    int  sliceDragIndex = -1;
+    bool sliceDragMoved = false;
+    bool slicePressOnMarker = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(WaveformDisplay)
 };

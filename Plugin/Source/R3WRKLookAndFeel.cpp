@@ -237,6 +237,30 @@ namespace
         const float dotR = outerR * 0.19f;
         g.fillEllipse(centre.x - dotR, centre.y - dotR, dotR * 2.0f, dotR * 2.0f);
     }
+
+    // Slice: a tiny waveform (four ascending/descending bars) with a bold vertical cut line
+    // straight through it -- reads as "divide the waveform here". On-brand for an app that's
+    // all about the waveform, rather than a generic scissors/razor glyph.
+    void drawSliceIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
+    {
+        auto area = bounds.reduced(bounds.getHeight() * 0.28f);
+        g.setColour(ink);
+
+        const float barW = area.getWidth() * 0.16f;
+        const float gap  = (area.getWidth() - barW * 4.0f) / 3.0f;
+        const float heights[4] = { 0.55f, 1.0f, 0.4f, 0.8f };
+        float x = area.getX();
+        for (float hf : heights)
+        {
+            const float barH = area.getHeight() * hf;
+            g.fillRoundedRectangle(x, area.getCentreY() - barH * 0.5f, barW, barH, barW * 0.35f);
+            x += barW + gap;
+        }
+
+        const float cutW = juce::jmax(1.8f, area.getWidth() * 0.10f);
+        const float pad  = bounds.getHeight() * 0.10f;
+        g.fillRect(area.getCentreX() - cutW * 0.5f, bounds.getY() + pad, cutW, bounds.getHeight() - pad * 2.0f);
+    }
 }
 
 void R3WRKLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int width, int height,
@@ -319,7 +343,8 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     const auto text = button.getButtonText();
     if (text != iconPlay && text != iconStop && text != iconLoop
         && text != iconPlayFromStart && text != iconTools && text != iconScrub
-        && text != iconReverse && text != iconClear && text != iconAutoRecord)
+        && text != iconReverse && text != iconClear && text != iconAutoRecord
+        && text != iconSlice)
     {
         juce::LookAndFeel_V4::drawButtonText(g, button, isMouseOverButton, isButtonDown);
         return;
@@ -344,6 +369,11 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     if (text == iconScrub)
     {
         drawScrubIcon(g, bounds, ink);
+        return;
+    }
+    if (text == iconSlice)
+    {
+        drawSliceIcon(g, bounds, ink);
         return;
     }
     if (text == iconReverse)

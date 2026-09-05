@@ -677,22 +677,26 @@ void WaveformDisplay::paint(juce::Graphics& g)
         g.drawVerticalLine((int) sampleToX(document.loopEnd), 0.0f, (float) getHeight());
     }
 
-    // Slice markers (right-click to place; Tools -> Slice to Folder / Export Octatrack Chain):
-    // a thin accent line with a small downward flag at the top edge so they read as markers,
-    // not selection brackets.
+    // Slice markers (Slice tool): same 2px line + top/bottom handle pills as the selection
+    // brackets, so they're the "similar size" the user asked for -- but in the loop-marker
+    // colour rather than the selection accent, so the two don't read as the same thing.
     {
         const auto& marks = document.getSliceMarkers();
         const float h = (float) getHeight();
+        const juce::Colour sliceCol = pal.loopMarker;
         for (int64_t m : marks)
         {
             const float x = sampleToX(m);
             if (x < -6.0f || x > (float) getWidth() + 6.0f)
                 continue;
-            g.setColour(pal.accent);
-            g.fillRect(juce::Rectangle<float>(x - 0.5f, 0.0f, 1.0f, h));
-            juce::Path flag;
-            flag.addTriangle(x - 4.0f, 0.0f, x + 4.0f, 0.0f, x, 7.0f);
-            g.fillPath(flag);
+
+            g.setColour(sliceCol.withAlpha(0.9f));
+            g.fillRect(juce::Rectangle<float>(x - 1.0f, 0.0f, 2.0f, h));
+
+            constexpr float hw = 5.0f, hh = 14.0f;
+            g.setColour(sliceCol);
+            for (float cy : { hh * 0.5f + 1.0f, h - hh * 0.5f - 1.0f })
+                g.fillRoundedRectangle(x - hw * 0.5f, cy - hh * 0.5f, hw, hh, 2.0f);
         }
     }
 
@@ -722,23 +726,26 @@ void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
         return;
     }
 
-    if (e.mods.isPopupMenu())
+    if (document.sliceModeEnabled)
     {
-        if (document.hasSelection())
-        {
-            const float sx = sampleToX(document.getSelectionStart());
-            const float ex = sampleToX(document.getSelectionEnd());
-            if ((float) e.x > sx + edgeTolerancePx && (float) e.x < ex - edgeTolerancePx)
-            {
-                dragKind = DragKind::none;
-                if (onSelectionContextMenu)
-                    onSelectionContextMenu(e.getScreenPosition());
-                return;
-            }
-        }
-
-        showSliceMarkerMenu(e);
+        const int64_t sample = xToSample((float) e.x);
+        sliceDragIndex   = document.findSliceMarkerNear(sample, sliceHitTolerance());
+        sliceDragMoved   = false;
+        slicePressOnMarker = sliceDragIndex >= 0;
         return;
+    }
+
+    if (e.mods.isPopupMenu() && document.hasSelection())
+    {
+        const float sx = sampleToX(document.getSelectionStart());
+        const float ex = sampleToX(document.getSelectionEnd());
+        if ((float) e.x > sx + edgeTolerancePx && (float) e.x < ex - edgeTolerancePx)
+        {
+            dragKind = DragKind::none;
+            if (onSelectionContextMenu)
+                onSelectionContextMenu(e.getScreenPosition());
+            return;
+        }
     }
 
     const int64_t f = xToSample((float) e.x);
@@ -772,42 +779,45 @@ void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
     dragAnchor = f;
 }
 
-void WaveformDisplay::showSliceMarkerMenu(const juce::MouseEvent& e)
+int64_t WaveformDisplay::sliceHitTolerance() const
 {
-    const int64_t sample = xToSample((float) e.x);
-    const int64_t tol    = juce::jmax((int64_t) 1,
-                                      (xToSample((float) e.x + 6.0f) - xToSample((float) e.x - 6.0f)) / 2);
-    const int nearIdx     = document.findSliceMarkerNear(sample, tol);
-    const bool hasMarkers = ! document.getSliceMarkers().empty();
+    // ~6 screen px, converted to samples at the current zoom -- measured mid-view so xToSample()'s
+    // 0..numSamples clamp at the edges doesn't skew it.
+    const float mid = (float) getWidth() * 0.5f;
+    return juce::jmax((int64_t) 1, xToSample(mid + 6.0f) - xToSample(mid - 6.0f));
+}
 
-    enum { idAdd = 1, idDelete, idClear };
-    juce::PopupMenu m;
-    if (nearIdx >= 0)
-        m.addItem(idDelete, "Delete slice marker");
-    else
-        m.addItem(idAdd, "Add slice marker");
-    if (hasMarkers)
+void WaveformDisplay::playSliceAt(int64_t sample)
+{
+    const auto regions = document.getSliceRegions();
+    for (auto r : regions)
     {
-        m.addSeparator();
-        m.addItem(idClear, "Clear all slice markers");
+        if (sample >= r.getStart() && sample < r.getEnd())
+        {
+            document.setSelection(r.getStart(), r.getEnd());
+            document.playhead = r.getStart();
+            if (onSlicePlay) onSlicePlay();
+            return;
+        }
     }
-
-    const auto target = juce::Rectangle<int>(e.getScreenPosition().x, e.getScreenPosition().y, 1, 1);
-    m.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(target),
-                    [this, sample, nearIdx](int r)
-                    {
-                        switch (r)
-                        {
-                            case idAdd:    document.addSliceMarker(sample);      break;
-                            case idDelete: document.removeSliceMarker(nearIdx);  break;
-                            case idClear:  document.clearSliceMarkers();         break;
-                            default: break;
-                        }
-                    });
+    // no markers -> just play from the click point
+    document.clearSelection();
+    document.playhead = juce::jlimit((int64_t) 0, document.getNumSamples(), sample);
+    if (onSlicePlay) onSlicePlay();
 }
 
 void WaveformDisplay::mouseDrag(const juce::MouseEvent& e)
 {
+    if (document.sliceModeEnabled)
+    {
+        if (sliceDragIndex >= 0)
+        {
+            sliceDragIndex = document.moveSliceMarker(sliceDragIndex, xToSample((float) e.x));
+            sliceDragMoved = true;
+        }
+        return;
+    }
+
     if (document.scrubModeEnabled)
     {
         if (! document.isScrubbing.load())
@@ -860,6 +870,23 @@ void WaveformDisplay::mouseDrag(const juce::MouseEvent& e)
 
 void WaveformDisplay::mouseUp(const juce::MouseEvent& e)
 {
+    if (document.sliceModeEnabled)
+    {
+        const bool wasClick = e.getDistanceFromDragStart() < 4;
+        if (slicePressOnMarker)
+        {
+            if (wasClick && ! sliceDragMoved && sliceDragIndex >= 0)
+                document.removeSliceMarker(sliceDragIndex);   // click on a marker deletes it
+        }
+        else if (wasClick && ! sliceDragMoved)
+        {
+            playSliceAt(xToSample((float) e.x));              // click a slice body plays it
+        }
+        sliceDragIndex = -1;
+        slicePressOnMarker = false;
+        return;
+    }
+
     if (document.scrubModeEnabled)
     {
         document.isScrubbing = false;
@@ -914,6 +941,14 @@ void WaveformDisplay::mouseUp(const juce::MouseEvent& e)
 
 void WaveformDisplay::mouseMove(const juce::MouseEvent& e)
 {
+    if (document.sliceModeEnabled)
+    {
+        const bool overMarker = document.findSliceMarkerNear(xToSample((float) e.x), sliceHitTolerance()) >= 0;
+        setMouseCursor(overMarker ? juce::MouseCursor::LeftRightResizeCursor    // drag to move / click to delete
+                                  : juce::MouseCursor::CrosshairCursor);         // double-click to place
+        return;
+    }
+
     if (document.scrubModeEnabled)
     {
         setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);   // "drag left/right to scrub"
@@ -935,8 +970,15 @@ void WaveformDisplay::mouseMove(const juce::MouseEvent& e)
     setMouseCursor(cursor);
 }
 
-void WaveformDisplay::mouseDoubleClick(const juce::MouseEvent&)
+void WaveformDisplay::mouseDoubleClick(const juce::MouseEvent& e)
 {
+    if (document.sliceModeEnabled)
+    {
+        if (! slicePressOnMarker)                    // don't add on top of an existing marker
+            document.addSliceMarker(xToSample((float) e.x));
+        return;
+    }
+
     if (document.scrubModeEnabled)
         return;   // scrubbing repurposes every mouse gesture here; no select-all mid-scrub
 

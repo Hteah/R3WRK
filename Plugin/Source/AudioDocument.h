@@ -56,15 +56,21 @@ public:
     juce::Range<int64_t> getEffectiveRange() const;
 
     //==============================================================================
-    // Slice markers: sample positions the user drops by right-clicking the waveform, used by
-    // Tools ▾ -> "Slice to Folder" / "Export Octatrack Chain". Message-thread only (the audio
-    // thread doesn't touch them -- there's no slice *playback*, just export), always kept
-    // sorted + de-duplicated + strictly inside (0, getNumSamples()). Persisted in plugin
-    // state; NOT part of the undo snapshot -- and any edit that changes the sample length
+    // Slice markers: sample positions used by Tools ▾ -> "Slice to Folder" / "Export Octatrack
+    // Chain". Placed/edited via the Slice tool (EditorToolbar's Slice toggle -> sliceModeEnabled;
+    // in that mode WaveformDisplay repurposes double-click = add, click-on-a-marker = delete,
+    // drag-a-marker = move, click-a-slice-body = play it). Message-thread only (the audio thread
+    // doesn't touch them -- "play slice" just sets the selection + normal playback), always kept
+    // sorted + de-duplicated + strictly inside (0, getNumSamples()). Persisted in plugin state;
+    // NOT part of the undo snapshot -- and any edit that changes the sample length
     // (trim/cut/stretch/...) clears them, since their absolute positions would no longer line
     // up with the audio (see restoreSnapshot()).
+    bool sliceModeEnabled = false;   // the Slice *tool* being selected -- message-thread only
+
     void addSliceMarker (int64_t sample);
     void removeSliceMarker (int index);                       // no-op if out of range
+    int  moveSliceMarker (int index, int64_t newSample);      // returns the marker's index after re-sorting
+                                                              // (the surviving one if it merged onto another)
     void clearSliceMarkers();
     const std::vector<int64_t>& getSliceMarkers() const { return sliceMarkers; }
     int findSliceMarkerNear (int64_t sample, int64_t tolerance) const;   // nearest within tolerance, else -1

@@ -92,6 +92,11 @@ private:
                                                                     // -- toggles the scrub *tool*;
                                                                     // WaveformDisplay does the actual
                                                                     // dragging once it's on
+    juce::TextButton sliceButton  { R3WRKLookAndFeel::iconSlice };  // setClickingTogglesState(true)
+                                                                    // -- toggles the slice *tool*
+                                                                    // (double-click adds a marker,
+                                                                    // etc.); mutually exclusive with
+                                                                    // Scrub
     juce::Label timeLabel;   // also carries the "● REC m:ss" elapsed time while recording
     juce::TextButton recordButton;
     juce::TextButton autoRecordButton { R3WRKLookAndFeel::iconAutoRecord };  // setClickingTogglesState(true)

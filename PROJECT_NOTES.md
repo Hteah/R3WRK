@@ -1307,6 +1307,10 @@ standard titled windows use. Smoke test passes; all four targets build clean.
 
 ## Slice markers + Slice / Octatrack export
 
+> **The right-click model below was replaced by a Slice *tool* one message later -- see "Slice
+> tool (redesign)" further down. The data model, `.ot` writer and export functions carried over
+> unchanged; only the waveform interaction and the marker visual changed.**
+
 User's plan: right-click the waveform to drop slice markers, then two Tools ▾ actions -- slice
 each region to its own file in a folder, and export the slices as an Octatrack ".ot" file for
 their hardware sampler.
@@ -1361,6 +1365,60 @@ placement in this environment; the marker maths, region computation, slice-file 
 full `.ot` byte layout (including the checksum) are covered by the new SmokeTest section, and
 the app builds + launches clean, but the actual right-click feel and the .ot loading on the
 Octatrack itself are for the user to confirm. Smoke test passes; all four targets build clean.
+
+## Slice tool (redesign)
+
+User, right after the above: "I'd like a button that puts R3WRK in slice marker mode. Double
+click adds a slice marker, a click after or before plays that slice, a left click on the slice
+marker deletes the slice, clicking and dragging moves the slice marker. I'd also like the slice
+markers to be similar size to the selection bars."
+
+**New `sliceButton`** (`R3WRKLookAndFeel::iconSlice` -- a little waveform of four bars with a
+bold vertical cut line through it, on-brand for a waveform app rather than a generic scissors),
+sits right after Scrub in the toolbar, same toggling-tool styling as Loop/Scrub (outlined off,
+accent-filled on), disabled while recording. `AudioDocument::sliceModeEnabled` (plain bool,
+message-thread only -- the audio thread still never touches slices; "play slice" just sets the
+selection + normal playback). **Mutually exclusive with Scrub** -- turning either on turns the
+other off (both `document.*ModeEnabled` and the button toggle state).
+
+**`WaveformDisplay` repurposes the mouse while `sliceModeEnabled`** (gated at the very top of
+each handler, ahead of the scrub check and the selection state machine):
+  - `mouseDown` records `sliceDragIndex` = the marker within `sliceHitTolerance()` (~6 screen px
+    in samples, measured mid-view so `xToSample()`'s edge clamp doesn't skew it) of the press,
+    or -1;
+  - `mouseDrag` on a marker calls `AudioDocument::moveSliceMarker(index, xToSample(x))`, which
+    repositions + re-normalises and returns the marker's new index (drag keeps tracking it; if
+    dragged exactly onto another marker the two collapse and it tracks the survivor);
+  - `mouseUp`: a clean click (`getDistanceFromDragStart() < 4`, no drag) on a marker deletes it;
+    a clean click in a slice *body* calls `playSliceAt()` -- sets the selection to that region,
+    drops the playhead at its start, and fires the new `onSlicePlay` callback
+    (`PluginEditor` -> `processor.startPlayback()`), which plays the region once; with no
+    markers it just plays from the click point;
+  - `mouseDoubleClick` anywhere-but-a-marker adds one (`slicePressOnMarker` from the preceding
+    `mouseDown` suppresses adding on top of an existing marker);
+  - `mouseMove` shows a left/right-resize cursor over a marker, a crosshair elsewhere.
+
+**Known rough edge (accepted for v1, flagged to the user):** a double-click's *first* click
+still runs the "play slice" path before `mouseDoubleClick` adds the marker, so a marker-add
+plays a blip of that slice. Fixing it cleanly needs a debounce timer (defer the play past the
+double-click window); left out unless it turns out to bother -- for an audition-while-you-slice
+workflow, a blip of the slice you're splitting is arguably fine feedback.
+
+**Markers redrawn** to match the selection brackets' size (the "similar to the selection bars"
+ask): the same 2px vertical line + 5x14 rounded handle pill at top and bottom, but in
+`pal.loopMarker` (the orange loop/unsaved colour) instead of the selection's accent-blue, so the
+two don't read as the same thing when a slice-body click leaves a selection showing.
+
+**The old right-click menu is gone** -- `showSliceMarkerMenu()` removed, the popup-menu
+`mouseDown` branch reverted to only the selection-body Amplify/Reverse/Stretch menu it had
+before. "Clear all" moved to a new Tools ▾ -> "Clear Slice Markers" item (the Slice-to-Folder /
+Export Octatrack Chain items are unchanged). New SmokeTest coverage for `moveSliceMarker`
+(reposition / reorder past a neighbour / merge onto another).
+
+**Not interactively verified** -- the button toggles, marker draw and mutual exclusion are
+visible in a screenshot (and the user's persisted 4-marker session renders in the new bracket
+style), but the actual double-click / drag / click-to-play feel is the user's to try, same as
+the export-to-hardware step. Smoke test passes; all four targets build clean.
 
 ## Known gaps / natural next steps
 

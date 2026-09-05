@@ -279,6 +279,24 @@ void AudioDocument::removeSliceMarker(int index)
     }
 }
 
+int AudioDocument::moveSliceMarker(int index, int64_t newSample)
+{
+    if (index < 0 || index >= (int) sliceMarkers.size())
+        return -1;
+
+    newSample = juce::jlimit((int64_t) 1, juce::jmax((int64_t) 1, getNumSamples() - 1), newSample);
+    sliceMarkers[(size_t) index] = newSample;
+    normaliseSliceMarkers();   // re-sorts; if dragged exactly onto another marker the two collapse to one
+    notifyChanged();
+
+    // `newSample` is always in range, so a marker sits there after normalising -- return its index
+    // (the same one, or the surviving one if a merge happened) so a drag can keep tracking it.
+    for (int i = 0; i < (int) sliceMarkers.size(); ++i)
+        if (sliceMarkers[(size_t) i] == newSample)
+            return i;
+    return -1;   // shouldn't happen
+}
+
 void AudioDocument::clearSliceMarkers()
 {
     if (! sliceMarkers.empty())
