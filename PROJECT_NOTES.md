@@ -30,8 +30,9 @@ R3WRK/
                                 talks directly to AudioDocument/EditActions
       KnobRow.h/.cpp           rotary knob strip under the transport bar
                                 (Pitch, Speed, Stretch, Start, End; extensible)
-      KnobLookAndFeel.h/.cpp   custom rotary knob painting for KnobRow (flat
-                                disc + pointer line, no value-arc; theme-aware)
+      R3WRKLookAndFeel.h/.cpp  shared custom look: rotary knobs (flat disc +
+                                pointer line, no value-arc) and pill-shaped
+                                buttons (fully rounded; theme-aware)
       TimeRuler.h/.cpp          time ruler under the waveform; follows the
                                 waveform's view range, nice tick spacing
       Theme.h/.cpp              Palette (11 editable colours) + ThemeManager
@@ -211,6 +212,31 @@ Feedback is a `HeaderBar::flashMessage()` — a ~3 s accent-coloured line in the
 readout area ("Saved …", "Exported …", "Output folder: …"), driven from
 `EditorToolbar` through its `onStatusMessage` callback.
 
+## Custom look (R3WRKLookAndFeel)
+
+One shared `R3WRKLookAndFeel` (per-owner instance, stateless beyond its own
+`SharedResourcePointer<ThemeManager>`, so every instance renders identically)
+covers two things so far:
+
+- **Rotary knobs** (`drawRotarySlider`) — a flat disc, thin outline, short
+  pointer tick near the rim, no value-arc. Used by `KnobRow`.
+- **Buttons** (`drawButtonBackground`) — fully rounded pills (radius = half the
+  button height). A component asking for a fully transparent `buttonColourId`
+  gets the outline treatment (hairline border + faint hover/press wash)
+  instead of a solid fill — that's how `EditorToolbar` gets both filled
+  (Play/Record, Loop-when-on) and outlined (Tools, Loop-when-off) buttons from
+  one draw routine. `loopButton` is a toggling `TextButton`
+  (`setClickingTogglesState(true)`), not a `ToggleButton`, so it's part of the
+  same pill family instead of rendering as a checkbox.
+
+Any owner must `setLookAndFeel(nullptr)` on every component it attached this
+to, in its destructor, *before* its own `R3WRKLookAndFeel` member is destroyed
+— both `KnobRow` and `EditorToolbar` do this.
+
+Not yet covered: `ComboBox`/`PopupMenu` (ThemeEditor's preset picker, the Tools
+menu's own popup) still use the default JUCE look, and there's no dark
+"control band" panel behind the transport row yet — that's the next UI pass.
+
 ## Theming
 
 `Source/Theme.{h,cpp}` — `Palette` is 11 `juce::Colour`s (window/panel bg,
@@ -232,7 +258,7 @@ Slate, Graphite, Amber, Paper, Madrona (steel-blue chrome / dark waveform —
 see below).
 
 `Palette` has two text pairs: `text`/`textDim` for components with no fill of
-their own (HeaderBar, EditorToolbar, KnobRow, KnobLookAndFeel — they show
+their own (HeaderBar, EditorToolbar, KnobRow, R3WRKLookAndFeel — they show
 through `windowBg`), and `screenText`/`screenTextDim` for the two components
 that paint their own background (`WaveformDisplay`, `TimeRuler` — both fill
 `panelBg`). Every preset before Madrona kept `windowBg`/`panelBg` close in
