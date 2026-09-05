@@ -79,6 +79,28 @@ public:
     std::atomic<double> scrubVelocity { 0.0 };
 
     //==============================================================================
+    // Auto-Record: arm this and R3WRK starts recording for real the moment the input level
+    // crosses autoRecordThresholdDb -- a level-triggered record standby (a tape deck's
+    // voice-activated record), not the plain Record button's "start right now".
+    //   autoRecordEnabled     : the toggle being armed (EditorToolbar's Auto-Record button) --
+    //                           read every idle block by the audio thread, so atomic.
+    //   autoRecordThresholdDb : the peak level (dBFS) that ends the standby and starts
+    //                           recording; written by the threshold panel (Tools ▾ menu),
+    //                           read by the audio thread. Persisted in plugin state, like the
+    //                           knob-row Speed/Pitch/Stretch, since it's a setting worth
+    //                           remembering across sessions, not a one-off toggle.
+    //   autoRecordTriggered   : the audio thread sets this the instant the threshold is
+    //                           crossed -- it never calls startRecording() itself (that
+    //                           allocates memory and drives document/recording state meant to
+    //                           come from the message thread); EditorToolbar's 15Hz timer
+    //                           notices it and does the actual start, the same "audio thread
+    //                           only flips an atomic, message thread acts on it" pattern every
+    //                           other UI-facing handoff in this class already follows.
+    std::atomic<bool> autoRecordEnabled { false };
+    std::atomic<double> autoRecordThresholdDb { -40.0 };
+    std::atomic<bool> autoRecordTriggered { false };
+
+    //==============================================================================
     // Live playback knobs (KnobRow writes these; the audio thread reads them every block
     // to drive a real-time RubberBand stretcher -- see PluginProcessor). Live here, not on
     // the processor, so the views (WaveformDisplay, TimeRuler) can read them too, for the

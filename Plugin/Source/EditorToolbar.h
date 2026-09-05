@@ -10,7 +10,7 @@
 /**
     A single control strip below the waveform:
 
-        ⏮ Play · Loop · Record · Tools · Scrub · Reverse · Clear    ···    time
+        ⏮ Play · Loop · Record · Auto-Record · Tools · Scrub · Reverse · Clear    ···    time
 
     Everything else — file ops, clipboard, region processing, stretch/pitch,
     export selection, undo/redo — lives in the "Tools" pop-up menu.
@@ -59,6 +59,7 @@ private:
     void showAmplifyCallout(juce::Rectangle<int> screenTargetArea);
     void showStretchCallout(juce::Rectangle<int> screenTargetArea);
     void showThemeCallout();
+    void showAutoRecordThresholdCallout();
     void chooseOutputFolder();
     void exportSelectionToFolder();
     void autoSaveRecording();
@@ -84,6 +85,10 @@ private:
                                                                     // dragging once it's on
     juce::Label timeLabel;   // also carries the "● REC m:ss" elapsed time while recording
     juce::TextButton recordButton;
+    juce::TextButton autoRecordButton { R3WRKLookAndFeel::iconAutoRecord };  // setClickingTogglesState(true)
+                                                                             // -- arms record-on-signal
+                                                                             // standby; see AudioDocument's
+                                                                             // autoRecordEnabled comment
     juce::TextButton toolsButton   { R3WRKLookAndFeel::iconTools };    // opens the Tools ▾ pop-up menu
     juce::TextButton reverseButton { R3WRKLookAndFeel::iconReverse };  // runs immediately, like Tools ▾'s
                                                                        // own Reverse item -- not a toggle

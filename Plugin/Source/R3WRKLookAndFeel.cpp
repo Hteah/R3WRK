@@ -201,6 +201,34 @@ namespace
         g.strokePath(x, juce::PathStrokeType(thickness, juce::PathStrokeType::curved,
                                              juce::PathStrokeType::rounded));
     }
+
+    // Auto-Record: three ascending level bars crossed by a threshold line -- "waits for the
+    // input to reach this line, then starts recording for real" (see AudioDocument::
+    // autoRecordThresholdDb / PluginProcessor's idle-block level check).
+    void drawAutoRecordIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
+    {
+        auto area = bounds.reduced(bounds.getHeight() * 0.26f);
+        const float barW = area.getWidth() * 0.22f;
+        const float gap  = area.getWidth() * 0.12f;
+        const float heightFractions[3] = { 0.42f, 0.70f, 1.0f };
+        const float totalW = barW * 3.0f + gap * 2.0f;
+        float x = area.getCentreX() - totalW * 0.5f;
+
+        juce::Path bars;
+        for (float hf : heightFractions)
+        {
+            const float barH = area.getHeight() * hf;
+            bars.addRoundedRectangle(x, area.getBottom() - barH, barW, barH, barW * 0.3f);
+            x += barW + gap;
+        }
+        g.setColour(ink);
+        g.fillPath(bars);
+
+        // The threshold line: level with the middle bar's top, spanning the full icon width.
+        const float lineY = area.getBottom() - area.getHeight() * heightFractions[1];
+        const float thickness = juce::jmax(1.3f, area.getHeight() * 0.09f);
+        g.drawLine(area.getX(), lineY, area.getRight(), lineY, thickness);
+    }
 }
 
 void R3WRKLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int width, int height,
@@ -283,7 +311,7 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     const auto text = button.getButtonText();
     if (text != iconPlay && text != iconStop && text != iconLoop
         && text != iconPlayFromStart && text != iconTools && text != iconScrub
-        && text != iconReverse && text != iconClear)
+        && text != iconReverse && text != iconClear && text != iconAutoRecord)
     {
         juce::LookAndFeel_V4::drawButtonText(g, button, isMouseOverButton, isButtonDown);
         return;
@@ -318,6 +346,11 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     if (text == iconClear)
     {
         drawClearIcon(g, bounds, ink);
+        return;
+    }
+    if (text == iconAutoRecord)
+    {
+        drawAutoRecordIcon(g, bounds, ink);
         return;
     }
 

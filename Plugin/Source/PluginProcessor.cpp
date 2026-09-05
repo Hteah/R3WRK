@@ -5,7 +5,7 @@
 
 namespace
 {
-    constexpr int kStateMagic = 0x52335733;   // 'R3W3' - session-state format tag
+    constexpr int kStateMagic = 0x52335734;   // 'R3W4' - session-state format tag
     constexpr int kMaxStateChannels = 32;
 }
 
@@ -353,7 +353,23 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     wasPlaying = false;
 
     // Neither recording nor playing back: leave `buffer` untouched so the host's input
-    // passes straight through.
+    // passes straight through -- except Auto-Record standby, which watches that same
+    // pass-through input for a peak loud enough to cross autoRecordThresholdDb. Read-only:
+    // it never touches `buffer` or starts recording itself, just flags it for the message
+    // thread (see EditorToolbar::timerCallback) to act on -- see AudioDocument's comment.
+    if (document.autoRecordEnabled.load(std::memory_order_relaxed)
+        && ! document.autoRecordTriggered.load(std::memory_order_relaxed))
+    {
+        float peak = 0.0f;
+        for (int ch = 0; ch < numCh; ++ch)
+        {
+            const auto r = juce::FloatVectorOperations::findMinAndMax(buffer.getReadPointer(ch), numSamples);
+            peak = juce::jmax(peak, std::abs(r.getStart()), std::abs(r.getEnd()));
+        }
+        const float peakDb = juce::Decibels::gainToDecibels(peak, -100.0f);
+        if (peakDb >= (float) document.autoRecordThresholdDb.load(std::memory_order_relaxed))
+            document.autoRecordTriggered.store(true, std::memory_order_relaxed);
+    }
 }
 
 void R3WRKAudioProcessor::startRecording()
@@ -432,6 +448,7 @@ void R3WRKAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     out.writeDouble(document.playbackSpeed.load());
     out.writeDouble(document.playbackPitch.load());
     out.writeDouble(document.playbackStretch.load());
+    out.writeDouble(document.autoRecordThresholdDb.load());
 
     auto& buf = document.getBuffer();
     for (int ch = 0; ch < buf.getNumChannels(); ++ch)
@@ -455,6 +472,7 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     double spd = in.readDouble();
     double pch = in.readDouble();
     double str = in.readDouble();
+    double thresh = in.readDouble();
 
     if (numCh <= 0 || numCh > kMaxStateChannels || numSamples < 0 || numSamples > 0x7fffffff)
         return;
@@ -478,6 +496,7 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     document.playbackSpeed.store(juce::jlimit(AudioDocument::kMinSpeed, AudioDocument::kMaxSpeed, spd > 0.0 ? spd : 1.0));
     document.playbackPitch.store(juce::jlimit(AudioDocument::kMinPitch, AudioDocument::kMaxPitch, pch));
     document.playbackStretch.store(juce::jlimit(AudioDocument::kMinStretch, AudioDocument::kMaxStretch, str > 0.0 ? str : 1.0));
+    document.autoRecordThresholdDb.store(juce::jlimit(-60.0, 0.0, thresh));
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

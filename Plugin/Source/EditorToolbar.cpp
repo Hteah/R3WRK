@@ -170,6 +170,48 @@ namespace
         juce::Slider stretch, pitch;
         juce::TextButton apply { "Apply" };
     };
+
+    //==============================================================================
+    // No Apply button, unlike Amplify/Stretch above -- this sets a monitoring threshold, not
+    // an audio edit, so it just writes straight through as the slider moves and there's
+    // nothing to preview or commit.
+    struct AutoRecordThresholdPanel : juce::Component
+    {
+        explicit AutoRecordThresholdPanel(AudioDocument& doc) : document(doc)
+        {
+            title.setText("Auto-Record Threshold", juce::dontSendNotification);
+            title.setFont(juce::FontOptions(14.0f, juce::Font::bold));
+
+            threshold.setRange(-60.0, 0.0, 0.5);
+            threshold.setValue(document.autoRecordThresholdDb.load(), juce::dontSendNotification);
+            threshold.setTextValueSuffix(" dB");
+            threshold.setSliderStyle(juce::Slider::LinearHorizontal);
+            threshold.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 22);
+            threshold.onValueChange = [this] { document.autoRecordThresholdDb = threshold.getValue(); };
+
+            hint.setText("Auto-Record starts for real once the input peaks past this level.",
+                         juce::dontSendNotification);
+            hint.setFont(juce::FontOptions(11.0f));
+            hint.setColour(juce::Label::textColourId, juce::Colours::grey);
+
+            addAndMakeVisible(title);
+            addAndMakeVisible(threshold);
+            addAndMakeVisible(hint);
+            setSize(300, 78);
+        }
+        void resized() override
+        {
+            auto r = getLocalBounds().reduced(10);
+            title.setBounds(r.removeFromTop(18));
+            r.removeFromTop(6);
+            threshold.setBounds(r.removeFromTop(24));
+            r.removeFromTop(4);
+            hint.setBounds(r);
+        }
+        AudioDocument& document;
+        juce::Label title, hint;
+        juce::Slider threshold;
+    };
 }
 
 //==============================================================================
@@ -185,11 +227,13 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     addAndMakeVisible(toolsButton);
     addAndMakeVisible(reverseButton);
     addAndMakeVisible(clearButton);
+    addAndMakeVisible(autoRecordButton);
 
     timeLabel.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::plain));
     timeLabel.setJustificationType(juce::Justification::centredRight);
     loopButton.setClickingTogglesState(true);
     scrubButton.setClickingTogglesState(true);
+    autoRecordButton.setClickingTogglesState(true);
 
     playFromStartButton.setTooltip("Play from start");
     playButton.setTooltip("Play the selection (Space)");
@@ -200,9 +244,11 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     toolsButton.setTooltip("Tools");
     reverseButton.setTooltip("Reverse the selection (or the whole clip, if nothing's selected)");
     clearButton.setTooltip("Clear -- empties the waveform and resets Pitch/Speed/Stretch/Start/End");
+    autoRecordButton.setTooltip("Auto-Record -- arm it and recording starts on its own once the "
+                                "input crosses the threshold (set in Tools, Auto-Record Threshold)");
 
     for (auto* b : { &playFromStartButton, &playButton, &loopButton, &scrubButton, &recordButton,
-                     &toolsButton, &reverseButton, &clearButton })
+                     &toolsButton, &reverseButton, &clearButton, &autoRecordButton })
     {
         b->setLookAndFeel(&toolbarLnF);
 
@@ -256,6 +302,13 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
         if (onSourceNameChanged) onSourceNameChanged({});
         if (onStatusMessage) onStatusMessage("Cleared");
     };
+    autoRecordButton.onClick = [this]
+    {
+        document.autoRecordEnabled = autoRecordButton.getToggleState();
+        if (! document.autoRecordEnabled)
+            document.autoRecordTriggered = false;   // cancelling standby clears any late trigger
+        document.notifyChanged();
+    };
 
     applyTheme();
     document.changeBroadcaster.addChangeListener(this);
@@ -267,7 +320,7 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
 EditorToolbar::~EditorToolbar()
 {
     for (auto* b : { &playFromStartButton, &playButton, &loopButton, &scrubButton, &recordButton,
-                     &toolsButton, &reverseButton, &clearButton })
+                     &toolsButton, &reverseButton, &clearButton, &autoRecordButton })
         b->setLookAndFeel(nullptr);   // detach before toolbarLnF is destroyed
     theme->removeChangeListener(this);
     document.changeBroadcaster.removeChangeListener(this);
@@ -319,6 +372,13 @@ void EditorToolbar::applyTheme()
     // one's destructive" cue, still just an outline rather than a filled warning circle.
     clearButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
     clearButton.setColour(juce::TextButton::textColourOffId, pal.recordButton);
+
+    // Auto-Record is a toggling tool, same treatment as Loop/Scrub: outlined while off,
+    // filled while armed and waiting for the input to cross the threshold.
+    autoRecordButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+    autoRecordButton.setColour(juce::TextButton::buttonOnColourId, pal.accent);
+    autoRecordButton.setColour(juce::TextButton::textColourOffId, pal.screenText);
+    autoRecordButton.setColour(juce::TextButton::textColourOnId, pal.windowBg);
 
     // timeLabel's colour flips to pal.playhead while recording -- see timerCallback().
     timeLabel.setColour(juce::Label::textColourId, pal.screenTextDim);
@@ -412,7 +472,7 @@ void EditorToolbar::showToolsMenu()
            idTrim, idDelete, idSilence,
            idNormalize, idAmplify, idFadeIn, idFadeOut, idReverse,
            idStretch, idExportSel,
-           idOutputFolder, idTheme,
+           idOutputFolder, idTheme, idAutoRecordThreshold,
            idUndo, idRedo };
 
     const bool empty   = document.isEmpty();
@@ -454,6 +514,7 @@ void EditorToolbar::showToolsMenu()
     m.addSeparator();
     m.addItem(idOutputFolder, juce::String::fromUTF8("Output Folder\xE2\x80\xA6"));
     m.addItem(idTheme,        juce::String::fromUTF8("Theme\xE2\x80\xA6"));
+    m.addItem(idAutoRecordThreshold, juce::String::fromUTF8("Auto-Record Threshold\xE2\x80\xA6"));
     m.addSeparator();
     m.addItem(keyed("Undo", idUndo, canUndo, cmd + "Z"));
     m.addItem(keyed("Redo", idRedo, canRedo, shift + cmd + "Z"));
@@ -480,6 +541,7 @@ void EditorToolbar::showToolsMenu()
             case idExportSel:    exportSelectionToFolder(); break;
             case idOutputFolder: chooseOutputFolder();      break;
             case idTheme:        showThemeCallout();        break;
+            case idAutoRecordThreshold: showAutoRecordThresholdCallout(); break;
             case idUndo:      doUndo(); break;
             case idRedo:      doRedo(); break;
             default: break;
@@ -528,6 +590,12 @@ void EditorToolbar::showThemeCallout()
                                            toolsButton.getScreenBounds(), nullptr);
 }
 
+void EditorToolbar::showAutoRecordThresholdCallout()
+{
+    juce::CallOutBox::launchAsynchronously(std::make_unique<AutoRecordThresholdPanel>(document),
+                                           toolsButton.getScreenBounds(), nullptr);
+}
+
 //==============================================================================
 void EditorToolbar::updateTransportButtonText()
 {
@@ -540,10 +608,24 @@ void EditorToolbar::updateTransportButtonText()
     scrubButton.setEnabled(! rec);
     reverseButton.setEnabled(! rec);
     clearButton.setEnabled(! rec);
+    autoRecordButton.setEnabled(! rec);
 }
 
 void EditorToolbar::timerCallback()
 {
+    // Auto-Record standby: the audio thread only ever flips this atomic when the input
+    // crosses the threshold -- it can't safely allocate/touch document or transport state
+    // itself (see PluginProcessor::processBlock's idle branch), so this timer is where the
+    // real start happens, on the message thread, the same handoff every other audio-thread ->
+    // UI-facing state change in this class already uses.
+    if (document.autoRecordTriggered.load())
+    {
+        document.autoRecordTriggered = false;
+        document.autoRecordEnabled = false;
+        autoRecordButton.setToggleState(false, juce::dontSendNotification);
+        processor.startRecording();
+    }
+
     updateTransportButtonText();
 
     const double sr = document.getSampleRate() > 0 ? document.getSampleRate() : 44100.0;
@@ -654,13 +736,15 @@ void EditorToolbar::resized()
                          .withMargin(juce::FlexItem::Margin(0, (float) gap, 0, 0)));
     };
     // Left-grouped, matching the mockup: Play/Loop/Record/Tools together, time pinned right.
-    // Scrub/Reverse/Clear sit last, at the right-hand end of the button cluster -- round like
-    // every other icon button here (the reel-hub icon reads better in a circle than the
-    // earlier rectangular cassette-body version did).
+    // Auto-Record sits right after Record (a Record modifier, at the user's request); Scrub/
+    // Reverse/Clear sit last, at the right-hand end of the button cluster -- round like every
+    // other icon button here (the reel-hub icon reads better in a circle than the earlier
+    // rectangular cassette-body version did).
     add(playFromStartButton, 28);
     add(playButton, 28);
     add(loopButton, 28);
     add(recordButton, 28);
+    add(autoRecordButton, 28);
     add(toolsButton, 28);
     add(scrubButton, 28);
     add(reverseButton, 28);

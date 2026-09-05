@@ -981,6 +981,52 @@ four targets build clean.
 gap is currently 16px, up from the original 4px, tried live at the user's request to preview
 wider spacing -- not yet explicitly confirmed as final.)
 
+## Auto-Record
+
+User's plan, verbatim: "I'd like to make a button for 'record when audio input starts'. In the
+settings I'd like a way to adjust the dB that R3WRK starts recording. Before that record
+pauses." A level-triggered record standby -- arm it, and R3WRK starts recording for real only
+once the input peaks past a configurable dBFS threshold, the same idea as a tape deck's
+voice-activated record or a field recorder's auto-record.
+
+**Why the audio thread never calls `startRecording()` itself.** Every other toggle in this class
+(Loop, Scrub) only ever has the *message* thread write real state and the *audio* thread read
+it -- `startRecording()` allocates (`recordingAccumulator.setSize(...)`) and touches
+document/transport state meant to be driven from outside the audio callback, so triggering it
+directly from inside `processBlock` would be a new, one-off exception to that rule. Instead:
+`AudioDocument` gained `autoRecordEnabled` (the toggle being armed, atomic since the audio
+thread reads it every idle block), `autoRecordThresholdDb` (atomic double, -60..0, default -40,
+written by the new threshold panel), and `autoRecordTriggered` (atomic bool) -- the audio
+thread's only job, in `processBlock`'s existing idle/pass-through branch (neither recording nor
+playing), is a **read-only** peak-level check each block (`FloatVectorOperations::findMinAndMax`
+per channel, converted with `Decibels::gainToDecibels`) that just sets `autoRecordTriggered`
+when the level crosses the threshold. `EditorToolbar`'s existing 15Hz timer -- already the one
+place a knob move or transport-state change gets noticed -- is where the real start happens:
+sees the flag, calls `processor.startRecording()` (message thread, same as a manual Record
+click), clears the flag, un-arms the toggle. No new thread-safety category introduced, just the
+same handoff pattern this class already uses everywhere else.
+
+**UI.** New `autoRecordButton` -- placed right after Record at the user's explicit request
+("Place it after the record button") -- toggles like Loop/Scrub (outlined off, filled-accent
+armed), disabled while already recording. New `drawAutoRecordIcon`: three ascending level bars
+crossed by a threshold line -- an icon of my own design this time (no reference image), meant to
+read as "level meter + trigger line"; flagged to the user as a first pass, open to a different
+treatment once they've seen it rendered. The threshold itself lives in a small `CallOutBox`
+panel (`AutoRecordThresholdPanel`, modeled on the existing Amplify/Stretch panels but with no
+Apply button -- it's a monitoring setting, not an audio edit, so the slider writes straight
+through as it moves) reached via a new **Tools ▾ → "Auto-Record Threshold…"** item, consistent
+with how Output Folder/Theme are already exposed there rather than inventing a new "Settings"
+surface that doesn't otherwise exist in this app.
+
+**Persistence.** `autoRecordThresholdDb` is saved in plugin state alongside the knob-row Speed/
+Pitch/Stretch (state-format tag bumped `'R3W3'`→`'R3W4'`, same one-field-at-a-time bump pattern
+every prior addition to this blob used) -- it's a setting worth remembering across sessions, not
+a one-off UI toggle. `autoRecordEnabled`/`autoRecordTriggered` are deliberately **not**
+persisted -- an "armed and waiting" state shouldn't survive a save/reload, the same reason
+`isRecording`/`isPlaying` aren't persisted either.
+
+Smoke test passes; all four targets build clean.
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).
