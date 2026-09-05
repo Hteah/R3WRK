@@ -153,7 +153,7 @@ private:
     // held steady for as long as the pointer stays at that distance.
     float scrubAnchorX = 0.0f;
     static constexpr float scrubDeadZonePx = 4.0f;    // a press that hasn't moved yet stays silent
-    static constexpr float scrubMaxDragPx  = 160.0f;  // distance from the anchor for full rate
+    static constexpr float scrubMaxDragPx  = 400.0f;  // distance from the anchor for full rate
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(WaveformDisplay)
 };

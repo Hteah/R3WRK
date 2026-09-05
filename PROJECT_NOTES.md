@@ -893,6 +893,13 @@ it's purely a function of *position*, not motion, a fast flick to a modest
 distance now starts exactly as slow as a careful pull to that same
 distance. Smoke test passes; all four targets build clean.
 
+**Less sensitive.** User: "Almost. Could you make it less sensitive?" — the shape (slow near the
+anchor, faster further out) was right, just reached full rate too easily. `scrubMaxDragPx`
+(160 → 400) is the one knob that controls this: it's the pull distance the whole 0→1 curve is
+stretched across, so doubling-plus it means the same physical drag now lands earlier/slower
+along that curve everywhere, not just at the top end. Smoke test passes; all four targets build
+clean.
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).
