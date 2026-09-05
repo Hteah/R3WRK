@@ -150,20 +150,36 @@ void WaveformDisplay::zoomToFit()
 }
 
 // Keyboard zoom (⌘+/⌘-, see PluginEditor::keyPressed) -- routes through the exact same
-// zoomToward() the mouse wheel uses, at the current mouse position (clamped onto the
-// component), so a keypress behaves exactly like one wheel notch: zooming in frames the
-// selection if the view is wider than it, and hovering near a selection edge pins and zooms
-// into that edge specifically, left or right. The factor is gentler than a wheel notch can
-// be (that one scales with how hard/fast the user scrolls, up to +/-2x) -- fixed, modest
-// steps here so repeated presses zoom in comfortably small increments. Kept as an exact
-// inverse pair (0.9 and 1/0.9) so zooming in then out lands back on the same span.
+// zoomToward() the mouse wheel uses, so a keypress behaves like one wheel notch: hovering
+// near a selection edge pins and zooms into that edge specifically, left or right. Where it
+// differs from the wheel: there's no real pointer to speak of (you're using the keyboard
+// specifically to keep your hand off the mouse), so the "pointer" fed to zoomToward() is the
+// selection's own midpoint whenever there is one, not wherever the mouse incidentally sits.
+// zoomToward()'s existing framing step already centres on that midpoint the *first* time
+// (while the view is wider than the selection), but once you're zoomed in tighter than it,
+// its normal pointer-anchored zoom takes over -- with the real mouse position that'd usually
+// be fine (you're pointing at something meaningful), but for a keyboard press it would just
+// pin whatever arbitrary spot the mouse happens to be, drifting the view away from the
+// selection with every further press. Anchoring on the midpoint throughout keeps every
+// keyboard zoom level centred on the selection, matching Sieve's editor. No selection ->
+// falls back to the actual mouse position, same as before. The factor is gentler than a
+// wheel notch can be (that one scales with how hard/fast the user scrolls, up to +/-2x) --
+// fixed, modest steps here so repeated presses zoom in comfortably small increments. Kept as
+// an exact inverse pair (0.9 and 1/0.9) so zooming in then out lands back on the same span.
 static constexpr double keyboardZoomStep = 0.9;
-void WaveformDisplay::zoomIn()  { zoomToward(keyboardZoomStep,       currentMouseX()); }
-void WaveformDisplay::zoomOut() { zoomToward(1.0 / keyboardZoomStep, currentMouseX()); }
+void WaveformDisplay::zoomIn()  { zoomToward(keyboardZoomStep,       keyboardZoomAnchorX()); }
+void WaveformDisplay::zoomOut() { zoomToward(1.0 / keyboardZoomStep, keyboardZoomAnchorX()); }
 
 float WaveformDisplay::currentMouseX() const
 {
     return juce::jlimit(0.0f, (float) juce::jmax(1, getWidth()), (float) getMouseXYRelative().x);
+}
+
+float WaveformDisplay::keyboardZoomAnchorX() const
+{
+    if (document.hasSelection())
+        return sampleToX((document.getSelectionStart() + document.getSelectionEnd()) / 2);
+    return currentMouseX();
 }
 
 // Sieve-style editor zoom: `spanFactor` multiplies the visible span (<1 = zoom in).

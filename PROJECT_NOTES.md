@@ -281,6 +281,26 @@ session's other fixes — timeScale != 1 is the trigger, so this bug already
 existed wherever Speed/Pitch/Stretch were live, just went unnoticed until
 this round of testing exercised it directly.
 
+**Keyboard zoom stays anchored on the selection.** `zoomToward()`'s existing
+Sieve-ported framing behaviour (frame the whole selection, centred, while the
+view is wider than it) only fires for the *first* zoom-in step — once you're
+zoomed in tighter than the selection, it hands off to plain pointer-anchored
+zoom, which is exactly right for the mouse wheel (the pointer is genuinely
+pointing at something) but wrong for ⌘+/⌘-, where the "pointer" was just
+whatever the mouse happened to be sitting over — often nowhere near the
+selection, since the whole point of a keyboard shortcut is not needing the
+mouse there. Every zoom-in past the first press would then anchor on that
+arbitrary spot instead, drifting the view away from the selection with each
+further press — the exact "zooming around trying to find the selection
+again" experience the Sieve behaviour exists to avoid. Fixed by giving
+`zoomIn()`/`zoomOut()` their own anchor (`keyboardZoomAnchorX()`): the
+selection's midpoint, converted to a screen X via `sampleToX()`, whenever
+there is one, falling back to the real mouse position only when there's no
+selection to anchor on. Since this "anchor" is just the `pointerX` fed into
+the same `zoomToward()` the wheel uses, it gets the framing behaviour *and*
+the pointer-anchored zoom that follows it for free, both now centred on the
+selection instead of an incidental mouse position, at every zoom level.
+
 ## Selection context menu + live Amplify/Stretch preview
 
 Right-clicking inside a selection (`WaveformDisplay::onSelectionContextMenu`,

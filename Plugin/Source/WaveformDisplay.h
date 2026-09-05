@@ -20,11 +20,14 @@
         (Amplify/Reverse/Stretch·Pitch) -- see onSelectionContextMenu.
     Mouse wheel zooms toward the pointer (or into the selection if there is one);
     horizontal swipe / Shift+wheel pans. ⌘+/⌘- (see zoomIn()/zoomOut(), wired up in
-    PluginEditor::keyPressed) zoom without the mouse, behaving exactly like one wheel
-    notch at the current pointer position -- not Control, which turned out to be a dead
-    end on macOS twice over (see the comment in PluginEditor::keyPressed). The view also
-    auto-refits after an edit that changes the document's length while showing the whole
-    thing (see refitViewIfContentChanged()).
+    PluginEditor::keyPressed) zoom without the mouse, behaving like one wheel notch --
+    anchored on the selection's midpoint at every zoom level when there is one (not just
+    the mouse's incidental position, which wouldn't track the selection once zoomed in
+    tighter than it), so repeated keyboard zoom-ins stay centred on the selection instead
+    of needing the mouse moved to find it again -- not Control, which turned out to be a
+    dead end on macOS twice over (see the comment in PluginEditor::keyPressed). The view
+    also auto-refits after an edit that changes the document's length while showing the
+    whole thing (see refitViewIfContentChanged()).
 
     While Speed/Pitch/Stretch are non-identity, the drawn waveform *shape* comes from a real
     offline stretch computed in the background (see WaveformStretchPreview / stretchPreview)
@@ -90,6 +93,7 @@ private:
     void zoomToward(double spanFactor, float pointerX);   // wheel zoom (Sieve model)
     void panByPixels(float dxPixels);
     float currentMouseX() const;   // mouse position in this component's coords, clamped on-screen
+    float keyboardZoomAnchorX() const;   // the selection's midpoint if there is one, else currentMouseX()
     int64_t maxViewSpan() const;   // largest sensible viewEnd-viewStart, for the current
                                    // sample count and timeScale -- see .cpp
     int64_t effectiveSpanFor(int64_t rawTotal, double timeScale) const;   // maxViewSpan(), but
