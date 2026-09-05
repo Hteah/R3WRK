@@ -1167,6 +1167,25 @@ actually take effect** -- a plain rebuild will silently keep serving the stale i
 via the same `.icns` round-trip -- the extracted PNG now matches the plain-white version exactly.
 Smoke test passes; all four targets build clean.
 
+**Still "black on black" -- a second, deeper Dock cache, unrelated to any of the above.** User
+sent a screenshot: the Dock tile really was rendering near-black, even though the `.icns` on disk
+was already confirmed correct via the round-trip check and Finder's own "Get Info" preview panel
+showed it correctly (white, ring clearly visible) -- so this was neither the icon file nor even
+Finder's icon cache; it was specifically the **Dock's own on-disk icon cache**, a separate file
+(`com.apple.dock.iconcache`, under the per-user `/private/var/folders/.../C/` cache directory)
+that a plain `killall Dock` doesn't invalidate -- the Dock process just reloads the same stale
+cache file from disk on relaunch. Fix: delete that file directly, then `killall Dock`. Confirmed
+by temporarily disabling Dock auto-hide (`defaults write com.apple.dock autohide -bool false` +
+`killall Dock`, restored after) to get a screenshot of the visible Dock -- the R3WRK tile now
+shows the correct white background with the ring clearly legible. **Three separate caching layers
+turned out to be involved across this whole icon saga**, each needing its own specific
+invalidation: (1) Xcode/CMake's own build-vs-configure split for the source `.icns` generation
+(needs a reconfigure, not just a rebuild, on any source-image edit -- see above); (2) Finder's
+icon cache (a plain `killall Finder` sufficed); (3) the Dock's *separate*, persistent on-disk
+icon cache (needed deleting the cache file itself, not just restarting the process). No source
+changes this round -- purely an OS/build-cache issue, confirmed resolved by direct visual
+inspection of the live Dock.
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).
