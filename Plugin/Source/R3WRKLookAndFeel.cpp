@@ -41,56 +41,60 @@ namespace
         g.fillPath(heads);
     }
 
-    // Tools: a plain gear/cog, line-icon style (stroked outline, hollow) to match a
-    // reference glyph the user supplied -- same body+teeth silhouette as before, but
-    // stroked with rounded joints instead of filled, so the tooth corners come out
-    // rounded for free (PathStrokeType::curved), and a separate stroked circle stands
-    // in for the centre hole instead of an even-odd punch-out.
+    // Tools: a plain 6-tooth gear, traced from a reference icon the user supplied
+    // rather than approximated by formula. kOuterR/kInnerR are radius ratios
+    // (of the tooth-tip radius) sampled directly from that image via radial
+    // ray-casting at 7.5deg steps around one 60deg sector, averaged across all
+    // six sectors (the source is exactly 6-fold symmetric) -- see PROJECT_NOTES.md
+    // for how these were extracted. Each ring (the gear body and the centre hole)
+    // is traced as an outer contour (clockwise) plus an inner contour
+    // (counter-clockwise), so nonzero-winding fillPath punches the band out
+    // directly. That reproduces the reference's actual ring width, which isn't
+    // constant -- it pinches in at each tooth tip and at each valley, and swells
+    // on the flanks between -- rather than the constant-width band a plain
+    // centreline stroke would give.
     void drawGearIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
     {
-        auto area = bounds.reduced(bounds.getHeight() * 0.14f);   // as large as the button allows
+        static constexpr float kOuterR[8] = { 0.9933f, 0.9717f, 0.9133f, 0.7700f,
+                                              0.7122f, 0.7700f, 0.9133f, 0.9717f };
+        static constexpr float kInnerR[8] = { 0.7867f, 0.7206f, 0.5595f, 0.5227f,
+                                              0.5189f, 0.5228f, 0.5605f, 0.7206f };
+        constexpr int   kPerSector  = 8;
+        constexpr int   kTotal      = kPerSector * 6;   // 48 points around the full gear
+        constexpr float kHoleOuterR = 0.366f;
+        constexpr float kHoleInnerR = 0.166f;
+
+        auto area = bounds.reduced(bounds.getHeight() * 0.20f);
         const float R = juce::jmin(area.getWidth(), area.getHeight()) * 0.5f;
         const auto  centre = area.getCentre();
-        const float thickness = juce::jmax(1.3f, R * 0.15f);
-
-        const float bodyR   = R * 0.44f;   // radius to the tooth root
-        const float toothLen = R * 0.30f;  // tooth radial length
-        const float holeR   = R * 0.30f;   // centre hole radius -- comfortably inside bodyR so
-                                            // the ring band reads as hollow, not solid, once stroked
-        const int   numTeeth = 6;   // matches the reference glyph (6 teeth, not 8)
-        // Half-step for 6 teeth is 30deg -- keep well under that so each tooth stays a
-        // distinct block with a clear gap either side, rather than merging into a ring.
-        const float toothHalfWidth = juce::degreesToRadians(15.0f);
-        const float step = juce::MathConstants<float>::twoPi / (float) numTeeth;
+        const float step = juce::MathConstants<float>::twoPi / (float) kTotal;
 
         juce::Path gear;
-        bool first = true;
-        for (int i = 0; i < numTeeth; ++i)
+
+        for (int i = 0; i < kTotal; ++i)
         {
-            const float toothCentre = (float) i * step;
-            const float toothL = toothCentre - toothHalfWidth;
-            const float toothR = toothCentre + toothHalfWidth;
-            const float gapEnd = toothCentre + step - toothHalfWidth;
-
-            auto p1 = centre.getPointOnCircumference(bodyR,            toothL);
-            auto p2 = centre.getPointOnCircumference(bodyR + toothLen, toothL);
-            auto p3 = centre.getPointOnCircumference(bodyR + toothLen, toothR);
-            auto p4 = centre.getPointOnCircumference(bodyR,            toothR);
-            auto p5 = centre.getPointOnCircumference(bodyR,            gapEnd);
-
-            if (first) { gear.startNewSubPath(p1); first = false; }
-            else         gear.lineTo(p1);
-            gear.lineTo(p2);
-            gear.lineTo(p3);
-            gear.lineTo(p4);
-            gear.lineTo(p5);
+            const float angle = (float) i * step;
+            auto p = centre.getPointOnCircumference(R * kOuterR[i % kPerSector], angle);
+            if (i == 0) gear.startNewSubPath(p); else gear.lineTo(p);
         }
         gear.closeSubPath();
 
+        for (int i = kTotal; i > 0; --i)   // reverse order -> opposite (counter-clockwise) winding
+        {
+            const int idx = i % kTotal;
+            const float angle = (float) idx * step;
+            auto p = centre.getPointOnCircumference(R * kInnerR[idx % kPerSector], angle);
+            if (i == kTotal) gear.startNewSubPath(p); else gear.lineTo(p);
+        }
+        gear.closeSubPath();
+
+        gear.addCentredArc(centre.x, centre.y, R * kHoleOuterR, R * kHoleOuterR, 0.0f,
+                           0.0f, juce::MathConstants<float>::twoPi, true);
+        gear.addCentredArc(centre.x, centre.y, R * kHoleInnerR, R * kHoleInnerR, 0.0f,
+                           juce::MathConstants<float>::twoPi, 0.0f, true);
+
         g.setColour(ink);
-        g.strokePath(gear, juce::PathStrokeType(thickness, juce::PathStrokeType::curved,
-                                                juce::PathStrokeType::rounded));
-        g.drawEllipse(centre.x - holeR, centre.y - holeR, holeR * 2.0f, holeR * 2.0f, thickness);
+        g.fillPath(gear);
     }
 }
 

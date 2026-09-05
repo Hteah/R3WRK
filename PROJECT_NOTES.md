@@ -310,9 +310,25 @@ rounds of screenshot+zoom iteration: 8 teeth at a half-width too close to the
 stroked style, the ring band between body and hole radius also needed to be
 wider than the stroke thickness or it filled in solid again -- settled on body/
 hole/tooth-length radii with enough clearance at the (near-floor, ~1.3px) stroke
-thickness this size forces. Tooth count is 6, not 8 -- the user's reference had
-6 points; `numTeeth`/`toothHalfWidth` are the two constants to change for a
-different count (half-width just needs to stay well under 360°/2/numTeeth).
+thickness this size forces. Tooth count was fixed 8→6 to match the reference.
+
+Asked to "get it right" against the reference exactly, the hand-tuned version
+was replaced with an actual trace of the source image: the user's reference PNG
+(44×44, `~/Desktop/Screenshot ... .png`) was radially ray-cast in Python/Pillow
+from its ink centroid -- for angles at 7.5° steps, walking outward in 0.05px
+steps and recording where the pixel luminance crosses a dark/light threshold --
+giving the exact outer (tooth) and inner (ring) radius at each angle, plus the
+centre hole's inner/outer radius. The source turned out to be exactly 6-fold
+symmetric (the 8 samples-per-60°-sector data is consistent to ~1% across all
+six repeats), so the six sectors were averaged into one canonical 8-point
+profile and hardcoded as `kOuterR`/`kInnerR` ratio arrays (of the tooth-tip
+radius) in `drawGearIcon`, repeated six times at render time. This is why the
+gear's ring isn't a constant width -- it genuinely pinches in at each tooth tip
+and at each valley and swells on the flanks between, in the source icon and now
+in ours, traced rather than smoothed into a uniform stroke. Each ring (gear body,
+centre hole) is built as an outer contour (clockwise) plus an inner contour
+(counter-clockwise) so nonzero-winding `fillPath` punches the band out directly,
+rather than using `PathStrokeType` at all.
 
 All five toolbar buttons (`playFromStartButton`/`playButton`/`loopButton`/
 `recordButton`/`toolsButton`) call `setWantsKeyboardFocus(false)`. A mouse
