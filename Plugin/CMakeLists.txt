@@ -82,7 +82,8 @@ target_sources(R3WRK
         Source/TimeRuler.cpp
         Source/Theme.cpp
         Source/ThemeEditor.cpp
-        Source/OutputSettings.cpp)
+        Source/OutputSettings.cpp
+        Source/StandaloneWindowShape.mm)
 
 target_compile_definitions(R3WRK
     PUBLIC

@@ -1250,6 +1250,61 @@ loop added inline for anyone not using the script. Smoke test passes; all four t
 clean (only the Standalone target actually relinks against the changed header -- VST3/AU are
 unaffected, as expected, since they never build that file at all).
 
+## Rounded corners on the Standalone window
+
+User: "Can you round the corners on the desktop app?" Checked first rather than assuming: a
+zoomed screenshot of the actual running window showed a perfectly sharp 90° corner -- no rounding
+at all, not even the subtle system-standard radius most native macOS windows get automatically.
+Root cause: `StandaloneFilterWindow` (JUCE's Standalone wrapper, via `DocumentWindow`) uses a
+**non-native title bar** (the plain "Options" pill button seen in every screenshot this session,
+not real traffic-light buttons) -- confirmed in JUCE's own source
+(`TopLevelWindow::getDesktopWindowStyleFlags()`) that `ComponentPeer::windowHasTitleBar` is only
+added when `useNativeTitleBar` is true, so this window's native peer never gets the standard
+titled-window treatment macOS auto-rounds; effectively a borderless-style window, which macOS
+does not round on its own.
+
+**No cross-platform JUCE feature reaches this** -- no "rounded window" setting, no exposed hook
+to the native NSWindow/CALayer from a `Component`. This needed real native code: new
+`Plugin/Source/StandaloneWindowShape.h`/`.mm` (`#if JUCE_MAC`-guarded, harmless no-op include on
+other platforms since it's simply not called there) clips the window's content view to a
+rounded-rect `CALayer` mask and makes the underlying `NSWindow` non-opaque with a clear
+background, so the four corners the mask crops away read as genuinely transparent (desktop
+showing through) rather than a mismatched solid square. Deliberately done via the layer mask
+(clips *everything* JUCE paints, any nesting depth) rather than overriding `paint()` and calling
+`Graphics::reduceClipRegion()` to a rounded path -- traced through JUCE's own
+`Component::paintComponentAndChildren()` and confirmed a `Graphics::ScopedSaveState` restores the
+clip **before** children are painted, so a clip set inside one Component's own `paint()` never
+reaches its children; the actual editor content filling the rest of the window would have kept
+its square corners peeking out past a window-level-only clip.
+
+One call wired into JUCE's own `StandaloneFilterWindow` constructor (`patches/juce-standalone-
+rounded-corners.patch`, same durability mechanism as the notification-bar patch -- captured as an
+isolated `git diff` from inside the JUCE checkout, `build.sh` already applies every
+`patches/*.patch` automatically). **Two real compile issues surfaced getting there, both fixed,
+both worth remembering:**
+
+1. **Cocoa/JUCE include-order collision.** `#import`ing `<Cocoa/Cocoa.h>` *after* JUCE headers
+   makes Carbon's `Components.h` (pulled in transitively) declare a plain global `Component`
+   typedef that collides with `juce::Component` once JUCE's own `using namespace juce;` has
+   already brought that name into unqualified scope -- "reference to 'Component' is ambiguous".
+   Fix: import Cocoa *first*, before any JUCE include, in the `.mm` file -- the same ordering
+   JUCE's own native `.mm` files always use.
+2. **An ambient, unclosed nested `namespace juce {}` inside JUCE's own amalgamated headers.**
+   The forward declaration this patch adds to `juce_StandaloneFilterWindow.h` sits (via
+   `juce_audio_plugin_client_Standalone.cpp`'s particular include order) inside a `namespace juce
+   { ... }` opened earlier by a different module header and not yet closed -- so *any* spelling
+   of the qualifier, including the root-relative `::juce::Component`, resolved as "look for a
+   nested namespace called juce inside the juce namespace we're already in" and failed to
+   compile. Fixed by sidestepping the type resolution entirely at the JUCE-patch call site: the
+   forward declaration and the constructor's call both use `extern "C" void
+   r3wrkApplyRoundedWindowCorners(void* window, float cornerRadiusPx)` -- a bare `void*` needs no
+   namespace lookup at all -- and only the `.mm` implementation (a context with no such ambient
+   nesting) casts it back to `juce::Component*`.
+
+Verified by zooming into a fresh screenshot of the actual corner -- clearly rounded, desktop
+visible through the corner, no artefacts. 12px radius, matching roughly what modern macOS's own
+standard titled windows use. Smoke test passes; all four targets build clean.
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).
