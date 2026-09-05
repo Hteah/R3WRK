@@ -189,19 +189,30 @@ void EditorToolbar::applyTheme()
     playButton.setColour(juce::TextButton::buttonColourId, pal.accent);
     playButton.setColour(juce::TextButton::textColourOffId, pal.windowBg);
 
+    // Loop/Tools are outlined and Play/Record are filled, but all four now sit on the dark
+    // control band (paint() fills panelBg behind them), so their text -- like WaveformDisplay
+    // and TimeRuler -- comes from screenText/screenTextDim rather than text/textDim.
     loopButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
     loopButton.setColour(juce::TextButton::buttonOnColourId, pal.accent);
-    loopButton.setColour(juce::TextButton::textColourOffId, pal.text);
+    loopButton.setColour(juce::TextButton::textColourOffId, pal.screenText);
     loopButton.setColour(juce::TextButton::textColourOnId, pal.windowBg);
 
     recordButton.setColour(juce::TextButton::buttonColourId, pal.recordButton);
 
     toolsButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
-    toolsButton.setColour(juce::TextButton::textColourOffId, pal.text);
+    toolsButton.setColour(juce::TextButton::textColourOffId, pal.screenText);
 
-    timeLabel.setColour(juce::Label::textColourId, pal.textDim);
+    timeLabel.setColour(juce::Label::textColourId, pal.screenTextDim);
     recLabel.setColour(juce::Label::textColourId, pal.playhead);
     repaint();
+}
+
+void EditorToolbar::paint(juce::Graphics& g)
+{
+    // The control band: a rounded dark panel (the same "screen" tone as the waveform and
+    // ruler) behind the whole transport row.
+    g.setColour(theme->palette().panelBg);
+    g.fillRoundedRectangle(getLocalBounds().toFloat(), 10.0f);
 }
 
 //==============================================================================
@@ -466,7 +477,7 @@ void EditorToolbar::chooseOutputFolder()
 //==============================================================================
 void EditorToolbar::resized()
 {
-    auto row = getLocalBounds().removeFromTop(26);
+    auto row = getLocalBounds().reduced(8, 5);   // inset so pills clear the band's rounded corners
     const int gap = 4;
 
     juce::FlexBox fb;

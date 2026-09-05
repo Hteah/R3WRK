@@ -44,18 +44,23 @@ void R3WRKLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Button& but
                                             const juce::Colour& backgroundColour,
                                             bool isHighlighted, bool isDown)
 {
-    const auto& pal = theme->palette();
     auto bounds = button.getLocalBounds().toFloat().reduced(0.5f);
     const float radius = bounds.getHeight() * 0.5f;
 
     if (backgroundColour.getAlpha() == 0)
     {
+        // Outline style: take the ink colour from whatever text colour the button's owner
+        // already set for it, rather than reading the theme directly -- this LookAndFeel is
+        // shared by components that sit on different backgrounds (e.g. KnobRow's captions
+        // sit on windowBg, EditorToolbar's outlined buttons sit on the dark control band /
+        // panelBg), and each owner already picks the right pair for its own context.
+        const juce::Colour ink = button.findColour(juce::TextButton::textColourOffId);
         if (isDown || isHighlighted)
         {
-            g.setColour(pal.text.withAlpha(isDown ? 0.16f : 0.08f));
+            g.setColour(ink.withAlpha(isDown ? 0.16f : 0.08f));
             g.fillRoundedRectangle(bounds, radius);
         }
-        g.setColour(pal.textDim.withAlpha(0.55f));
+        g.setColour(ink.withAlpha(0.45f));
         g.drawRoundedRectangle(bounds, radius, 1.2f);
         return;
     }

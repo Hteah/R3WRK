@@ -24,6 +24,7 @@ public:
     EditorToolbar(R3WRKAudioProcessor& processor, AudioDocument& document);
     ~EditorToolbar() override;
 
+    void paint(juce::Graphics&) override;
     void resized() override;
     void changeListenerCallback(juce::ChangeBroadcaster*) override;
 

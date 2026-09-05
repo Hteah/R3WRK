@@ -37,8 +37,8 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
 
     setWantsKeyboardFocus(true);
     setResizable(true, true);
-    setResizeLimits(680, 454, 2200, 1300);
-    setSize(1000, 620);
+    setResizeLimits(680, 464, 2200, 1300);
+    setSize(1000, 630);
 }
 
 R3WRKAudioProcessorEditor::~R3WRKAudioProcessorEditor()
@@ -60,7 +60,7 @@ void R3WRKAudioProcessorEditor::resized()
 
     knobRow.setBounds(area.removeFromBottom(74));   // knob strip, under the transport bar
     area.removeFromBottom(4);
-    toolbar.setBounds(area.removeFromBottom(28));   // transport control strip
+    toolbar.setBounds(area.removeFromBottom(38));   // transport control strip (dark band + padding)
     area.removeFromBottom(6);
 
     timeRuler.setBounds(area.removeFromBottom(22)); // time ruler, hugging the waveform
