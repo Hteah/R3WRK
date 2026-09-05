@@ -10,7 +10,7 @@
 /**
     A single control strip below the waveform:
 
-        Play · Loop · time    ···    ● REC m:ss · Record · Tools ▾
+        ⏮ Play · Loop · time    ···    ● REC m:ss · Record · Tools ▾
 
     Everything else — file ops, clipboard, region processing, stretch/pitch,
     export selection, undo/redo — lives in the "Tools" pop-up menu.
@@ -40,6 +40,7 @@ public:
     void doRedo();
     void toggleTransport();   // Record button: record if idle, else stop
     void togglePlay();        // Space: play if idle, else stop
+    void playFromStart();     // restarts playback at sample 0 (region-snapped, see processBlock)
 
 private:
     void timerCallback() override;
@@ -67,6 +68,7 @@ private:
     // (so pill-radius-as-circle) buttons -- a play triangle, a loop/repeat glyph, and (for
     // Record) no icon at all while idle, since a plain red circular button already reads as
     // "record" on its own; a stop square appears on it once recording.
+    juce::TextButton playFromStartButton { R3WRKLookAndFeel::iconPlayFromStart };
     juce::TextButton playButton   { R3WRKLookAndFeel::iconPlay };
     juce::TextButton loopButton   { R3WRKLookAndFeel::iconLoop };   // setClickingTogglesState(true)
                                                                     // -- a toggling pill, not a checkbox

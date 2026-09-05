@@ -120,7 +120,7 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
                                       bool isMouseOverButton, bool isButtonDown)
 {
     const auto text = button.getButtonText();
-    if (text != iconPlay && text != iconStop && text != iconLoop)
+    if (text != iconPlay && text != iconStop && text != iconLoop && text != iconPlayFromStart)
     {
         juce::LookAndFeel_V4::drawButtonText(g, button, isMouseOverButton, isButtonDown);
         return;
@@ -144,6 +144,21 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
         auto r = bounds.reduced(bounds.getHeight() * 0.32f);
         juce::Path p;
         p.addTriangle(r.getX(), r.getY(), r.getX(), r.getBottom(), r.getRight(), r.getCentreY());
+        g.fillPath(p);
+    }
+    else if (text == iconPlayFromStart)
+    {
+        // A vertical bar, then the same play triangle shifted over to make room for it --
+        // "go back to the start, then play forward".
+        auto r = bounds.reduced(bounds.getHeight() * 0.28f);
+        const float barWidth = juce::jmax(1.6f, r.getWidth() * 0.16f);
+        const float gap      = r.getWidth() * 0.14f;
+
+        g.fillRoundedRectangle(r.getX(), r.getY(), barWidth, r.getHeight(), barWidth * 0.4f);
+
+        auto tri = r.withTrimmedLeft(barWidth + gap);
+        juce::Path p;
+        p.addTriangle(tri.getX(), tri.getY(), tri.getX(), tri.getBottom(), tri.getRight(), tri.getCentreY());
         g.fillPath(p);
     }
     else // iconStop

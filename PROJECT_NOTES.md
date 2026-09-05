@@ -281,6 +281,16 @@ The loop icon is two ~140° arcs (`Path::addCentredArc`) with gaps between
 them, each ending in a small triangular arrowhead computed from
 `Point::getPointOnCircumference` plus the tangent/normal at that angle.
 
+A fourth, `playFromStartButton`, sits to the left of Play (same 28×28
+circular shape, outlined rather than filled -- it's a secondary/modifier
+action, not a primary one): a vertical bar next to the same play triangle
+("go back to the start, then play forward"). Its handler
+(`EditorToolbar::playFromStart()`) forces `document.playhead` to 0 and
+restarts playback; `startPlayback()`/`processBlock`'s existing region
+snap then lands it at the start of whatever's actually playing -- the
+selection if there is one, else the loop range, else sample 0 -- with
+no extra region-lookup logic duplicated in the toolbar.
+
 ## Theming
 
 `Source/Theme.{h,cpp}` — `Palette` is 11 `juce::Colour`s (window/panel bg,

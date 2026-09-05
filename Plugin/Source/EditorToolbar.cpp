@@ -144,6 +144,7 @@ namespace
 EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     : processor(proc), document(doc)
 {
+    addAndMakeVisible(playFromStartButton);
     addAndMakeVisible(playButton);
     addAndMakeVisible(loopButton);
     addAndMakeVisible(timeLabel);
@@ -155,17 +156,19 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     toolsButton.setButtonText(juce::String::fromUTF8("Tools \xe2\x96\xbe"));   // Tools ▾
     loopButton.setClickingTogglesState(true);
 
+    playFromStartButton.setTooltip("Play from start");
     playButton.setTooltip("Play the selection (Space)");
     loopButton.setTooltip("Loop");
     recordButton.setTooltip("Record");
 
-    for (auto* b : { &playButton, &loopButton, &recordButton, &toolsButton })
+    for (auto* b : { &playFromStartButton, &playButton, &loopButton, &recordButton, &toolsButton })
         b->setLookAndFeel(&toolbarLnF);
 
-    recordButton.onClick = [this] { toggleTransport(); };
-    playButton.onClick   = [this] { togglePlay(); };
-    loopButton.onClick   = [this] { document.loopEnabled = loopButton.getToggleState(); };
-    toolsButton.onClick  = [this] { showToolsMenu(); };
+    recordButton.onClick        = [this] { toggleTransport(); };
+    playButton.onClick          = [this] { togglePlay(); };
+    playFromStartButton.onClick = [this] { playFromStart(); };
+    loopButton.onClick          = [this] { document.loopEnabled = loopButton.getToggleState(); };
+    toolsButton.onClick         = [this] { showToolsMenu(); };
 
     applyTheme();
     document.changeBroadcaster.addChangeListener(this);
@@ -176,7 +179,7 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
 
 EditorToolbar::~EditorToolbar()
 {
-    for (auto* b : { &playButton, &loopButton, &recordButton, &toolsButton })
+    for (auto* b : { &playFromStartButton, &playButton, &loopButton, &recordButton, &toolsButton })
         b->setLookAndFeel(nullptr);   // detach before toolbarLnF is destroyed
     theme->removeChangeListener(this);
     document.changeBroadcaster.removeChangeListener(this);
@@ -187,10 +190,15 @@ void EditorToolbar::applyTheme()
     const auto& pal = theme->palette();
 
     // Play and Record are always filled (primary actions); Loop fills only when on;
-    // Tools stays outlined. A fully transparent buttonColourId is R3WRKLookAndFeel's cue
-    // to draw the outline style instead of a solid pill -- see drawButtonBackground().
+    // Tools and Play-from-start stay outlined -- the latter is a secondary/modifier
+    // action next to Play, not a primary one. A fully transparent buttonColourId is
+    // R3WRKLookAndFeel's cue to draw the outline style instead of a solid pill --
+    // see drawButtonBackground().
     playButton.setColour(juce::TextButton::buttonColourId, pal.accent);
     playButton.setColour(juce::TextButton::textColourOffId, pal.windowBg);
+
+    playFromStartButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+    playFromStartButton.setColour(juce::TextButton::textColourOffId, pal.screenText);
 
     // Loop/Tools are outlined and Play/Record are filled, but all four now sit on the dark
     // control band (paint() fills panelBg behind them), so their text -- like WaveformDisplay
@@ -240,6 +248,28 @@ void EditorToolbar::togglePlay()
     if (document.isRecording.load())    { processor.stopRecording(); autoSaveRecording(); }
     else if (document.isPlaying.load()) processor.stopPlayback();
     else                               processor.startPlayback();
+    updateTransportButtonText();
+}
+
+void EditorToolbar::playFromStart()
+{
+    if (document.isRecording.load())
+    {
+        processor.stopRecording();
+        autoSaveRecording();
+    }
+    else
+    {
+        if (document.isPlaying.load())
+            processor.stopPlayback();
+
+        // Force the playhead to sample 0 and (re)start -- startPlayback()/processBlock
+        // then snap it into whatever's actually playing (the selection, else the loop
+        // range, else the whole clip), so this always lands at the start of that region,
+        // not necessarily the document's literal first sample.
+        document.playhead = 0;
+        processor.startPlayback();
+    }
     updateTransportButtonText();
 }
 
@@ -492,6 +522,7 @@ void EditorToolbar::resized()
                          .withMargin(juce::FlexItem::Margin(0, (float) gap, 0, 0)));
     };
     // Left-grouped, matching the mockup: Play/Loop/Record/Tools together, time pinned right.
+    add(playFromStartButton, 28);
     add(playButton, 28);
     add(loopButton, 28);
     add(recordButton, 28);
