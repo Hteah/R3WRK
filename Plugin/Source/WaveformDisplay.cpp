@@ -873,15 +873,10 @@ void WaveformDisplay::mouseUp(const juce::MouseEvent& e)
     if (document.sliceModeEnabled)
     {
         const bool wasClick = e.getDistanceFromDragStart() < 4;
-        if (slicePressOnMarker)
-        {
-            if (wasClick && ! sliceDragMoved && sliceDragIndex >= 0)
-                document.removeSliceMarker(sliceDragIndex);   // click on a marker deletes it
-        }
-        else if (wasClick && ! sliceDragMoved)
-        {
-            playSliceAt(xToSample((float) e.x));              // click a slice body plays it
-        }
+        // A clean click on a marker does nothing now (drag to move, double-click a handle to
+        // delete). A clean click in a slice body plays that region.
+        if (! slicePressOnMarker && wasClick && ! sliceDragMoved)
+            playSliceAt(xToSample((float) e.x));
         sliceDragIndex = -1;
         slicePressOnMarker = false;
         return;
@@ -944,7 +939,7 @@ void WaveformDisplay::mouseMove(const juce::MouseEvent& e)
     if (document.sliceModeEnabled)
     {
         const bool overMarker = document.findSliceMarkerNear(xToSample((float) e.x), sliceHitTolerance()) >= 0;
-        setMouseCursor(overMarker ? juce::MouseCursor::LeftRightResizeCursor    // drag to move / click to delete
+        setMouseCursor(overMarker ? juce::MouseCursor::LeftRightResizeCursor    // drag to move / dbl-click a handle to delete
                                   : juce::MouseCursor::CrosshairCursor);         // double-click to place
         return;
     }
@@ -974,8 +969,18 @@ void WaveformDisplay::mouseDoubleClick(const juce::MouseEvent& e)
 {
     if (document.sliceModeEnabled)
     {
-        if (! slicePressOnMarker)                    // don't add on top of an existing marker
-            document.addSliceMarker(xToSample((float) e.x));
+        // Self-contained hit-test: JUCE fires mouseUp before mouseDoubleClick, and the slice
+        // mouseUp resets the press state, so re-derive from this event.
+        const int64_t sample = xToSample((float) e.x);
+        const int idx = document.findSliceMarkerNear(sample, sliceHitTolerance());
+        const bool onHandle = idx >= 0
+                           && ((float) e.y <= sliceHandleZonePx
+                               || (float) e.y >= (float) getHeight() - sliceHandleZonePx);
+        if (onHandle)
+            document.removeSliceMarker(idx);                 // double-click a top/bottom handle deletes
+        else if (idx < 0)
+            document.addSliceMarker(sample);                // double-click empty space adds
+        // double-click on the thin line (not a handle) does nothing
         return;
     }
 

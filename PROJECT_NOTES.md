@@ -1389,20 +1389,30 @@ each handler, ahead of the scrub check and the selection state machine):
   - `mouseDrag` on a marker calls `AudioDocument::moveSliceMarker(index, xToSample(x))`, which
     repositions + re-normalises and returns the marker's new index (drag keeps tracking it; if
     dragged exactly onto another marker the two collapse and it tracks the survivor);
-  - `mouseUp`: a clean click (`getDistanceFromDragStart() < 4`, no drag) on a marker deletes it;
-    a clean click in a slice *body* calls `playSliceAt()` -- sets the selection to that region,
-    drops the playhead at its start, and fires the new `onSlicePlay` callback
-    (`PluginEditor` -> `processor.startPlayback()`), which plays the region once; with no
-    markers it just plays from the click point;
-  - `mouseDoubleClick` anywhere-but-a-marker adds one (`slicePressOnMarker` from the preceding
-    `mouseDown` suppresses adding on top of an existing marker);
+  - `mouseUp`: a clean click (`getDistanceFromDragStart() < 4`, no drag) that did *not* land on
+    a marker calls `playSliceAt()` -- sets the selection to the clicked region, drops the
+    playhead at its start, and fires the new `onSlicePlay` callback (`PluginEditor` ->
+    `processor.startPlayback()`), which plays the region once; with no markers it just plays
+    from the click point. A clean click *on* a marker line does nothing (drag it, or
+    double-click its handle to delete);
+  - `mouseDoubleClick` (**handle-only delete**, per the user's follow-up: "deleting a slice
+    marker should only be done when double clicking the top and bottom of the marker, where
+    there is thicker chunks"): a double-click within `sliceHandleZonePx` (20px) of the top or
+    bottom edge *and* on a marker deletes that marker; a double-click that's not on any marker
+    adds one; a double-click on the thin middle of a marker line does nothing. This handler is
+    **self-contained** -- it re-runs the marker hit-test + handle-zone check from the event
+    rather than trusting state from `mouseDown`, because JUCE dispatches `mouseUp` (which
+    clears `sliceDragIndex` / `slicePressOnMarker`) *before* `mouseDoubleClick`
+    (`juce_Component.cpp` ~L2586 vs ~L2603);
   - `mouseMove` shows a left/right-resize cursor over a marker, a crosshair elsewhere.
 
-**Known rough edge (accepted for v1, flagged to the user):** a double-click's *first* click
-still runs the "play slice" path before `mouseDoubleClick` adds the marker, so a marker-add
-plays a blip of that slice. Fixing it cleanly needs a debounce timer (defer the play past the
-double-click window); left out unless it turns out to bother -- for an audition-while-you-slice
-workflow, a blip of the slice you're splitting is arguably fine feedback.
+**Known rough edge (accepted for v1, flagged to the user):** a double-click's *first* click,
+when it's not on a marker, runs the "play slice" path before `mouseDoubleClick` adds the
+marker, so a marker-add plays a blip of that slice. Fixing it cleanly needs a debounce timer
+(defer the play past the double-click window); left out unless it turns out to bother -- for an
+audition-while-you-slice workflow, a blip of the slice you're splitting is arguably fine
+feedback. (Deleting via a handle double-click has no such blip -- the click lands on a marker,
+so the play path is suppressed.)
 
 **Markers redrawn** to match the selection brackets' size (the "similar to the selection bars"
 ask): the same 2px vertical line + 5x14 rounded handle pill at top and bottom, but in
@@ -1417,8 +1427,9 @@ Export Octatrack Chain items are unchanged). New SmokeTest coverage for `moveSli
 
 **Not interactively verified** -- the button toggles, marker draw and mutual exclusion are
 visible in a screenshot (and the user's persisted 4-marker session renders in the new bracket
-style), but the actual double-click / drag / click-to-play feel is the user's to try, same as
-the export-to-hardware step. Smoke test passes; all four targets build clean.
+style), but the actual double-click / drag / click-to-play feel -- including the handle-only
+delete -- is the user's to try, same as the export-to-hardware step. Smoke test passes; all
+four targets build clean.
 
 ## Known gaps / natural next steps
 

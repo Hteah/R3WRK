@@ -162,8 +162,11 @@ private:
     static constexpr float scrubMaxDragPx  = 400.0f;  // distance from the anchor for full rate
 
     // Slice tool (document.sliceModeEnabled) -- mouseDown records which marker (if any) the
-    // press landed on; the drag moves it, a clean click on it deletes it, a clean click in a
-    // slice body plays that region, a double-click anywhere-but-a-marker adds one.
+    // press landed on. The drag moves that marker; a double-click on a marker's top/bottom
+    // handle pill deletes it (mouseDoubleClick re-derives the hit itself, since JUCE fires
+    // mouseUp -- which clears this state -- first); a double-click in empty space adds one;
+    // a clean click in a slice body plays that region.
+    static constexpr float sliceHandleZonePx = 20.0f;   // top/bottom band that counts as a handle
     int  sliceDragIndex = -1;
     bool sliceDragMoved = false;
     bool slicePressOnMarker = false;

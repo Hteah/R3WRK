@@ -242,8 +242,9 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     loopButton.setTooltip("Loop");
     scrubButton.setTooltip("Scrub -- press and drag left/right; how far you pull sets the "
                            "speed, like a tape deck's shuttle wheel");
-    sliceButton.setTooltip("Slice tool -- double-click to add a marker, click a marker to delete it, "
-                           "drag a marker to move it, click a slice to play it (Tools has the export)");
+    sliceButton.setTooltip("Slice tool -- double-click to add a marker, double-click a marker's top/bottom "
+                           "handle to delete it, drag a marker to move it, click a slice to play it "
+                           "(Tools has the export)");
     recordButton.setTooltip("Record");
     toolsButton.setTooltip("Tools");
     reverseButton.setTooltip("Reverse the selection (or the whole clip, if nothing's selected)");
