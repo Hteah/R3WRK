@@ -238,41 +238,67 @@ namespace
         g.fillEllipse(centre.x - dotR, centre.y - dotR, dotR * 2.0f, dotR * 2.0f);
     }
 
-    // Slice: a plain pair of scissors -- the universal "cut" glyph (a box-cutter was tried
-    // first and read as too many other things). Two finger rings on the left, two blades
-    // crossing at a pivot with the tips opening to the right, same line weight as the
-    // gear/reel/X icons. Built in nominal units, scaled to fill the button, then centred by
-    // its own bounds so nothing needs a hand-tuned offset.
+    // Slice: a pair of scissors on the diagonal -- two finger rings low, two filled blades
+    // opening upward in a narrow V, crossing at the screw -- traced from a reference icon the
+    // user supplied. Blades are filled tapered triangles; shanks + rings are stroked. Laid out
+    // directly in its final orientation, then scaled to fill the button and centred by its own
+    // bounds (no hand-tuned offsets).
     void drawSliceIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
     {
-        const float st = juce::jmax(1.5f, bounds.getHeight() * 0.078f);   // stroke weight
+        const float st = juce::jmax(1.6f, bounds.getHeight() * 0.065f);   // shank / ring weight
         const juce::PathStrokeType stroke (st, juce::PathStrokeType::curved,
                                                juce::PathStrokeType::rounded);
 
-        const float ringR = 3.0f;
-        const juce::Point<float> A     { -4.6f, -3.6f };      // upper finger ring
-        const juce::Point<float> B     { -4.6f,  3.6f };      // lower finger ring
-        const juce::Point<float> pivot {  1.0f,  0.0f };      // where the blades cross
-        const juce::Point<float> tU    {  7.2f, -2.6f };      // upper blade tip
-        const juce::Point<float> tL    {  7.2f,  2.6f };      // lower blade tip
+        const float ringR = 3.3f;
+        const juce::Point<float> P   { -1.0f,  1.0f };        // the screw -- blades + shanks cross
+        const juce::Point<float> aT  { -2.0f, -7.0f };        // blade A tip -- points up
+        const juce::Point<float> bT  {  5.0f, -5.0f };        // blade B tip -- points up-right
+        const juce::Point<float> rA  { -5.5f,  4.5f };        // ring feeding blade B (crosses)
+        const juce::Point<float> rB  {  0.5f,  6.0f };        // ring feeding blade A (crosses)
 
-        juce::Path s;
-        s.addEllipse (A.x - ringR, A.y - ringR, ringR * 2.0f, ringR * 2.0f);
-        s.addEllipse (B.x - ringR, B.y - ringR, ringR * 2.0f, ringR * 2.0f);
-        s.startNewSubPath (A); s.lineTo (pivot); s.lineTo (tU);
-        s.startNewSubPath (B); s.lineTo (pivot); s.lineTo (tL);
+        // Filled tapered blade: a triangle from a short fat base just behind the screw out to
+        // the tip.
+        auto blade = [&] (juce::Point<float> tip)
+        {
+            const auto d = tip - P;
+            const float len = juce::jmax (0.001f, d.getDistanceFromOrigin());
+            const juce::Point<float> dir  { d.x / len, d.y / len };
+            const juce::Point<float> perp { -dir.y, dir.x };
+            const float halfBase = 2.1f;
+            const auto base = P - dir * 1.0f;
+            juce::Path p;
+            p.addTriangle (base + perp * halfBase, base - perp * halfBase, tip);
+            return p;
+        };
 
-        const auto target = bounds.reduced (bounds.getHeight() * 0.14f);
-        auto b = s.getBounds();
-        const float k = juce::jmin (target.getWidth()  / b.getWidth(),
-                                    target.getHeight() / b.getHeight());
-        s.applyTransform (juce::AffineTransform::scale (k, k));
-        b = s.getBounds();
-        s.applyTransform (juce::AffineTransform::translation (
-            bounds.getCentreX() - b.getCentreX(), bounds.getCentreY() - b.getCentreY()));
+        juce::Path blades;
+        blades.addPath (blade (aT));
+        blades.addPath (blade (bT));
+
+        juce::Path lines;                                     // shanks + finger rings
+        lines.addEllipse (rA.x - ringR, rA.y - ringR, ringR * 2.0f, ringR * 2.0f);
+        lines.addEllipse (rB.x - ringR, rB.y - ringR, ringR * 2.0f, ringR * 2.0f);
+        lines.startNewSubPath (rA); lines.lineTo (P);
+        lines.startNewSubPath (rB); lines.lineTo (P);
+
+        auto unionOf = [] (juce::Rectangle<float> r1, juce::Rectangle<float> r2) { return r1.getUnion (r2); };
+        const auto target = bounds.reduced (bounds.getHeight() * 0.17f);
+        auto bb = unionOf (blades.getBounds(), lines.getBounds());
+        const float k = juce::jmin (target.getWidth()  / bb.getWidth(),
+                                    target.getHeight() / bb.getHeight());
+        const auto sc = juce::AffineTransform::scale (k, k);
+        blades.applyTransform (sc);
+        lines.applyTransform (sc);
+
+        bb = unionOf (blades.getBounds(), lines.getBounds());
+        const auto tr = juce::AffineTransform::translation (
+            bounds.getCentreX() - bb.getCentreX(), bounds.getCentreY() - bb.getCentreY());
+        blades.applyTransform (tr);
+        lines.applyTransform (tr);
 
         g.setColour (ink);
-        g.strokePath (s, stroke);
+        g.fillPath (blades);
+        g.strokePath (lines, stroke);
     }
 }
 
