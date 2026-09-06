@@ -65,6 +65,12 @@ public:
     void zoomIn();
     void zoomOut();
 
+    // Left/Right arrow keys (see PluginEditor::keyPressed). dir = -1 back / +1 forward.
+    // Scrolls the view by a step; while stopped, the playhead rides along by the same amount
+    // (so the red line stays put on screen while the waveform slides, and still moves when the
+    // view is fully zoomed out). bigStep = Shift held -> half a screen instead of ~1/20.
+    void keyboardScroll(int dir, bool bigStep);
+
     int64_t getViewStart() const { return viewStart; }
     int64_t getViewEnd() const { return viewEnd; }
 

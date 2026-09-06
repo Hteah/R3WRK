@@ -117,6 +117,14 @@ bool R3WRKAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
         { waveformDisplay.zoomIn(); return true; }
     if (key == KP('-', cmd, 0))
         { waveformDisplay.zoomOut(); return true; }
+
+    // Left/Right arrows scroll through the waveform (the playhead -- the red line -- rides along
+    // while stopped). Shift = half a screen per press instead of ~1/20. Auto-repeat on hold.
+    const auto shift = juce::ModifierKeys::shiftModifier;
+    if (key == KP(juce::KeyPress::leftKey))            { waveformDisplay.keyboardScroll(-1, false); return true; }
+    if (key == KP(juce::KeyPress::rightKey))           { waveformDisplay.keyboardScroll(+1, false); return true; }
+    if (key == KP(juce::KeyPress::leftKey,  shift, 0)) { waveformDisplay.keyboardScroll(-1, true);  return true; }
+    if (key == KP(juce::KeyPress::rightKey, shift, 0)) { waveformDisplay.keyboardScroll(+1, true);  return true; }
     return false;
 }
 

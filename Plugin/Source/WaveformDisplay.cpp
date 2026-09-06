@@ -204,6 +204,57 @@ static constexpr double keyboardZoomStep = 0.9;
 void WaveformDisplay::zoomIn()  { zoomToward(keyboardZoomStep,       keyboardZoomAnchorX()); }
 void WaveformDisplay::zoomOut() { zoomToward(1.0 / keyboardZoomStep, keyboardZoomAnchorX()); }
 
+void WaveformDisplay::keyboardScroll(int dir, bool bigStep)
+{
+    const int64_t n = document.getNumSamples();
+    if (n <= 0 || dir == 0)
+        return;
+
+    // Step is a fraction of what's actually visible, so it feels the same at any zoom. The
+    // raw span across the width is (viewEnd-viewStart)/timeScale (sampleToX divides s/px by it).
+    const double  timeScale  = juce::jmax(0.0001, document.getTimeScale());
+    const int64_t span       = viewEnd - viewStart;
+    const int64_t visibleRaw = (int64_t) ((double) span / timeScale);
+    const int64_t delta = (int64_t) dir * juce::jmax((int64_t) 1,
+                              (int64_t) ((double) visibleRaw * (bigStep ? 0.5 : 1.0 / 20.0)));
+
+    bool moved = false;
+
+    // Scroll the view (only meaningful when zoomed in past the whole clip).
+    const bool canScroll = span > 0 && span < maxViewSpan();
+    if (canScroll)
+    {
+        const int64_t maxStart = juce::jmax((int64_t) 0, maxViewSpan() - span);
+        const int64_t newStart = juce::jlimit((int64_t) 0, maxStart, viewStart + delta);
+        if (newStart != viewStart)
+        {
+            viewStart = newStart;
+            viewEnd   = newStart + span;
+            moved = true;
+        }
+    }
+
+    // While stopped, the playhead moves with the view (stays put on screen when scrolling,
+    // and still moves when zoomed all the way out). During playback it's driven by the audio
+    // thread, so leave it alone -- the arrows just pan the view then.
+    if (! document.isPlaying.load())
+    {
+        const int64_t ph = juce::jlimit((int64_t) 0, n, document.playhead.load() + delta);
+        if (ph != document.playhead.load())
+        {
+            document.playhead = ph;
+            moved = true;
+        }
+    }
+
+    if (moved)
+    {
+        if (canScroll)
+            rebuildWaveformPath();
+        document.notifyChanged();
+    }
+}
+
 float WaveformDisplay::currentMouseX() const
 {
     return juce::jlimit(0.0f, (float) juce::jmax(1, getWidth()), (float) getMouseXYRelative().x);
