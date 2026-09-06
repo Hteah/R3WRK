@@ -168,10 +168,11 @@ private:
 
     // Slice tool (document.sliceModeEnabled). mouseDown records which marker (if any) the press
     // landed on and whether it was a *plain left* click (sliceLeftPress). Then:
-    //   plain left click (no drag)      -> add a marker at the click
-    //   plain left drag on a marker     -> move it
-    //   double plain-left-click on a    -> delete that marker (the only delete)
+    //   double plain-left-click, empty  -> add a marker at the click (drag from the 2nd press
+    //                                      to nudge it)
+    //   double plain-left-click on a    -> delete that marker
     //     marker's top/bottom handle
+    //   plain left drag on a marker     -> move it
     //   any other button (right / ctrl) -> play the slice under the click
     // Gating on isLeftButtonDown() rather than !isPopupMenu() because some mice/trackpads don't
     // reliably set the popup flag for a right-click, which used to let a right double-click hit

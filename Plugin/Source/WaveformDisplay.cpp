@@ -846,14 +846,25 @@ void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
         slicePressOnMarker = sliceDragIndex >= 0;
         sliceLeftPress     = e.mods.isLeftButtonDown() && ! e.mods.isPopupMenu();
 
-        // Double plain-left-click on a marker's top/bottom handle band -- the only way to delete.
-        if (sliceLeftPress && e.getNumberOfClicks() >= 2 && sliceDragIndex >= 0
-            && ((float) e.y <= sliceHandleZonePx
-                || (float) e.y >= (float) getHeight() - sliceHandleZonePx))
+        // A plain-left double-click: on a marker's top/bottom handle band -> delete it;
+        // on empty space -> add a marker there (and let a continued drag nudge it).
+        if (sliceLeftPress && e.getNumberOfClicks() >= 2)
         {
-            document.removeSliceMarker(sliceDragIndex);
-            sliceDragIndex = -1;
-            slicePressOnMarker = false;
+            const bool onHandle = (float) e.y <= sliceHandleZonePx
+                               || (float) e.y >= (float) getHeight() - sliceHandleZonePx;
+
+            if (sliceDragIndex >= 0 && onHandle)
+            {
+                document.removeSliceMarker(sliceDragIndex);
+                sliceDragIndex = -1;
+                slicePressOnMarker = false;
+            }
+            else if (sliceDragIndex < 0)
+            {
+                document.addSliceMarker(xToSample((float) e.x));
+                sliceDragIndex     = sliceMarkerAtPixel((float) e.x);   // grab it for an immediate drag
+                slicePressOnMarker = sliceDragIndex >= 0;
+            }
         }
         return;
     }
@@ -1007,13 +1018,10 @@ void WaveformDisplay::mouseUp(const juce::MouseEvent& e)
 
         // e.getNumberOfClicks() >= 2 -> the 2nd release of a double-click; the action already
         // happened on the 1st release (or, for the left double, in mouseDown), so skip it.
-        if (wasClick && e.getNumberOfClicks() < 2)
-        {
-            if (! sliceLeftPress)
-                playSliceAt(xToSample((float) e.x));              // right / ctrl click plays the slice
-            else if (! slicePressOnMarker)
-                document.addSliceMarker(xToSample((float) e.x));  // plain left click adds a marker
-        }
+        // Right / ctrl single-click plays the slice. Add + delete are both double-left-clicks
+        // (handled in mouseDown); a plain left single-click does nothing.
+        if (wasClick && e.getNumberOfClicks() < 2 && ! sliceLeftPress)
+            playSliceAt(xToSample((float) e.x));
 
         sliceDragIndex = -1;
         slicePressOnMarker = false;
