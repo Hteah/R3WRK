@@ -245,11 +245,11 @@ namespace
     // so it leans like the reference. Stroked at the same weight as the gear/reel/X icons.
     void drawSliceIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
     {
-        const auto  area = bounds.reduced(bounds.getHeight() * 0.08f);
+        const auto  area = bounds.reduced(bounds.getHeight() * 0.06f);
         const float u    = area.getHeight() * 0.5f;           // half-height working unit
         // Nudge the anchor right + up a hair so the leaned blade doesn't crowd the left edge.
-        const juce::Point<float> cc { area.getCentreX() + 0.09f * u, area.getCentreY() - 0.05f * u };
-        const float st   = juce::jmax(1.4f, u * 0.10f);       // stroke weight
+        const juce::Point<float> cc { area.getCentreX() + 0.16f * u, area.getCentreY() - 0.02f * u };
+        const float st   = juce::jmax(1.5f, u * 0.11f);       // stroke weight
         const juce::PathStrokeType stroke (st, juce::PathStrokeType::curved,
                                                juce::PathStrokeType::rounded);
         auto P = [cc] (float dx, float dy) { return juce::Point<float> (cc.x + dx, cc.y + dy); };
@@ -258,19 +258,19 @@ namespace
             return juce::Point<float> (p.x + (q.x - p.x) * t, p.y + (q.y - p.y) * t);
         };
 
-        const float hw = 0.24f * u;                           // handle half-width
-        const float topY = -0.16f * u;                        // handle top / bottom
-        const float botY =  0.62f * u;
+        const float hw = 0.30f * u;                           // handle half-width
+        const float topY = -0.20f * u;                        // handle top / bottom
+        const float botY =  0.66f * u;
 
         juce::Path knife;
 
         // Handle: a capsule (rounded bottom), with a short inner slot line = the blade channel.
         knife.addRoundedRectangle(cc.x - hw, cc.y + topY, hw * 2.0f, botY - topY, hw);
-        knife.startNewSubPath(P(-hw * 0.18f, topY + 0.10f * u));
-        knife.lineTo          (P(-hw * 0.18f, 0.34f * u));
+        knife.startNewSubPath(P(-hw * 0.16f, topY + 0.12f * u));
+        knife.lineTo          (P(-hw * 0.16f, 0.40f * u));
 
         // Thumb-slider tab poking out the right side, just below centre.
-        const float nubW = 0.13f * u, nubH = 0.24f * u;
+        const float nubW = 0.16f * u, nubH = 0.27f * u;
         knife.addRoundedRectangle(cc.x + hw - st * 0.5f, cc.y + 0.06f * u - nubH * 0.5f,
                                   nubW + st * 0.5f, nubH, juce::jmax(1.0f, nubW * 0.35f));
 
@@ -278,8 +278,8 @@ namespace
         // a point -- the diagonal cutting edge.
         const auto bl  = P(-hw,          topY);               // sits on the handle's top edge
         const auto br  = P( hw,          topY);
-        const auto bkT = P( hw,         -0.60f * u);          // blade back, tall
-        const auto tip = P(-hw,         -0.42f * u);          // blade tip
+        const auto bkT = P( hw,         -0.74f * u);          // blade back, tall
+        const auto tip = P(-hw * 0.9f,  -0.50f * u);          // blade tip
         knife.startNewSubPath(bl);
         knife.lineTo(br);
         knife.lineTo(bkT);
@@ -290,7 +290,7 @@ namespace
         knife.startNewSubPath(lerp(br, bkT, 0.30f));
         knife.lineTo          (lerp(bl, tip, 0.30f));
 
-        knife.applyTransform(juce::AffineTransform::rotation(-0.07f, cc.x, cc.y));
+        knife.applyTransform(juce::AffineTransform::rotation(-0.05f, cc.x, cc.y));
 
         g.setColour(ink);
         g.strokePath(knife, stroke);
