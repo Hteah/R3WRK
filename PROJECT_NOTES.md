@@ -1532,6 +1532,18 @@ zoomed-in preview drew as blocks:**
 - Worker thread back to `Priority::normal` (the crackle-fix `low` was pointless once the pass
   only runs while stopped, and it dragged on a busy machine).
 
+**Then removed entirely (`42d438d`).** A 16 s clip at 50x is ~14 min of output audio to
+synthesize -- minutes of wait even with the fast engine -- and the peak cache had to stay
+coarse enough that a zoomed-in view drew as terraced blocks. The stretched view is now just
+the stored waveform rescaled to the new duration (`samplesPerPixel` already folds in
+`getTimeScale()`), plus a **transient smear**: a box-blur of the per-pixel min/max envelope in
+`rebuildWaveformPath()` whose radius grows with `|log2(timeScale)|` (0 at identity, up to 8 px
+by 50x) -- so a stretched view rounds sharp hits off instead of only widening them, instant at
+any ratio, with real sample detail on zoom-in. Gone: `WaveformStretchPreview.{h,cpp}`, its
+CMake + SmokeTest entries, the "Rendering stretch" spinner, `TimeStretchEngine`'s `fastPreview`
+flag. Kept: the O(n^2) output-growth fix in `TimeStretchEngine` (destructive Apply still uses
+it) and the realtime ratio smoothing in `PluginProcessor` (the crackle fix).
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).
