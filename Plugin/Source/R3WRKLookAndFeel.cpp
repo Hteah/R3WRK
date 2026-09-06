@@ -238,28 +238,62 @@ namespace
         g.fillEllipse(centre.x - dotR, centre.y - dotR, dotR * 2.0f, dotR * 2.0f);
     }
 
-    // Slice: a tiny waveform (four ascending/descending bars) with a bold vertical cut line
-    // straight through it -- reads as "divide the waveform here". On-brand for an app that's
-    // all about the waveform, rather than a generic scissors/razor glyph.
+    // Slice: a utility / box-cutter knife, line-art style, traced from a reference icon the
+    // user supplied -- a hollow capsule handle (outer + inner outline = the blade channel), a
+    // small thumb-slider tab on the right, and a segmented blade angling off the top toward the
+    // upper left. Drawn upright in a local frame, then rotated a few degrees counter-clockwise
+    // so it leans like the reference. Stroked at the same weight as the gear/reel/X icons.
     void drawSliceIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
     {
-        auto area = bounds.reduced(bounds.getHeight() * 0.28f);
-        g.setColour(ink);
-
-        const float barW = area.getWidth() * 0.16f;
-        const float gap  = (area.getWidth() - barW * 4.0f) / 3.0f;
-        const float heights[4] = { 0.55f, 1.0f, 0.4f, 0.8f };
-        float x = area.getX();
-        for (float hf : heights)
+        const auto  area = bounds.reduced(bounds.getHeight() * 0.08f);
+        const float u    = area.getHeight() * 0.5f;           // half-height working unit
+        // Nudge the anchor right + up a hair so the leaned blade doesn't crowd the left edge.
+        const juce::Point<float> cc { area.getCentreX() + 0.09f * u, area.getCentreY() - 0.05f * u };
+        const float st   = juce::jmax(1.4f, u * 0.10f);       // stroke weight
+        const juce::PathStrokeType stroke (st, juce::PathStrokeType::curved,
+                                               juce::PathStrokeType::rounded);
+        auto P = [cc] (float dx, float dy) { return juce::Point<float> (cc.x + dx, cc.y + dy); };
+        auto lerp = [] (juce::Point<float> p, juce::Point<float> q, float t)
         {
-            const float barH = area.getHeight() * hf;
-            g.fillRoundedRectangle(x, area.getCentreY() - barH * 0.5f, barW, barH, barW * 0.35f);
-            x += barW + gap;
-        }
+            return juce::Point<float> (p.x + (q.x - p.x) * t, p.y + (q.y - p.y) * t);
+        };
 
-        const float cutW = juce::jmax(1.8f, area.getWidth() * 0.10f);
-        const float pad  = bounds.getHeight() * 0.10f;
-        g.fillRect(area.getCentreX() - cutW * 0.5f, bounds.getY() + pad, cutW, bounds.getHeight() - pad * 2.0f);
+        const float hw = 0.24f * u;                           // handle half-width
+        const float topY = -0.16f * u;                        // handle top / bottom
+        const float botY =  0.62f * u;
+
+        juce::Path knife;
+
+        // Handle: a capsule (rounded bottom), with a short inner slot line = the blade channel.
+        knife.addRoundedRectangle(cc.x - hw, cc.y + topY, hw * 2.0f, botY - topY, hw);
+        knife.startNewSubPath(P(-hw * 0.18f, topY + 0.10f * u));
+        knife.lineTo          (P(-hw * 0.18f, 0.34f * u));
+
+        // Thumb-slider tab poking out the right side, just below centre.
+        const float nubW = 0.13f * u, nubH = 0.24f * u;
+        knife.addRoundedRectangle(cc.x + hw - st * 0.5f, cc.y + 0.06f * u - nubH * 0.5f,
+                                  nubW + st * 0.5f, nubH, juce::jmax(1.0f, nubW * 0.35f));
+
+        // Blade: a slim quad continuing up off the handle, its outer top corner sliced back to
+        // a point -- the diagonal cutting edge.
+        const auto bl  = P(-hw,          topY);               // sits on the handle's top edge
+        const auto br  = P( hw,          topY);
+        const auto bkT = P( hw,         -0.60f * u);          // blade back, tall
+        const auto tip = P(-hw,         -0.42f * u);          // blade tip
+        knife.startNewSubPath(bl);
+        knife.lineTo(br);
+        knife.lineTo(bkT);
+        knife.lineTo(tip);
+        knife.closeSubPath();
+
+        // One snap-line across the blade, parallel to the cutting edge.
+        knife.startNewSubPath(lerp(br, bkT, 0.30f));
+        knife.lineTo          (lerp(bl, tip, 0.30f));
+
+        knife.applyTransform(juce::AffineTransform::rotation(-0.07f, cc.x, cc.y));
+
+        g.setColour(ink);
+        g.strokePath(knife, stroke);
     }
 }
 

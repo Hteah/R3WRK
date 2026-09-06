@@ -1375,9 +1375,12 @@ click adds a slice marker, a click after or before plays that slice, a left clic
 marker deletes the slice, clicking and dragging moves the slice marker. I'd also like the slice
 markers to be similar size to the selection bars."
 
-**New `sliceButton`** (`R3WRKLookAndFeel::iconSlice` -- a little waveform of four bars with a
-bold vertical cut line through it, on-brand for a waveform app rather than a generic scissors),
-sits right after Scrub in the toolbar, same toggling-tool styling as Loop/Scrub (outlined off,
+**New `sliceButton`** (`R3WRKLookAndFeel::iconSlice` -- originally a little four-bar waveform
+with a cut line; **replaced at the user's request with a box-cutter / utility-knife line icon**
+matching a reference PNG they supplied: `drawSliceIcon` strokes a capsule handle with an inner
+U-slot, a thumb-slider tab, and a slim chamfered blade with one snap-line, built in a local
+frame and leaned ~4deg CCW, then screenshot-tuned for centring the same way as the gear/reel
+icons), sits right after Scrub in the toolbar, same toggling-tool styling as Loop/Scrub (outlined off,
 accent-filled on), disabled while recording. `AudioDocument::sliceModeEnabled` (plain bool,
 message-thread only -- the audio thread still never touches slices; "play slice" just sets the
 selection + normal playback). **Mutually exclusive with Scrub** -- turning either on turns the
