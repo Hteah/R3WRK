@@ -174,7 +174,7 @@ private:
     //   double-click on a marker's  -> delete that marker (the only delete)
     //     top/bottom handle band
     static constexpr float sliceHandleZonePx = 20.0f;   // top/bottom band that counts as a handle
-    static constexpr float sliceMarkerHitPx  = 7.0f;    // horizontal grab distance to a marker line
+    static constexpr float sliceMarkerHitPx  = 10.0f;   // horizontal grab distance to a marker line
     int  sliceDragIndex = -1;
     bool sliceDragMoved = false;
     bool slicePressOnMarker = false;
