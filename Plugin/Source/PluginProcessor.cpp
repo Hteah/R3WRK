@@ -455,11 +455,10 @@ void R3WRKAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     for (int ch = 0; ch < buf.getNumChannels(); ++ch)
         out.write(buf.getReadPointer(ch), (size_t) buf.getNumSamples() * sizeof(float));
 
-    // Slice markers last, after the (variable-length) audio -- count then each int64.
-    const auto& marks = document.getSliceMarkers();
-    out.writeInt((int) marks.size());
-    for (int64_t m : marks)
-        out.writeInt64(m);
+    // Slice markers are deliberately NOT persisted -- they live only in AudioDocument for the
+    // life of this plugin instance (per the user: "save for that session, not in permanent
+    // memory"). Older state blobs may still carry a trailing marker list here; setStateInformation
+    // just stops reading after the audio, so those extra bytes are harmless.
 }
 
 void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
@@ -492,15 +491,8 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     for (int ch = 0; ch < numCh; ++ch)
         in.read(loaded.getWritePointer(ch), (int) ((size_t) numSamples * sizeof(float)));
 
-    // Slice markers trail the audio; tolerate an older/shorter blob that doesn't have them.
-    std::vector<int64_t> markers;
-    if (in.getNumBytesRemaining() >= 4)
-    {
-        const int mc = in.readInt();
-        if (mc >= 0 && mc <= 4096 && in.getNumBytesRemaining() >= (int64_t) mc * 8)
-            for (int i = 0; i < mc; ++i)
-                markers.push_back(in.readInt64());
-    }
+    // Slice markers are not restored from state -- they're session-only (see getStateInformation).
+    // Any trailing marker bytes an older blob wrote are simply left unread.
 
     document.newEmptyDocument(numCh, sr);
     document.beginChange();
@@ -515,9 +507,7 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     document.playbackStretch.store(juce::jlimit(AudioDocument::kMinStretch, AudioDocument::kMaxStretch, str > 0.0 ? str : 1.0));
     document.autoRecordThresholdDb.store(juce::jlimit(-60.0, 0.0, thresh));
 
-    document.clearSliceMarkers();
-    for (int64_t m : markers)
-        document.addSliceMarker(m);   // each call re-normalises against the loaded length
+    document.clearSliceMarkers();   // session-only; a restored document starts with no markers
 
     document.markAsOriginal();   // the restored session is the new "Revert to Original" baseline
 }

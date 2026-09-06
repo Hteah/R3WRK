@@ -1319,9 +1319,11 @@ their hardware sampler.
 (there's no slice *playback*, the audio thread never touches them), kept sorted +
 de-duplicated + strictly inside `(0, getNumSamples())` by `normaliseSliceMarkers()`, which runs
 after every add. `getSliceRegions()` turns k markers into the k+1 half-open ranges between `0`,
-the markers, and the clip end (empty when there are no markers). Persisted in plugin state
+the markers, and the clip end (empty when there are no markers). ~~Persisted in plugin state
 (state tag bumped `'R3W4'` -> `'R3W5'`), written *after* the variable-length audio so an older
-blob without them still loads. **Deliberately not in the undo snapshot** -- and any edit that
+blob without them still loads.~~ **Superseded a few messages later** -- markers are now
+*session-only*, never written to or read from plugin state (see the "Slice tool (redesign)"
+section); the `'R3W5'` tag stayed. **Deliberately not in the undo snapshot** -- and any edit that
 changes the sample length (trim/cut/paste/stretch/...) clears them, since their absolute
 positions would no longer line up with the audio (see `restoreSnapshot()` comparing old vs new
 length). Non-length-changing edits (amplify/normalize/fade/reverse/silence) keep them. `Clear`
@@ -1425,11 +1427,23 @@ before. "Clear all" moved to a new Tools ▾ -> "Clear Slice Markers" item (the 
 Export Octatrack Chain items are unchanged). New SmokeTest coverage for `moveSliceMarker`
 (reposition / reorder past a neighbour / merge onto another).
 
+**Markers only exist while the Slice tool is on** -- `WaveformDisplay::paint()` draws them
+inside an `if (document.sliceModeEnabled)` block, so turning the button off hides every marker
+and (the mouse handlers were already gated) hands the waveform straight back to normal editing.
+The markers themselves stay in `AudioDocument::sliceMarkers` and come back the instant the tool
+is re-enabled.
+
+**Markers are session-only, never persisted** (user: "save for that session, not in permanent
+memory"). `PluginProcessor::get/setStateInformation` no longer write or read the marker list --
+they live purely in `AudioDocument` for the life of the plugin instance, gone on reload / DAW
+project save / standalone relaunch. `kStateMagic` stays `'R3W5'` (not reverted) so a state blob
+already written with a trailing marker list still loads -- `setStateInformation` just stops
+reading after the audio and ignores the extra bytes.
+
 **Not interactively verified** -- the button toggles, marker draw and mutual exclusion are
-visible in a screenshot (and the user's persisted 4-marker session renders in the new bracket
-style), but the actual double-click / drag / click-to-play feel -- including the handle-only
-delete -- is the user's to try, same as the export-to-hardware step. Smoke test passes; all
-four targets build clean.
+visible in a screenshot, but the actual double-click / drag / click-to-play feel -- including
+the handle-only delete -- is the user's to try, same as the export-to-hardware step. Smoke test
+passes; all four targets build clean.
 
 ## Known gaps / natural next steps
 
