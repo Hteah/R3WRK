@@ -1,4 +1,7 @@
 #include "PluginEditor.h"
+#if JUCE_MAC
+ #include "StandaloneWindowShape.h"
+#endif
 
 R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
     : AudioProcessorEditor(&p),
@@ -69,6 +72,20 @@ void R3WRKAudioProcessorEditor::paint(juce::Graphics& g)
         g.setColour(theme->palette().accent);
         g.drawRect(getLocalBounds(), 3);
     }
+}
+
+void R3WRKAudioProcessorEditor::mouseDown(const juce::MouseEvent& e)
+{
+   #if JUCE_MAC
+    // Standalone/macOS: the native title-bar strip is hidden, so let the reserved band at the
+    // top of our own UI (where the traffic lights float) drag the whole window, like grabbing
+    // a title bar. Everywhere else the child components handle their own clicks and never
+    // reach here.
+    if (standaloneWindow && e.position.y < (float) kMacTrafficLightInset)
+        r3wrkBeginWindowDrag(this);
+   #else
+    juce::ignoreUnused(e);
+   #endif
 }
 
 void R3WRKAudioProcessorEditor::resized()

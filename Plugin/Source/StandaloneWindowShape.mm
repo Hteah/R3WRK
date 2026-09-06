@@ -47,4 +47,21 @@ void r3wrkApplyRoundedWindowCorners (void* windowPtr, float cornerRadiusPx)
     view.layer.cornerRadius = (CGFloat) cornerRadiusPx;
     view.layer.masksToBounds = YES;
 }
+
+void r3wrkBeginWindowDrag (void* componentPtr)
+{
+    auto* comp = static_cast<juce::Component*> (componentPtr);
+    if (comp == nullptr)
+        return;
+
+    auto* peer = comp->getPeer();
+    if (peer == nullptr)
+        return;
+
+    NSView* view = (NSView*) peer->getNativeHandle();
+    NSWindow* nsWindow = view.window;
+    NSEvent* ev = NSApp.currentEvent;
+    if (nsWindow != nil && ev != nil)
+        [nsWindow performWindowDragWithEvent: ev];   // AppKit takes over the move loop
+}
 #endif

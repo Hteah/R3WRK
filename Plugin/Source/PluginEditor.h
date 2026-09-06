@@ -20,6 +20,7 @@ public:
     void paint(juce::Graphics&) override;
     void resized() override;
     bool keyPressed(const juce::KeyPress&) override;
+    void mouseDown(const juce::MouseEvent&) override;   // drag the window by the top inset (Standalone/macOS)
 
     // Drag a sample in from Finder (or a DAW's browser) and drop it anywhere on the window to
     // load it, same as Tools ▾ -> "Open…" -- covers the whole editor rather than just the

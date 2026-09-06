@@ -28,4 +28,11 @@
 // there's no such ambient nesting.
 #if JUCE_MAC
 extern "C" void r3wrkApplyRoundedWindowCorners (void* window, float cornerRadiusPx);
+
+// The title-bar strip is hidden, so there's nothing to grab to move the window and every
+// pixel of the window belongs to a JUCE component (so movableByWindowBackground never gets a
+// look-in). Call this from a component's mouseDown to hand the drag to AppKit -- it runs the
+// native window-move loop off the event that's in flight. `component` is any juce::Component
+// with a live peer in the window you want to move.
+extern "C" void r3wrkBeginWindowDrag (void* component);
 #endif
