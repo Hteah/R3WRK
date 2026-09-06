@@ -846,21 +846,19 @@ void EditorToolbar::resized()
         fb.items.add(juce::FlexItem(c).withWidth((float) w).withMinWidth(22.0f)
                          .withMargin(juce::FlexItem::Margin(0, (float) gap, 0, 0)));
     };
-    // Left-grouped, matching the mockup: Play/Loop/Record/Tools together, time pinned right.
-    // Auto-Record sits right after Record (a Record modifier, at the user's request); Scrub/
-    // Reverse/Clear sit last, at the right-hand end of the button cluster -- round like every
-    // other icon button here (the reel-hub icon reads better in a circle than the earlier
-    // rectangular cassette-body version did).
+    // Order set by the user: transport (Play-from-start, Play) -> record (Record, Auto-Record)
+    // -> Loop -> waveform tools (Scrub, Reverse, Slice, Follow) -> Tools menu -> Clear, with the
+    // time readout pinned right. All round icon buttons.
     add(playFromStartButton, 28);
     add(playButton, 28);
-    add(loopButton, 28);
     add(recordButton, 28);
     add(autoRecordButton, 28);
-    add(toolsButton, 28);
+    add(loopButton, 28);
     add(scrubButton, 28);
+    add(reverseButton, 28);
     add(sliceButton, 28);
     add(followButton, 28);
-    add(reverseButton, 28);
+    add(toolsButton, 28);
     add(clearButton, 28);
     fb.items.add(juce::FlexItem().withFlex(1.0f));
     add(timeLabel, 150);
