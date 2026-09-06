@@ -754,7 +754,10 @@ void WaveformDisplay::paint(juce::Graphics& g)
     paintSelectionPreview(g);
 
     // Selection: a wash, plus a bracket at each edge — a 2 px line with a small handle pill
-    // at top and bottom (same as Sieve's editor).
+    // at top and bottom (same as Sieve's editor). In the Slice tool the brackets are
+    // suppressed: a right-click sets a selection spanning the audition slice, and its blue
+    // edges are drawn identically to an (orange) slice marker -- landing right on one -- which
+    // reads as "the marker turned blue and won't delete". Just the wash there.
     if (document.hasSelection())
     {
         const juce::Colour accent = pal.accent;
@@ -765,18 +768,19 @@ void WaveformDisplay::paint(juce::Graphics& g)
         g.setColour(accent.withAlpha(0.16f));
         g.fillRect(juce::Rectangle<float>(x0, 0.0f, juce::jmax(1.0f, x1 - x0), h));
 
-        for (float x : { x0, x1 })
-        {
-            if (x < -2.0f || x > (float) getWidth() + 2.0f)
-                continue;
-            g.setColour(accent.withAlpha(0.9f));
-            g.fillRect(juce::Rectangle<float>(x - 1.0f, 0.0f, 2.0f, h));
+        if (! document.sliceModeEnabled)
+            for (float x : { x0, x1 })
+            {
+                if (x < -2.0f || x > (float) getWidth() + 2.0f)
+                    continue;
+                g.setColour(accent.withAlpha(0.9f));
+                g.fillRect(juce::Rectangle<float>(x - 1.0f, 0.0f, 2.0f, h));
 
-            constexpr float hw = 5.0f, hh = 14.0f;
-            g.setColour(accent);
-            for (float cy : { hh * 0.5f + 1.0f, h - hh * 0.5f - 1.0f })
-                g.fillRoundedRectangle(x - hw * 0.5f, cy - hh * 0.5f, hw, hh, 2.0f);
-        }
+                constexpr float hw = 5.0f, hh = 14.0f;
+                g.setColour(accent);
+                for (float cy : { hh * 0.5f + 1.0f, h - hh * 0.5f - 1.0f })
+                    g.fillRoundedRectangle(x - hw * 0.5f, cy - hh * 0.5f, hw, hh, 2.0f);
+            }
     }
 
     if (document.loopEnabled && document.loopEnd > document.loopStart)
