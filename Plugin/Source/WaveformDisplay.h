@@ -123,6 +123,13 @@ private:
     juce::SharedResourcePointer<ThemeManager> theme;
     int64_t viewStart = 0, viewEnd = 0;
     std::vector<juce::Path> channelPaths;
+    // Zoomed in past ~1 sample/pixel, channelPaths hold a polyline through the actual sample
+    // values (paint() strokes it) instead of a min/max envelope polygon (paint() fills it) --
+    // the envelope collapses to a flat sample-and-hold staircase down there. rebuildWaveformPath
+    // sets this; paint() reads it.
+    bool waveformIsSampleLine = false;
+    bool showSampleDots = false;    // even tighter: mark each sample; points are in sampleDots
+    std::vector<std::vector<juce::Point<float>>> sampleDots;   // per channel
     int lastBufferVersion = -1;      // rebuild the paths when the audio content changes
     int64_t lastKnownTotal = 0;      // getNumSamples() as of lastBufferVersion -- see
                                       // refitIfWasShowingWholeDocument()

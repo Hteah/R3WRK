@@ -415,6 +415,9 @@ void WaveformDisplay::rebuildPeakCache()
 void WaveformDisplay::rebuildWaveformPath()
 {
     channelPaths.clear();
+    waveformIsSampleLine = false;
+    showSampleDots = false;
+    sampleDots.clear();
 
     const int w = getWidth();
     const int h = getHeight();
@@ -458,7 +461,7 @@ void WaveformDisplay::rebuildWaveformPath()
     if (samplesPerPixel < (double) peakBinSize)
     {
         rawStart = juce::jlimit((int64_t) 0, total, viewStart);
-        const int64_t visibleSamples = (int64_t) (samplesPerPixel * (double) w) + 2;
+        const int64_t visibleSamples = (int64_t) (samplesPerPixel * (double) w) + 6;
         const int rawLen = (int) juce::jlimit((int64_t) 0, total - rawStart, visibleSamples);
         const juce::CriticalSection::ScopedTryLockType sl(document.getLock());
         if (sl.isLocked())
@@ -472,6 +475,44 @@ void WaveformDisplay::rebuildWaveformPath()
                     raw.copyFrom(ch, 0, src, ch, (int) rawStart, copyLen);
             }
         }
+    }
+
+    // Once there's more than a pixel per sample, a min/max envelope has nothing left to show --
+    // it flattens into a sample-and-hold staircase. Draw a polyline through the actual sample
+    // values instead (paint() strokes it), and past ~5 px/sample also mark each sample.
+    waveformIsSampleLine = raw.getNumSamples() > 0 && samplesPerPixel < 1.0;
+    showSampleDots       = waveformIsSampleLine && samplesPerPixel < 0.2;
+    if (waveformIsSampleLine)
+        sampleDots.assign((size_t) numCh, {});
+
+    if (waveformIsSampleLine)
+    {
+        const int64_t firstS = juce::jmax((int64_t) 0, viewStart);
+        const int64_t lastS  = juce::jmin(total - 1,
+                                          viewStart + (int64_t) std::ceil(samplesPerPixel * (double) w) + 1);
+        for (int ch = 0; ch < numCh && ch < raw.getNumChannels(); ++ch)
+        {
+            const float* d = raw.getReadPointer(ch);
+            const float laneMid  = (float) (ch * laneHeight) + (float) laneHeight * 0.5f;
+            const float laneHalf = (float) laneHeight * 0.48f;
+
+            juce::Path p;
+            bool started = false;
+            for (int64_t s = firstS; s <= lastS; ++s)
+            {
+                const int64_t idx = s - rawStart;
+                if (idx < 0 || idx >= raw.getNumSamples())
+                    continue;
+                const float x = sampleToX(s);
+                const float y = laneMid - juce::jlimit(-1.0f, 1.0f, d[idx]) * laneHalf;
+                if (! started) { p.startNewSubPath(x, y); started = true; }
+                else            p.lineTo(x, y);
+                if (showSampleDots)
+                    sampleDots[(size_t) ch].push_back({ x, y });
+            }
+            channelPaths.push_back(std::move(p));
+        }
+        return;
     }
 
     for (int ch = 0; ch < numCh; ++ch)
@@ -744,8 +785,22 @@ void WaveformDisplay::paint(juce::Graphics& g)
     }
 
     g.setColour(pal.waveform);
-    for (auto& p : channelPaths)
-        g.fillPath(p);
+    if (waveformIsSampleLine)
+    {
+        const juce::PathStrokeType stroke(1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded);
+        for (auto& p : channelPaths)
+            g.strokePath(p, stroke);
+
+        if (showSampleDots)
+            for (auto& lane : sampleDots)
+                for (auto& pt : lane)
+                    g.fillEllipse(pt.x - 2.0f, pt.y - 2.0f, 4.0f, 4.0f);
+    }
+    else
+    {
+        for (auto& p : channelPaths)
+            g.fillPath(p);
+    }
 
     g.setColour(pal.gridLine);
     for (int ch = 1; ch < numCh; ++ch)
