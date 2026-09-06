@@ -842,9 +842,20 @@ void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
     if (document.sliceModeEnabled)
     {
         const int64_t sample = xToSample((float) e.x);
-        sliceDragIndex   = document.findSliceMarkerNear(sample, sliceHitTolerance());
-        sliceDragMoved   = false;
+        sliceDragIndex     = document.findSliceMarkerNear(sample, sliceHitTolerance());
+        sliceDragMoved     = false;
         slicePressOnMarker = sliceDragIndex >= 0;
+        slicePressWasPopup = e.mods.isPopupMenu();
+
+        // Double right-click on a marker's top/bottom handle pill -- the only way to delete.
+        if (slicePressWasPopup && e.getNumberOfClicks() >= 2 && sliceDragIndex >= 0
+            && ((float) e.y <= sliceHandleZonePx
+                || (float) e.y >= (float) getHeight() - sliceHandleZonePx))
+        {
+            document.removeSliceMarker(sliceDragIndex);
+            sliceDragIndex = -1;
+            slicePressOnMarker = false;
+        }
         return;
     }
 
@@ -923,7 +934,7 @@ void WaveformDisplay::mouseDrag(const juce::MouseEvent& e)
 {
     if (document.sliceModeEnabled)
     {
-        if (sliceDragIndex >= 0)
+        if (! slicePressWasPopup && sliceDragIndex >= 0)   // left-drag a marker to move it
         {
             sliceDragIndex = document.moveSliceMarker(sliceDragIndex, xToSample((float) e.x));
             sliceDragMoved = true;
@@ -985,13 +996,21 @@ void WaveformDisplay::mouseUp(const juce::MouseEvent& e)
 {
     if (document.sliceModeEnabled)
     {
-        const bool wasClick = e.getDistanceFromDragStart() < 4;
-        // A clean click on a marker does nothing now (drag to move, double-click a handle to
-        // delete). A clean click in a slice body plays that region.
-        if (! slicePressOnMarker && wasClick && ! sliceDragMoved)
-            playSliceAt(xToSample((float) e.x));
+        const bool wasClick = e.getDistanceFromDragStart() < 4 && ! sliceDragMoved;
+
+        // e.getNumberOfClicks() >= 2 -> the 2nd release of a double-click; the action already
+        // happened on the 1st release (or, for a right double, in mouseDown), so skip it.
+        if (wasClick && e.getNumberOfClicks() < 2)
+        {
+            if (slicePressWasPopup)
+                playSliceAt(xToSample((float) e.x));              // right-click plays the slice
+            else if (! slicePressOnMarker)
+                document.addSliceMarker(xToSample((float) e.x));  // left-click adds a marker
+        }
+
         sliceDragIndex = -1;
         slicePressOnMarker = false;
+        slicePressWasPopup = false;
         return;
     }
 
@@ -1052,8 +1071,8 @@ void WaveformDisplay::mouseMove(const juce::MouseEvent& e)
     if (document.sliceModeEnabled)
     {
         const bool overMarker = document.findSliceMarkerNear(xToSample((float) e.x), sliceHitTolerance()) >= 0;
-        setMouseCursor(overMarker ? juce::MouseCursor::LeftRightResizeCursor    // drag to move / dbl-click a handle to delete
-                                  : juce::MouseCursor::CrosshairCursor);         // double-click to place
+        setMouseCursor(overMarker ? juce::MouseCursor::LeftRightResizeCursor    // drag to move / dbl right-click a handle to delete
+                                  : juce::MouseCursor::CrosshairCursor);         // left-click to add a marker
         return;
     }
 
@@ -1081,21 +1100,7 @@ void WaveformDisplay::mouseMove(const juce::MouseEvent& e)
 void WaveformDisplay::mouseDoubleClick(const juce::MouseEvent& e)
 {
     if (document.sliceModeEnabled)
-    {
-        // Self-contained hit-test: JUCE fires mouseUp before mouseDoubleClick, and the slice
-        // mouseUp resets the press state, so re-derive from this event.
-        const int64_t sample = xToSample((float) e.x);
-        const int idx = document.findSliceMarkerNear(sample, sliceHitTolerance());
-        const bool onHandle = idx >= 0
-                           && ((float) e.y <= sliceHandleZonePx
-                               || (float) e.y >= (float) getHeight() - sliceHandleZonePx);
-        if (onHandle)
-            document.removeSliceMarker(idx);                 // double-click a top/bottom handle deletes
-        else if (idx < 0)
-            document.addSliceMarker(sample);                // double-click empty space adds
-        // double-click on the thin line (not a handle) does nothing
-        return;
-    }
+        return;   // slice add / play / delete are all handled in mouseDown / mouseUp now
 
     if (document.scrubModeEnabled)
         return;   // scrubbing repurposes every mouse gesture here; no select-all mid-scrub

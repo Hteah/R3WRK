@@ -58,11 +58,12 @@ public:
     //==============================================================================
     // Slice markers: sample positions used by Tools ▾ -> "Export Slices" / "Export Octatrack
     // Chain". Placed/edited via the Slice tool (EditorToolbar's Slice toggle -> sliceModeEnabled;
-    // in that mode WaveformDisplay repurposes double-click = add, click-on-a-marker = delete,
-    // drag-a-marker = move, click-a-slice-body = play it). Message-thread only (the audio thread
-    // doesn't touch them -- "play slice" just sets the selection + normal playback), always kept
-    // sorted + de-duplicated + strictly inside (0, getNumSamples()). Persisted in plugin state;
-    // NOT part of the undo snapshot -- and any edit that changes the sample length
+    // in that mode WaveformDisplay repurposes the mouse: left-click = add, right-click = play the
+    // slice, drag-a-marker = move, double right-click a marker's top/bottom handle = delete).
+    // Message-thread only (the audio thread doesn't touch them -- "play slice" just sets the
+    // selection + normal playback), always kept sorted + de-duplicated + strictly inside
+    // (0, getNumSamples()). NOT persisted (session-only) and NOT part of the undo snapshot --
+    // and any edit that changes the sample length
     // (trim/cut/stretch/...) clears them, since their absolute positions would no longer line
     // up with the audio (see restoreSnapshot()).
     bool sliceModeEnabled = false;   // the Slice *tool* being selected -- message-thread only

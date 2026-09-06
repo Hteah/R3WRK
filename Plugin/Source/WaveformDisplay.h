@@ -166,15 +166,18 @@ private:
     static constexpr float scrubDeadZonePx = 4.0f;    // a press that hasn't moved yet stays silent
     static constexpr float scrubMaxDragPx  = 400.0f;  // distance from the anchor for full rate
 
-    // Slice tool (document.sliceModeEnabled) -- mouseDown records which marker (if any) the
-    // press landed on. The drag moves that marker; a double-click on a marker's top/bottom
-    // handle pill deletes it (mouseDoubleClick re-derives the hit itself, since JUCE fires
-    // mouseUp -- which clears this state -- first); a double-click in empty space adds one;
-    // a clean click in a slice body plays that region.
+    // Slice tool (document.sliceModeEnabled). mouseDown records which marker (if any) the press
+    // landed on and whether it was a right/ctrl-click. Then:
+    //   left click (no drag)        -> add a marker at the click
+    //   left drag on a marker       -> move it
+    //   right click (no drag)       -> play the slice under the click
+    //   double right-click on a     -> delete that marker (the only delete)
+    //     marker's top/bottom handle
     static constexpr float sliceHandleZonePx = 20.0f;   // top/bottom band that counts as a handle
     int  sliceDragIndex = -1;
     bool sliceDragMoved = false;
     bool slicePressOnMarker = false;
+    bool slicePressWasPopup = false;   // the press was a right / ctrl click
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(WaveformDisplay)
 };
