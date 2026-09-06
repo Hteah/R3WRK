@@ -1391,36 +1391,27 @@ other off (both `document.*ModeEnabled` and the button toggle state).
 
 **`WaveformDisplay` repurposes the mouse while `sliceModeEnabled`** (gated at the very top of
 each handler, ahead of the scrub check and the selection state machine):
-  - `mouseDown` records `sliceDragIndex` = the marker within `sliceHitTolerance()` (~6 screen px
-    in samples, measured mid-view so `xToSample()`'s edge clamp doesn't skew it) of the press,
-    or -1;
-  - `mouseDrag` on a marker calls `AudioDocument::moveSliceMarker(index, xToSample(x))`, which
-    repositions + re-normalises and returns the marker's new index (drag keeps tracking it; if
-    dragged exactly onto another marker the two collapse and it tracks the survivor);
-  - `mouseUp`: a clean click (`getDistanceFromDragStart() < 4`, no drag) that did *not* land on
-    a marker calls `playSliceAt()` -- sets the selection to the clicked region, drops the
-    playhead at its start, and fires the new `onSlicePlay` callback (`PluginEditor` ->
-    `processor.startPlayback()`), which plays the region once; with no markers it just plays
-    from the click point. A clean click *on* a marker line does nothing (drag it, or
-    double-click its handle to delete);
-  - `mouseDoubleClick` (**handle-only delete**, per the user's follow-up: "deleting a slice
-    marker should only be done when double clicking the top and bottom of the marker, where
-    there is thicker chunks"): a double-click within `sliceHandleZonePx` (20px) of the top or
-    bottom edge *and* on a marker deletes that marker; a double-click that's not on any marker
-    adds one; a double-click on the thin middle of a marker line does nothing. This handler is
-    **self-contained** -- it re-runs the marker hit-test + handle-zone check from the event
-    rather than trusting state from `mouseDown`, because JUCE dispatches `mouseUp` (which
-    clears `sliceDragIndex` / `slicePressOnMarker`) *before* `mouseDoubleClick`
-    (`juce_Component.cpp` ~L2586 vs ~L2603);
-  - `mouseMove` shows a left/right-resize cursor over a marker, a crosshair elsewhere.
+**`471afb6` -- mouse model reworked again (user: "left click, one click, add slice. One right
+click plays the slice. Only way to delete a slice marker is to double right click at the very
+top or bottom of the slice marker.")** The whole thing now lives in `mouseDown`/`mouseUp` --
+`mouseDoubleClick` in slice mode does nothing:
+  - `mouseDown` records `sliceDragIndex` (marker within `sliceHitTolerance()`, ~6 screen px),
+    `slicePressOnMarker`, and `slicePressWasPopup` (`e.mods.isPopupMenu()` -- right or ctrl
+    click). If it's a right-click with `getNumberOfClicks() >= 2` on a marker within
+    `sliceHandleZonePx` (20px) of the top/bottom edge -> `removeSliceMarker()` right there.
+  - `mouseDrag` moves the pressed marker via `moveSliceMarker()` -- **left-drag only**
+    (`! slicePressWasPopup`); returns/re-tracks the new index, collapses onto a coincident
+    marker.
+  - `mouseUp`: `wasClick = getDistanceFromDragStart() < 4 && ! sliceDragMoved`. On a clean
+    click with `getNumberOfClicks() < 2` (skip the 2nd release of a double): right-click ->
+    `playSliceAt()` (selection + playhead + `onSlicePlay` -> `processor.startPlayback()`);
+    left-click not on a marker -> `addSliceMarker()`. The `< 2` guard stops a left double-click
+    dropping two markers and the right double's play firing on top of the delete.
+  - `mouseMove` -- resize cursor over a marker, crosshair elsewhere.
 
-**Known rough edge (accepted for v1, flagged to the user):** a double-click's *first* click,
-when it's not on a marker, runs the "play slice" path before `mouseDoubleClick` adds the
-marker, so a marker-add plays a blip of that slice. Fixing it cleanly needs a debounce timer
-(defer the play past the double-click window); left out unless it turns out to bother -- for an
-audition-while-you-slice workflow, a blip of the slice you're splitting is arguably fine
-feedback. (Deleting via a handle double-click has no such blip -- the click lands on a marker,
-so the play path is suppressed.)
+**Known rough edge (accepted, flagged):** a right-click that turns out to be the first of a
+double-right-click-to-delete still plays a blip on its first release before the delete lands on
+the second press. Clean fix = a debounce timer; left out.
 
 **Markers redrawn** to match the selection brackets' size (the "similar to the selection bars"
 ask): the same 2px vertical line + 5x14 rounded handle pill at top and bottom, but in
