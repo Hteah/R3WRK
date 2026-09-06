@@ -1397,8 +1397,9 @@ top or bottom of the slice marker.")** The whole thing now lives in `mouseDown`/
 `mouseDoubleClick` in slice mode does nothing:
   - `mouseDown` records `sliceDragIndex` (marker within `sliceHitTolerance()`, ~6 screen px),
     `slicePressOnMarker`, and `slicePressWasPopup` (`e.mods.isPopupMenu()` -- right or ctrl
-    click). If it's a right-click with `getNumberOfClicks() >= 2` on a marker within
+    click). A **double LEFT-click** (`getNumberOfClicks() >= 2`, not popup) on a marker within
     `sliceHandleZonePx` (20px) of the top/bottom edge -> `removeSliceMarker()` right there.
+    (`d341a55` -- was double right-click first.)
   - `mouseDrag` moves the pressed marker via `moveSliceMarker()` -- **left-drag only**
     (`! slicePressWasPopup`); returns/re-tracks the new index, collapses onto a coincident
     marker.
@@ -1409,9 +1410,9 @@ top or bottom of the slice marker.")** The whole thing now lives in `mouseDown`/
     dropping two markers and the right double's play firing on top of the delete.
   - `mouseMove` -- resize cursor over a marker, crosshair elsewhere.
 
-**Known rough edge (accepted, flagged):** a right-click that turns out to be the first of a
-double-right-click-to-delete still plays a blip on its first release before the delete lands on
-the second press. Clean fix = a debounce timer; left out.
+**Known rough edge (accepted, flagged):** a left-click that turns out to be the first of a
+double-left-click-to-delete on a handle adds nothing (it lands on the marker) -- fine -- but a
+stray double-left-click in *empty* space still adds a marker from its first release. Minor.
 
 **Markers redrawn** to match the selection brackets' size (the "similar to the selection bars"
 ask): the same 2px vertical line + 5x14 rounded handle pill at top and bottom, but in
