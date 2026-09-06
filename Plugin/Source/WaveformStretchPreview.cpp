@@ -127,6 +127,7 @@ void WaveformStretchPreview::run()
 {
     while (! threadShouldExit())
     {
+        jobRunning.store(false, std::memory_order_relaxed);
         wakeEvent.wait(500);   // periodic wake so threadShouldExit() still gets checked at shutdown
         if (threadShouldExit())
             break;
@@ -148,6 +149,8 @@ void WaveformStretchPreview::run()
         if (raw.getNumSamples() <= 0)
             continue;
 
+        jobRunning.store(true, std::memory_order_relaxed);   // WaveformDisplay shows a spinner
+
         // Same time-ratio / pitch-scale mapping the real-time playback engine uses (see
         // PluginProcessor::renderPlaybackStretched) -- speed acts like tape speed (changes
         // both duration and pitch), stretch is pure duration, pitch is the extra shift on
@@ -156,7 +159,8 @@ void WaveformStretchPreview::run()
         // pitch-scale ratio, hence the log2 conversion back from the real-time engine's units.
         const double timeRatio = stretch / juce::jmax(0.0001, speed);
         const double semitones = 12.0 * std::log2(juce::jmax(0.0001, speed)) + pitch;
-        auto processed = TimeStretchEngine::process(raw, sr, timeRatio, semitones);
+        auto processed = TimeStretchEngine::process(raw, sr, timeRatio, semitones,
+                                                    /*fastPreview*/ true);   // just for the drawn shape
 
         if (processed.getNumSamples() <= 0)
             continue;

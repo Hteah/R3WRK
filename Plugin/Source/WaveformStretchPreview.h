@@ -59,6 +59,11 @@ public:
 
     static constexpr int peakBinSize = 64;   // must match WaveformDisplay's own constant
 
+    // True while the background thread is actually running an offline stretch pass -- for a
+    // "rendering..." indicator (the pass can still take a moment at extreme ratios even with
+    // the fast engine). Not set for the short debounce wait.
+    bool isProcessing() const { return jobRunning.load(std::memory_order_relaxed); }
+
 private:
     void run() override;
     void kickOffJob(double speed, double pitch, double stretch);
@@ -80,6 +85,7 @@ private:
     // time the worker loops back round, rather than delivering an already-stale result. No
     // attempt to interrupt a RubberBand pass already in progress -- see the destructor.
     juce::WaitableEvent wakeEvent;
+    std::atomic<bool> jobRunning { false };   // worker actually mid-pass -- see isProcessing()
     juce::CriticalSection requestLock;
     bool haveRequest = false;
     juce::AudioBuffer<float> requestBuffer;

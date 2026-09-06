@@ -791,6 +791,36 @@ void WaveformDisplay::paint(juce::Graphics& g)
 
     g.setColour(pal.playhead);
     g.drawVerticalLine((int) sampleToX(document.playhead.load()), 0.0f, (float) getHeight());
+
+    // "Rendering..." pill, bottom-right, while the background stretch-shape pass is running --
+    // the drawn waveform is still the previous (or plain-rescaled) shape until it lands.
+    if (stretchPreview.isProcessing())
+    {
+        const float hgt = 20.0f, pillW = 138.0f, padX = 9.0f, spin = 12.0f;
+        const juce::Rectangle<float> pill (getWidth() - pillW - 8.0f, getHeight() - hgt - 8.0f,
+                                           pillW, hgt);
+        g.setColour(pal.panelBg.withAlpha(0.92f));
+        g.fillRoundedRectangle(pill, hgt * 0.5f);
+        g.setColour(pal.screenText.withAlpha(0.22f));
+        g.drawRoundedRectangle(pill, hgt * 0.5f, 1.0f);
+
+        // Indeterminate spinner: a 270-degree arc that rotates with wall-clock time.
+        const float cx = pill.getX() + padX + spin * 0.5f;
+        const float cy = pill.getCentreY();
+        const float r  = spin * 0.5f - 1.5f;
+        const float a0 = (float) (juce::Time::getMillisecondCounter() % 900) / 900.0f
+                         * juce::MathConstants<float>::twoPi;
+        juce::Path arc;
+        arc.addCentredArc(cx, cy, r, r, 0.0f, a0, a0 + juce::MathConstants<float>::twoPi * 0.75f, true);
+        g.setColour(pal.accent);
+        g.strokePath(arc, juce::PathStrokeType(1.8f, juce::PathStrokeType::curved,
+                                               juce::PathStrokeType::rounded));
+
+        g.setColour(pal.screenTextDim);
+        g.setFont(juce::FontOptions(11.0f));
+        g.drawText("Rendering stretch", pill.withTrimmedLeft(padX * 2.0f + spin).withTrimmedRight(padX),
+                   juce::Justification::centredLeft);
+    }
 }
 
 WaveformDisplay::EdgeHit WaveformDisplay::hitEdge(float pressX, float startX, float endX, float tolerance)
