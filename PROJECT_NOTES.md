@@ -1544,6 +1544,19 @@ CMake + SmokeTest entries, the "Rendering stretch" spinner, `TimeStretchEngine`'
 flag. Kept: the O(n^2) output-growth fix in `TimeStretchEngine` (destructive Apply still uses
 it) and the realtime ratio smoothing in `PluginProcessor` (the crackle fix).
 
+## Waveform redraw never blocks the audio thread (`86880d4`)
+
+User: still crackled a bit zooming in with follow-playhead on during playback. Cause: the
+deep-zoom branch of `rebuildWaveformPath()` (`samplesPerPixel < peakBinSize`) took a *blocking*
+`ScopedLock` on `document.getLock()` to copy the visible raw span -- and follow-playhead makes
+that whole rebuild run every 30 Hz frame (the view scrolls each tick), so the message thread
+held the lock ~30x/sec and `processBlock`'s `ScopedTryLock` kept losing -> cleared block ->
+click. (Zoomed out the copy is skipped, hence "only when zoomed in".) Fix: every message-thread
+acquisition of `document.getLock()` in the redraw path is now `ScopedTryLockType` -- the
+deep-zoom copy and `rebuildPeakCache()` keep/fall back to the existing peak cache for that
+frame, `paintSelectionPreview()` skips its overlay for that frame. The audio thread always
+wins the lock.
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).
