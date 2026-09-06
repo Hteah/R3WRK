@@ -1557,6 +1557,27 @@ deep-zoom copy and `rebuildPeakCache()` keep/fall back to the existing peak cach
 frame, `paintSelectionPreview()` skips its overlay for that frame. The audio thread always
 wins the lock.
 
+## Standalone: native macOS title bar (traffic lights on the left)
+
+User: "move the close and minimize controls ... to the left side like all other normal Mac
+apps." The Standalone drew its own JUCE title bar (buttons on the right, Windows-style; that's
+also how the dark strip + hand-rolled rounded corners worked). Now:
+
+- **`patches/juce-standalone-window.patch`** (consolidates the old `juce-standalone-rounded-
+  corners.patch` + `juce-standalone-notification-bar.patch` into one file): `StandaloneFilter
+  Window`'s ctor calls `setUsingNativeTitleBar (true)` (mac) -> real traffic lights, left.
+  `resized()` floats the audio-device `optionsButton` top-**right** (with a native bar
+  `getTitleBarHeight()` is 0). The "input muted" `NotificationArea` text is left-padded 66px on
+  mac so the floating buttons don't overlap it.
+- **`StandaloneWindowShape.mm`**: hides the title-bar strip -- `titlebarAppearsTransparent` +
+  `NSWindowTitleHidden` + `NSWindowStyleMaskFullSizeContentView`, `movableByWindowBackground`
+  -- so the app's own UI runs the full window height with the buttons just floating over the
+  top-left; keeps the rounded-corner `CALayer` mask + non-opaque clear `NSWindow`.
+- **`PluginEditor`**: standalone-only `kMacTrafficLightInset` (22px) reserved at the top in
+  `resized()`; window default/min height bumped by the same. Zero in VST3/AU (the DAW owns the
+  chrome). `standaloneWindow` = `p.wrapperType == wrapperType_Standalone`, init'd from the
+  ctor param (declared before `processorRef` to keep member-init order clean).
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).
