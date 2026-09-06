@@ -238,29 +238,27 @@ namespace
         g.fillEllipse(centre.x - dotR, centre.y - dotR, dotR * 2.0f, dotR * 2.0f);
     }
 
-    // Slice: a marker flag -- a bold vertical pole with a small pennant near the top, waving
-    // right. It's the literal "drop a marker here" glyph, which is exactly what the Slice tool
-    // does. Traced from a reference icon the user supplied (minus its little "+" badge). All
-    // filled; built in nominal units, scaled to fill the button, centred by its own bounds.
+    // Slice: a marker flag -- a bold vertical pole with a square banner at the top. It's the
+    // literal "drop a marker here" glyph, which is exactly what the Slice tool does. Based on a
+    // reference icon the user supplied (minus its little "+" badge; banner squared off at their
+    // request). All filled; built in nominal units, scaled to fill the button, centred by its
+    // own bounds.
     void drawSliceIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
     {
         const float poleX     = -2.6f;
         const float top       = -8.5f;
         const float bot       =  8.5f;
         const float poleHalfW =  1.15f;
+        const float flagW     =  8.2f;
+        const float flagH     =  6.2f;
 
         juce::Path flag;
 
         // Pole: a filled bar with softly rounded ends.
         flag.addRoundedRectangle (poleX - poleHalfW, top, poleHalfW * 2.0f, bot - top, poleHalfW);
 
-        // Pennant: attached at the pole's top, top edge slopes down a touch, the outer edge
-        // angles back in toward the pole, the underside runs back partway down the pole.
-        flag.startNewSubPath (poleX,        top);
-        flag.lineTo          (poleX + 8.4f, top + 1.6f);
-        flag.lineTo          (poleX + 6.6f, top + 4.2f);
-        flag.lineTo          (poleX,        top + 5.6f);
-        flag.closeSubPath();
+        // Banner: a plain rectangle hanging off the top of the pole.
+        flag.addRectangle (poleX, top, flagW, flagH);
 
         const auto target = bounds.reduced (bounds.getHeight() * 0.16f);
         auto bb = flag.getBounds();
