@@ -1621,6 +1621,16 @@ bracket stays put, reading as "the marker turned blue and now won't move or dele
 `WaveformDisplay::paint()` skips the selection brackets (keeps only the faint wash) while
 `sliceModeEnabled`.
 
+## Sample-level waveform render (`45c6d2e`)
+
+User: "make the resolution better when zooming in tight." Below one raw sample per pixel the
+min/max envelope collapses into a flat sample-and-hold staircase. `rebuildWaveformPath()` now
+switches, at `samplesPerPixel < 1.0`, to a polyline through the actual sample values (drawn
+with `strokePath`, curved joints, from the visible raw span it already copies for deep zoom);
+below `0.2` (~5+ px/sample) it also drops a dot on each sample. `waveformIsSampleLine` /
+`showSampleDots` / `sampleDots` (per-channel points) are set there and read by `paint()`, all
+reset at the top of the rebuild. Normal-zoom envelope render is untouched.
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).
