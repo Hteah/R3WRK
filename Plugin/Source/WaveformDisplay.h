@@ -16,7 +16,7 @@
       - drag from inside the selection body to drag the audio out as a WAV file
         (onto an Ableton track, Finder, ...);
       - right-click inside the selection body for a context menu
-        (Amplify/Reverse/Stretch·Pitch) -- see onSelectionContextMenu.
+        (Amplify/Fade In/Fade Out/Reverse/Stretch·Pitch) -- see onSelectionContextMenu.
     Mouse wheel zooms toward the pointer (or into the selection if there is one);
     horizontal swipe / Shift+wheel pans. ⌘+/⌘- (see zoomIn()/zoomOut(), wired up in
     PluginEditor::keyPressed) zoom without the mouse, behaving like one wheel notch --
@@ -85,7 +85,7 @@ public:
     std::function<void()> onSelectionCommitted;
 
     /// Right-click inside the selection body (not near an edge) -- e.g. show a context menu
-    /// (Amplify/Reverse/Stretch·Pitch) at the given screen position.
+    /// (Amplify/Fade In/Fade Out/Reverse/Stretch·Pitch) at the given screen position.
     std::function<void(juce::Point<int> screenPosition)> onSelectionContextMenu;
 
     /// Slice tool: clicking a slice body has set the selection to that region and dropped the

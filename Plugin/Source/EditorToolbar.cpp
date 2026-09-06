@@ -615,7 +615,7 @@ void EditorToolbar::showStretchCallout(juce::Rectangle<int> screenTargetArea)
 //==============================================================================
 void EditorToolbar::showSelectionContextMenu(juce::Point<int> screenPosition)
 {
-    enum { idTrim = 1, idAmplify, idReverse, idStretch };
+    enum { idTrim = 1, idAmplify, idFadeIn, idFadeOut, idReverse, idStretch };
 
     const juce::String cmd = juce::String::fromUTF8("\xe2\x8c\x98");   // ⌘
     juce::PopupMenu::Item trimItem("Trim to Selection");
@@ -625,6 +625,8 @@ void EditorToolbar::showSelectionContextMenu(juce::Point<int> screenPosition)
     juce::PopupMenu m;
     m.addItem(trimItem);
     m.addItem(idAmplify, juce::String::fromUTF8("Amplify\xE2\x80\xA6"));
+    m.addItem(idFadeIn,  "Fade In");    // EditActions fades operate on getEffectiveRange(),
+    m.addItem(idFadeOut, "Fade Out");   // which is the selection whenever there is one
     m.addItem(idReverse, "Reverse");
     m.addItem(idStretch, juce::String::fromUTF8("Stretch / Pitch\xE2\x80\xA6"));
 
@@ -635,6 +637,8 @@ void EditorToolbar::showSelectionContextMenu(juce::Point<int> screenPosition)
         {
             case idTrim:    EditActions::trimToSelection(document); break;
             case idAmplify: showAmplifyCallout(targetArea); break;
+            case idFadeIn:  EditActions::fadeIn(document);  break;
+            case idFadeOut: EditActions::fadeOut(document); break;
             case idReverse: EditActions::reverse(document); break;
             case idStretch: showStretchCallout(targetArea); break;
             default: break;
