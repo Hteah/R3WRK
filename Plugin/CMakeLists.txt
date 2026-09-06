@@ -72,7 +72,6 @@ target_sources(R3WRK
         Source/AudioDocument.cpp
         Source/EditActions.cpp
         Source/WaveformDisplay.cpp
-        Source/WaveformStretchPreview.cpp
         Source/SpectrogramDisplay.cpp
         Source/TimeStretchEngine.cpp
         Source/HeaderBar.cpp
@@ -119,7 +118,6 @@ target_sources(R3WRKSmokeTest
         Source/EditActions.cpp
         Source/OctatrackOtFile.cpp
         Source/TimeStretchEngine.cpp
-        Source/WaveformStretchPreview.cpp
         Tests/SmokeTest.cpp)
 
 target_compile_definitions(R3WRKSmokeTest

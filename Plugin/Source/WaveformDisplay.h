@@ -2,7 +2,6 @@
 #include <JuceHeader.h>
 #include "AudioDocument.h"
 #include "Theme.h"
-#include "WaveformStretchPreview.h"
 
 /**
     Draws the waveform for the document (one lane per channel), plus a per-lane
@@ -35,11 +34,12 @@
     fast it plays in that direction (not how fast you're moving the mouse), like a tape deck's
     shuttle wheel -- see mouseDown()/mouseDrag()/mouseUp() and PluginProcessor::renderScrub().
 
-    While Speed/Pitch/Stretch are non-identity, the drawn waveform *shape* comes from a real
-    offline stretch computed in the background (see WaveformStretchPreview / stretchPreview)
-    rather than the stored audio simply rescaled -- so it actually shows how the audio's
-    detail reshapes at the current knob settings (transients smear at extreme ratios, etc.),
-    not just how long it'll be.
+    While Speed/Pitch/Stretch are non-identity, the drawn waveform is the stored audio rescaled
+    to the new duration (samplesPerPixel folds in getTimeScale()) plus a mild "transient smear"
+    -- a box-blur of the per-pixel envelope whose radius grows with |log2(timeScale)| -- so a
+    stretched view rounds sharp hits off rather than just drawing them wider. See
+    rebuildWaveformPath(). (A real offline RubberBand render of the whole clip was tried and
+    removed: unusably slow at extreme ratios, and its coarse peak cache drew as terraces.)
 */
 class WaveformDisplay : public juce::Component,
                          public juce::ChangeListener,
@@ -137,8 +137,6 @@ private:
     std::vector<std::vector<float>> chPeakMin, chPeakMax;
     int peakVersion = -1;
     int64_t peakTotalSamples = 0;
-
-    WaveformStretchPreview stretchPreview { document };   // background real-stretch preview
 
     // A scroll/trackpad gesture sends a rapid burst of small wheel events; re-reading the
     // pointer's exact x on every single one means incidental mouse jitter during the gesture

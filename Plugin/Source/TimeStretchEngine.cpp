@@ -6,7 +6,7 @@ namespace TimeStretchEngine
 {
 
 juce::AudioBuffer<float> process(const juce::AudioBuffer<float>& input, double sampleRate,
-                                  double stretchRatio, double pitchSemitones, bool fastPreview)
+                                  double stretchRatio, double pitchSemitones)
 {
     using namespace RubberBand;
 
@@ -15,14 +15,9 @@ juce::AudioBuffer<float> process(const juce::AudioBuffer<float>& input, double s
     if (numCh <= 0 || numFrames <= 0)
         return {};
 
-    auto options = fastPreview
-        ? (RubberBandStretcher::OptionProcessOffline
-           | RubberBandStretcher::OptionEngineFaster
-           | RubberBandStretcher::OptionWindowShort
-           | RubberBandStretcher::OptionPitchHighSpeed)
-        : (RubberBandStretcher::OptionProcessOffline
-           | RubberBandStretcher::OptionEngineFiner
-           | RubberBandStretcher::OptionPitchHighQuality);
+    auto options = RubberBandStretcher::OptionProcessOffline
+                 | RubberBandStretcher::OptionEngineFiner
+                 | RubberBandStretcher::OptionPitchHighQuality;
 
     RubberBandStretcher stretcher((size_t) sampleRate, (size_t) numCh, options);
     stretcher.setTimeRatio(juce::jmax(0.01, stretchRatio));

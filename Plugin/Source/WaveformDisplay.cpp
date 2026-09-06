@@ -106,11 +106,7 @@ void WaveformDisplay::timerCallback()
     const int64_t maxSpan = maxViewSpan();
     const bool viewBad = viewEnd <= viewStart || viewEnd > maxSpan || viewStart >= juce::jmax((int64_t) 1, maxSpan);
 
-    // A freshly (or no longer) available real-stretch preview also means the drawn shape is
-    // stale -- see rebuildWaveformPath() for how it's used.
-    const bool previewChanged = stretchPreview.update();
-
-    if (contentChanged || timeScaleChanged || viewBad || previewChanged
+    if (contentChanged || timeScaleChanged || viewBad
         || getWidth() != lastPathWidth || getHeight() != lastPathHeight)
     {
         if (viewBad)   // refits above already handled the "was showing everything" cases
@@ -435,20 +431,23 @@ void WaveformDisplay::rebuildWaveformPath()
     const double timeScale = juce::jmax(0.0001, document.getTimeScale());
     const double samplesPerPixel = (double) rangeLen / (double) w / timeScale;
 
-    // While Speed/Pitch/Stretch are non-identity and settled, draw the *real* processed
-    // shape instead of the stored audio rescaled -- see WaveformStretchPreview. Its peak
-    // cache covers the actual RubberBand output for the whole document at the current knob
-    // position, so a raw sample position s maps to processed-domain index s*timeScale (the
-    // same factor rescales the view span itself, see effectiveSpanFor()/maxViewSpan() above).
-    const bool usePreview = stretchPreview.hasPreview();
+    // When Speed/Pitch/Stretch spread the clip out (or squeeze it), the drawn shape is the
+    // stored waveform rescaled to the new duration -- samplesPerPixel already folds in
+    // getTimeScale() -- plus a "transient smear": a box-blur of the per-pixel envelope whose
+    // radius grows with how far the ratio is from 1x, so a stretched view rounds sharp hits
+    // off instead of just drawing them wider. (A true RubberBand render of the whole clip was
+    // tried -- WaveformStretchPreview, removed -- but at extreme ratios it's unusably slow, ~14
+    // minutes of output audio for a 16 s clip at 50x, and its necessarily coarse peak cache
+    // drew as terraces when zoomed in anyway.)
+    const int smearRadius = juce::jlimit(0, 8,
+                                juce::roundToInt(std::abs(std::log2(timeScale)) * 1.4));
 
-    // Deep zoom (fewer than one peak bin per pixel): copy just the actually-visible span
-    // (w * samplesPerPixel raw samples -- bounded even at extreme Stretch, unlike the full
+    // Deep zoom (fewer than one peak-cache bin per pixel): copy just the actually-visible raw
+    // span (w * samplesPerPixel raw samples -- bounded even at extreme Stretch, unlike the full
     // [viewStart,viewEnd) range) out from under the lock once, then read it per-sample below.
-    // Not needed at all when drawing from the preview buffer instead.
     juce::AudioBuffer<float> raw;
     int64_t rawStart = 0;
-    if (! usePreview && samplesPerPixel < (double) peakBinSize)
+    if (samplesPerPixel < (double) peakBinSize)
     {
         rawStart = juce::jlimit((int64_t) 0, total, viewStart);
         const int64_t visibleSamples = (int64_t) (samplesPerPixel * (double) w) + 2;
@@ -484,36 +483,48 @@ void WaveformDisplay::rebuildWaveformPath()
                 s1 = juce::jmin(total, s0 + 1);
 
             float mn = 0.0f, mx = 0.0f;
-            if (usePreview && ch < stretchPreview.getNumChannels())
+            const int64_t r0 = s0 - rawStart, r1 = s1 - rawStart;
+            if (raw.getNumSamples() > 0 && ch < raw.getNumChannels()
+                && r0 >= 0 && r1 <= raw.getNumSamples() && r1 > r0)
             {
-                const int64_t p0 = (int64_t) ((double) s0 * timeScale);
-                const int64_t p1 = (int64_t) ((double) s1 * timeScale);
-                stretchPreview.getPeakRange(ch, p0, p1, mn, mx);
+                const auto r = juce::FloatVectorOperations::findMinAndMax(raw.getReadPointer(ch) + r0,
+                                                                         (int) (r1 - r0));
+                mn = r.getStart();
+                mx = r.getEnd();
             }
-            else
+            else if (nBins > 0)
             {
-                const int64_t r0 = s0 - rawStart, r1 = s1 - rawStart;
-                if (raw.getNumSamples() > 0 && ch < raw.getNumChannels()
-                    && r0 >= 0 && r1 <= raw.getNumSamples() && r1 > r0)
+                int b0 = juce::jlimit(0, nBins - 1, (int) (s0 / peakBinSize));
+                int b1 = juce::jlimit(b0, nBins - 1, (int) ((s1 - 1) / peakBinSize));
+                for (int b = b0; b <= b1; ++b)
                 {
-                    const auto r = juce::FloatVectorOperations::findMinAndMax(raw.getReadPointer(ch) + r0,
-                                                                             (int) (r1 - r0));
-                    mn = r.getStart();
-                    mx = r.getEnd();
-                }
-                else if (nBins > 0)
-                {
-                    int b0 = juce::jlimit(0, nBins - 1, (int) (s0 / peakBinSize));
-                    int b1 = juce::jlimit(b0, nBins - 1, (int) ((s1 - 1) / peakBinSize));
-                    for (int b = b0; b <= b1; ++b)
-                    {
-                        mn = juce::jmin(mn, binMin[(size_t) b]);
-                        mx = juce::jmax(mx, binMax[(size_t) b]);
-                    }
+                    mn = juce::jmin(mn, binMin[(size_t) b]);
+                    mx = juce::jmax(mx, binMax[(size_t) b]);
                 }
             }
             mins[(size_t) x] = mn;
             maxs[(size_t) x] = mx;
+        }
+
+        // Transient smear: average each envelope point over +/- smearRadius pixels, so a
+        // stretched view softens sharp hits rather than just stretching the spikes wider.
+        if (smearRadius > 0 && w > 1)
+        {
+            const auto blur = [w, smearRadius] (std::vector<float>& a)
+            {
+                const std::vector<float> in (a);
+                for (int x = 0; x < w; ++x)
+                {
+                    float acc = 0.0f;
+                    const int lo = juce::jmax(0, x - smearRadius);
+                    const int hi = juce::jmin(w - 1, x + smearRadius);
+                    for (int k = lo; k <= hi; ++k)
+                        acc += in[(size_t) k];
+                    a[(size_t) x] = acc / (float) (hi - lo + 1);
+                }
+            };
+            blur(mins);
+            blur(maxs);
         }
 
         juce::Path p;
@@ -791,36 +802,6 @@ void WaveformDisplay::paint(juce::Graphics& g)
 
     g.setColour(pal.playhead);
     g.drawVerticalLine((int) sampleToX(document.playhead.load()), 0.0f, (float) getHeight());
-
-    // "Rendering..." pill, bottom-right, while the background stretch-shape pass is running --
-    // the drawn waveform is still the previous (or plain-rescaled) shape until it lands.
-    if (stretchPreview.isProcessing())
-    {
-        const float hgt = 20.0f, pillW = 138.0f, padX = 9.0f, spin = 12.0f;
-        const juce::Rectangle<float> pill (getWidth() - pillW - 8.0f, getHeight() - hgt - 8.0f,
-                                           pillW, hgt);
-        g.setColour(pal.panelBg.withAlpha(0.92f));
-        g.fillRoundedRectangle(pill, hgt * 0.5f);
-        g.setColour(pal.screenText.withAlpha(0.22f));
-        g.drawRoundedRectangle(pill, hgt * 0.5f, 1.0f);
-
-        // Indeterminate spinner: a 270-degree arc that rotates with wall-clock time.
-        const float cx = pill.getX() + padX + spin * 0.5f;
-        const float cy = pill.getCentreY();
-        const float r  = spin * 0.5f - 1.5f;
-        const float a0 = (float) (juce::Time::getMillisecondCounter() % 900) / 900.0f
-                         * juce::MathConstants<float>::twoPi;
-        juce::Path arc;
-        arc.addCentredArc(cx, cy, r, r, 0.0f, a0, a0 + juce::MathConstants<float>::twoPi * 0.75f, true);
-        g.setColour(pal.accent);
-        g.strokePath(arc, juce::PathStrokeType(1.8f, juce::PathStrokeType::curved,
-                                               juce::PathStrokeType::rounded));
-
-        g.setColour(pal.screenTextDim);
-        g.setFont(juce::FontOptions(11.0f));
-        g.drawText("Rendering stretch", pill.withTrimmedLeft(padX * 2.0f + spin).withTrimmedRight(padX),
-                   juce::Justification::centredLeft);
-    }
 }
 
 WaveformDisplay::EdgeHit WaveformDisplay::hitEdge(float pressX, float startX, float endX, float tolerance)
