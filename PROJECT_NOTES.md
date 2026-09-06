@@ -1475,6 +1475,22 @@ frame just re-centres (matches Sieve). `TimeRuler` picks up the scrolled view th
 **Not interactively verified** -- can't script playback + zoom here; the toggle button renders
 and the math mirrors Sieve's `followIfNeeded`. Smoke test passes; all four targets build clean.
 
+## Left/Right arrow navigation
+
+User: "press the right and left keys ... move the waveform back and forth ... maybe also move
+the red line" (the red line = the **playhead**, `document.playhead`, drawn in `pal.playhead`
+with the TimeRuler triangle -- where a click seeks and playback starts).
+
+`PluginEditor::keyPressed` maps `leftKey`/`rightKey` (plain, and +Shift) to
+`WaveformDisplay::keyboardScroll(dir, bigStep)`. Step = a fraction of the *visible* raw span
+(`(viewEnd-viewStart)/timeScale`): 1/20 plain, 1/2 with Shift -- so it feels the same at any
+zoom. It scrolls `viewStart/viewEnd` by that delta (clamped to `[0, maxViewSpan()-span]`,
+rebuilds the path) and, **only while stopped**, advances `document.playhead` by the same delta
+-- so the red line holds its screen position while the waveform slides, and still moves when
+the view is fully zoomed out. During playback the audio thread owns the playhead, so the
+arrows just pan. JUCE auto-repeats `keyPressed` on hold. Matched by exact `KeyPress` equality
+(keyCode + mods), same idiom as the Space / ⌘Z/X/C/V / ⌘+/- shortcuts.
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).
