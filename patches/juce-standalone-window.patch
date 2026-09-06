@@ -1,0 +1,101 @@
+diff --git a/modules/juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h b/modules/juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h
+index a4ddcf2..b80e426 100644
+--- a/modules/juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h
++++ b/modules/juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h
+@@ -38,6 +38,20 @@
+  #include <juce_audio_plugin_client/detail/juce_CreatePluginFilter.h>
+ #endif
+ 
++// R3WRK: rounds the Standalone window's corners -- see Source/StandaloneWindowShape.h/.mm and
++// patches/juce-standalone-rounded-corners.patch. Declared here rather than #included so this
++// patch stays a self-contained one-line addition to JUCE's own file, not a new dependency of
++// JUCE code on R3WRK's own headers.
++#if JUCE_MAC
++// void*, extern "C" rather than juce::Component& -- by the time this header gets included
++// here, some other JUCE amalgamation header up the include chain has already opened an
++// ambient `namespace juce { ... }` (nested, unclosed) around everything below it, so *any*
++// spelling of the juce:: qualifier (even the root-relative ::juce::) fails to resolve; a
++// void* sidesteps needing the type to resolve here at all (see Source/StandaloneWindowShape.mm,
++// which receives it back as a juce::Component* -- a context with no such ambient nesting).
++extern "C" void r3wrkApplyRoundedWindowCorners (void* window, float cornerRadiusPx);
++#endif
++
+ namespace juce
+ {
+ 
+@@ -712,6 +726,16 @@ public:
+             if (auto* editor = processor->getActiveEditor())
+                 setResizable (editor->isResizable(), false);
+        #endif
++
++       #if JUCE_MAC
++        // R3WRK: use the real macOS window frame so the close/minimise controls are the native
++        // traffic lights on the LEFT, like every other Mac app (JUCE's own Standalone wrapper
++        // draws its own title bar with the buttons on the right). r3wrkApplyRoundedWindowCorners
++        // then hides the title-bar strip and lets the app's UI run full height under the
++        // floating buttons -- see Source/StandaloneWindowShape.mm.
++        setUsingNativeTitleBar (true);
++        r3wrkApplyRoundedWindowCorners (this, 12.0f);
++       #endif
+     }
+ 
+     //==============================================================================
+@@ -807,7 +831,15 @@ public:
+     void resized() override
+     {
+         DocumentWindow::resized();
++       #if JUCE_MAC
++        // R3WRK: native title bar -> getTitleBarHeight() is 0 and there's no drawn title-bar
++        // strip. Keep the audio-device "Options" button reachable by floating it at the
++        // top-right, opposite the traffic lights, in the strip PluginEditor keeps clear in the
++        // Standalone build.
++        optionsButton.setBounds (getWidth() - 66, 5, 58, 20);
++       #else
+         optionsButton.setBounds (8, 6, 60, getTitleBarHeight() - 8);
++       #endif
+     }
+ 
+     virtual StandalonePluginHolder* getPluginHolder()    { return pluginHolder.get(); }
+@@ -931,8 +963,15 @@ private:
+             {
+                 setOpaque (true);
+ 
+-                notification.setColour (Label::textColourId, Colours::black);
++                // R3WRK: recoloured to sit quietly alongside the app's own dark UI instead of
++                // JUCE's stock bright-yellow feedback-loop warning banner -- Midnight theme's
++                // panelBg/accent/screenText, hardcoded rather than read live from R3WRK's
++                // ThemeManager (this window lives outside the plugin editor entirely, so it
++                // has no reach into the app's theme system without much deeper wiring).
++                notification.setColour (Label::textColourId, Colour (0xffe0e0e0));
+ 
++                settingsButton.setColour (TextButton::buttonColourId, Colour (0xff2a2e35));
++                settingsButton.setColour (TextButton::textColourOffId, Colour (0xffe0e0e0));
+                 settingsButton.addListener (settingsButtonListener);
+ 
+                 addAndMakeVisible (notification);
+@@ -943,10 +982,10 @@ private:
+             {
+                 auto r = getLocalBounds();
+ 
+-                g.setColour (Colours::darkgoldenrod);
++                g.setColour (Colour (0xff5ec2ff));
+                 g.fillRect (r.removeFromBottom (1));
+ 
+-                g.setColour (Colours::lightgoldenrodyellow);
++                g.setColour (Colour (0xff17191e));
+                 g.fillRect (r);
+             }
+ 
+@@ -954,6 +993,12 @@ private:
+             {
+                 auto r = getLocalBounds().reduced (5);
+ 
++               #if JUCE_MAC
++                // R3WRK: native title bar -> the traffic lights float over the top-left of this
++                // banner (it sits at the very top of the window). Keep the text clear of them.
++                r.removeFromLeft (66);
++               #endif
++
+                 settingsButton.setBounds (r.removeFromRight (70));
+                 notification.setBounds (r);
+             }

@@ -36,6 +36,12 @@ private:
 
     bool showingDropHighlight = false;
 
+    // In the Standalone build the macOS traffic lights float over the top-left of our own UI
+    // (native title bar, no strip -- see StandaloneWindowShape.mm), so reserve a thin band at
+    // the top for them. Zero in a plugin (the DAW owns the window chrome).
+    static constexpr int kMacTrafficLightInset = 22;
+    const bool standaloneWindow;
+
     R3WRKAudioProcessor& processorRef;
     juce::SharedResourcePointer<ThemeManager> theme;
 

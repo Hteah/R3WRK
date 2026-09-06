@@ -25,6 +25,17 @@ void r3wrkApplyRoundedWindowCorners (void* windowPtr, float cornerRadiusPx)
     if (nsWindow == nil)
         return;
 
+    // The window frame is native now (StandaloneFilterWindow's ctor calls
+    // setUsingNativeTitleBar(true)), so the close/minimise controls are the standard macOS
+    // traffic lights on the LEFT. Hide the title-bar strip itself and let the app's own dark
+    // UI run the full height of the window under the buttons -- the buttons just float over
+    // the top-left. PluginEditor keeps that strip clear of its own controls in the Standalone
+    // build (a small top inset, standalone-only).
+    nsWindow.titlebarAppearsTransparent = YES;
+    nsWindow.titleVisibility = NSWindowTitleHidden;
+    nsWindow.styleMask |= NSWindowStyleMaskFullSizeContentView;
+    nsWindow.movableByWindowBackground = YES;   // drag the window by its background, no strip to grab
+
     // Let the desktop show through the four corners the layer mask below crops away, instead
     // of a mismatched solid square peeking out from behind the rounded content.
     nsWindow.opaque = NO;

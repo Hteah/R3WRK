@@ -3,46 +3,47 @@
 Small local edits to the vendored JUCE checkout (`../JUCE/`, git-ignored, re-cloned fresh by
 `build.sh` or the manual steps in `BUILD_ON_MACOS.md`) that don't have a supported JUCE
 customization hook to reach the same result. `build.sh` applies every `.patch` file here
-automatically right after a fresh clone; a manual clone needs the same step by hand (see below).
-
-Each patch is a plain `git diff` taken from inside the `JUCE/` checkout, so it applies with:
+automatically right after a fresh clone; a manual clone needs the same step by hand:
 
 ```sh
 cd JUCE
 git apply ../patches/<name>.patch
 ```
 
-## `juce-standalone-notification-bar.patch`
+Each patch is a plain `git diff` taken from inside the `JUCE/` checkout.
 
-Recolours the Standalone app's built-in "Audio input is muted to avoid feedback loop" banner
-(`juce_StandaloneFilterWindow.h`'s `NotificationArea`) from JUCE's stock bright yellow to
-R3WRK's own Midnight-theme colours, so it doesn't clash with the rest of the dark UI. Hardcoded
-colours, not read live from `ThemeManager` -- this window lives outside the plugin editor
-entirely (it wraps the editor, rather than being part of it), so it has no reach into the app's
-theme system without much deeper wiring than a cosmetic fix like this warrants. The feedback-loop
-detection and muting itself is untouched, only the banner's appearance.
+## `juce-standalone-window.patch`
 
-If JUCE ever gets upgraded to a newer tag, re-check that this still applies cleanly (JUCE's own
-`NotificationArea` implementation could change) -- `git apply --check` will say so without
-touching anything.
+All of R3WRK's tweaks to the Standalone app's own window
+(`juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h`). None of it affects the
+VST3/AU — those are hosted inside a DAW's own window. In one file:
 
-## `juce-standalone-rounded-corners.patch`
+1. **Native title bar.** `StandaloneFilterWindow`'s constructor now calls
+   `setUsingNativeTitleBar (true)` (mac only), so the close / minimise controls are the real
+   macOS traffic lights on the **left**, like every other Mac app. JUCE's stock Standalone
+   wrapper draws its own title bar with the buttons on the right.
 
-Rounds the corners of the Standalone app's own window (irrelevant to VST3/AU -- those are hosted
-inside a DAW's own window and can't reshape it). JUCE has no cross-platform "rounded window"
-feature and no exposed hook to reach the native NSWindow/CALayer from a `Component`, so this
-patch is a single call into R3WRK's own code: `StandaloneFilterWindow`'s constructor gets one
-call to `r3wrkApplyRoundedWindowCorners(*this, 12.0f)` right after the window's native peer
-exists, forward-declared at the top of the file (not `#include`d, so this patch stays a
-self-contained one-line addition to JUCE's own file rather than a new dependency of JUCE code
-on R3WRK's own headers). The actual work happens in `Plugin/Source/StandaloneWindowShape.mm`
-(mac-only, `#if JUCE_MAC`): clips the window's content view to a rounded-rect `CALayer` mask
-(so everything JUCE paints, at any nesting depth, gets cropped to the shape -- clipping inside
-a single `Component::paint()` wouldn't reach child components, since JUCE's own paint-scoping
-restores the clip before painting children) and makes the underlying `NSWindow` non-opaque with
-a clear background, so the four corners the mask crops away read as genuinely transparent (the
-desktop showing through) instead of a mismatched solid colour peeking out from behind the
-rounded content.
+2. **Rounded corners + hidden title-bar strip.** Right after the peer exists the constructor
+   calls `r3wrkApplyRoundedWindowCorners (this, 12.0f)` (forward-declared at the top of the
+   file — not `#include`d, so the patch stays self-contained and doesn't make JUCE code depend
+   on R3WRK headers). The work is in `Plugin/Source/StandaloneWindowShape.mm` (mac only): hides
+   the title-bar strip (`titlebarAppearsTransparent` + `NSWindowTitleHidden` +
+   `NSWindowStyleMaskFullSizeContentView`, `movableByWindowBackground`) so the app's own dark
+   UI runs the full height under the floating buttons, and clips the content view to a
+   rounded-rect `CALayer` mask with a non-opaque clear-background `NSWindow` behind it so the
+   cropped corners read as genuinely transparent. `PluginEditor` keeps a thin band at the top
+   clear of its own controls in the Standalone build (a standalone-only top inset).
 
-Applies independently of the notification-bar patch above (touches a different, non-overlapping
-part of the same file), so the two can be applied in either order.
+3. **"Options" button repositioned.** With a native title bar `getTitleBarHeight()` is 0, so
+   `resized()` floats the audio-device `optionsButton` at the top-**right**, opposite the
+   traffic lights.
+
+4. **Notification banner recoloured + inset.** The built-in "Audio input is muted to avoid
+   feedback loop" banner (`NotificationArea`) is recoloured from JUCE's stock bright yellow to
+   R3WRK's Midnight-theme colours (hardcoded — this window is outside the plugin editor and
+   has no reach into `ThemeManager`), and its text is left-padded on mac so the floating
+   traffic lights don't sit on top of it. The feedback-loop detection/muting itself is
+   untouched.
+
+If JUCE is ever upgraded to a newer tag, re-check this still applies — `git apply --check`
+reports without touching anything.

@@ -1,7 +1,9 @@
 #include "PluginEditor.h"
 
 R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
-    : AudioProcessorEditor(&p), processorRef(p),
+    : AudioProcessorEditor(&p),
+      standaloneWindow(p.wrapperType == juce::AudioProcessor::wrapperType_Standalone),
+      processorRef(p),
       header(p.document), waveformDisplay(p.document), spectrogramDisplay(p.document),
       timeRuler(waveformDisplay, p.document), toolbar(p, p.document), knobRow(p.document)
 {
@@ -46,10 +48,11 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
 
     theme->addChangeListener(this);
 
+    const int topInset = standaloneWindow ? kMacTrafficLightInset : 0;
     setWantsKeyboardFocus(true);
     setResizable(true, true);
-    setResizeLimits(680, 464, 2200, 1300);
-    setSize(1000, 630);
+    setResizeLimits(680, 464 + topInset, 2200, 1300 + topInset);
+    setSize(1000, 630 + topInset);
 }
 
 R3WRKAudioProcessorEditor::~R3WRKAudioProcessorEditor()
@@ -71,6 +74,9 @@ void R3WRKAudioProcessorEditor::paint(juce::Graphics& g)
 void R3WRKAudioProcessorEditor::resized()
 {
     auto area = getLocalBounds().reduced(8);
+
+    if (standaloneWindow)
+        area.removeFromTop(kMacTrafficLightInset);   // clear of the floating macOS traffic lights
 
     header.setBounds(area.removeFromTop(30));
     area.removeFromTop(6);
