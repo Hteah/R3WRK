@@ -537,7 +537,6 @@ void EditorToolbar::showToolsMenu()
     juce::PopupMenu m;
     m.addItem(idOpen,   juce::String::fromUTF8("Open\xE2\x80\xA6"));
     m.addItem(idSave,   juce::String::fromUTF8("Save As\xE2\x80\xA6"), ! empty);
-    m.addItem(idRevert, "Revert to Original", ! empty);
     m.addSeparator();
     m.addItem(keyed("Cut",   idCut,   sel,  cmd + "X"));
     m.addItem(keyed("Copy",  idCopy,  sel,  cmd + "C"));
@@ -566,6 +565,7 @@ void EditorToolbar::showToolsMenu()
     m.addSeparator();
     m.addItem(keyed("Undo", idUndo, canUndo, cmd + "Z"));
     m.addItem(keyed("Redo", idRedo, canRedo, shift + cmd + "Z"));
+    m.addItem(idRevert, "Revert to Original", ! empty);
 
     m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(toolsButton), [this](int r)
     {
