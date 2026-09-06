@@ -1359,8 +1359,9 @@ as `"<baseName> NN.wav"` (24-bit, zero-padded index) into a `"<timestamp> slices
 the output folder; `exportOctatrackChain(doc, wavFile, bpm)` writes `<name>.wav` (whole clip)
 plus a sibling `<name>.ot`, falling back to a single whole-clip slice if there are no markers
 and capping at the Octatrack's 64-slice limit (the toolbar reports the count and whether it was
-capped via the header status line). Tools ▾ gains "Slice to Folder…" (enabled only with markers
-present) and "Export Octatrack Chain (.wav + .ot)…" (enabled with any audio).
+capped via the header status line). Tools ▾ gains "Export Slices…" (was "Slice to Folder…";
+enabled only with markers present) and "Export Octatrack Chain (.wav + .ot)…" (enabled with any
+audio).
 
 **Not interactively verified end-to-end** -- no way to script a right-click / menu-pick / mark
 placement in this environment; the marker maths, region computation, slice-file output and the

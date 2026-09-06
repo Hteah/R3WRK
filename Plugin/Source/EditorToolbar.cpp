@@ -540,7 +540,7 @@ void EditorToolbar::showToolsMenu()
     m.addItem(idStretch,   juce::String::fromUTF8("Stretch / Pitch\xE2\x80\xA6"), ! empty);
     m.addItem(idExportSel, "Export Selection to Folder", sel);
     m.addSeparator();
-    m.addItem(idSliceToFolder, juce::String::fromUTF8("Slice to Folder\xE2\x80\xA6"), ! empty && hasSlices);
+    m.addItem(idSliceToFolder, juce::String::fromUTF8("Export Slices\xE2\x80\xA6"), ! empty && hasSlices);
     m.addItem(idExportOt,      juce::String::fromUTF8("Export Octatrack Chain (.wav + .ot)\xE2\x80\xA6"), ! empty);
     m.addItem(idClearSlices,   "Clear Slice Markers", hasSlices);
     m.addSeparator();

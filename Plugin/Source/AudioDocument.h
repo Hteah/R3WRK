@@ -56,7 +56,7 @@ public:
     juce::Range<int64_t> getEffectiveRange() const;
 
     //==============================================================================
-    // Slice markers: sample positions used by Tools ▾ -> "Slice to Folder" / "Export Octatrack
+    // Slice markers: sample positions used by Tools ▾ -> "Export Slices" / "Export Octatrack
     // Chain". Placed/edited via the Slice tool (EditorToolbar's Slice toggle -> sliceModeEnabled;
     // in that mode WaveformDisplay repurposes double-click = add, click-on-a-marker = delete,
     // drag-a-marker = move, click-a-slice-body = play it). Message-thread only (the audio thread
