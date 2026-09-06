@@ -847,8 +847,8 @@ void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
         slicePressOnMarker = sliceDragIndex >= 0;
         slicePressWasPopup = e.mods.isPopupMenu();
 
-        // Double right-click on a marker's top/bottom handle pill -- the only way to delete.
-        if (slicePressWasPopup && e.getNumberOfClicks() >= 2 && sliceDragIndex >= 0
+        // Double LEFT-click on a marker's top/bottom handle band -- the only way to delete.
+        if (! slicePressWasPopup && e.getNumberOfClicks() >= 2 && sliceDragIndex >= 0
             && ((float) e.y <= sliceHandleZonePx
                 || (float) e.y >= (float) getHeight() - sliceHandleZonePx))
         {
@@ -1071,7 +1071,7 @@ void WaveformDisplay::mouseMove(const juce::MouseEvent& e)
     if (document.sliceModeEnabled)
     {
         const bool overMarker = document.findSliceMarkerNear(xToSample((float) e.x), sliceHitTolerance()) >= 0;
-        setMouseCursor(overMarker ? juce::MouseCursor::LeftRightResizeCursor    // drag to move / dbl right-click a handle to delete
+        setMouseCursor(overMarker ? juce::MouseCursor::LeftRightResizeCursor    // drag to move / dbl-click a handle to delete
                                   : juce::MouseCursor::CrosshairCursor);         // left-click to add a marker
         return;
     }

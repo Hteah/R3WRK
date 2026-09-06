@@ -245,7 +245,7 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     scrubButton.setTooltip("Scrub -- press and drag left/right; how far you pull sets the "
                            "speed, like a tape deck's shuttle wheel");
     sliceButton.setTooltip("Slice tool -- left-click adds a marker, right-click plays that slice, "
-                           "drag a marker to move it, double right-click a marker's top/bottom handle "
+                           "drag a marker to move it, double-click a marker's top/bottom handle "
                            "to delete it (Tools has the export)");
     followButton.setTooltip("Follow playhead -- keeps the playhead on screen while playing when zoomed in");
     recordButton.setTooltip("Record");

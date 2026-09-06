@@ -171,8 +171,8 @@ private:
     //   left click (no drag)        -> add a marker at the click
     //   left drag on a marker       -> move it
     //   right click (no drag)       -> play the slice under the click
-    //   double right-click on a     -> delete that marker (the only delete)
-    //     marker's top/bottom handle
+    //   double-click on a marker's  -> delete that marker (the only delete)
+    //     top/bottom handle band
     static constexpr float sliceHandleZonePx = 20.0f;   // top/bottom band that counts as a handle
     int  sliceDragIndex = -1;
     bool sliceDragMoved = false;
