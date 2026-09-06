@@ -167,18 +167,21 @@ private:
     static constexpr float scrubMaxDragPx  = 400.0f;  // distance from the anchor for full rate
 
     // Slice tool (document.sliceModeEnabled). mouseDown records which marker (if any) the press
-    // landed on and whether it was a right/ctrl-click. Then:
-    //   left click (no drag)        -> add a marker at the click
-    //   left drag on a marker       -> move it
-    //   right click (no drag)       -> play the slice under the click
-    //   double-click on a marker's  -> delete that marker (the only delete)
-    //     top/bottom handle band
+    // landed on and whether it was a *plain left* click (sliceLeftPress). Then:
+    //   plain left click (no drag)      -> add a marker at the click
+    //   plain left drag on a marker     -> move it
+    //   double plain-left-click on a    -> delete that marker (the only delete)
+    //     marker's top/bottom handle
+    //   any other button (right / ctrl) -> play the slice under the click
+    // Gating on isLeftButtonDown() rather than !isPopupMenu() because some mice/trackpads don't
+    // reliably set the popup flag for a right-click, which used to let a right double-click hit
+    // the delete branch.
     static constexpr float sliceHandleZonePx = 20.0f;   // top/bottom band that counts as a handle
     static constexpr float sliceMarkerHitPx  = 10.0f;   // horizontal grab distance to a marker line
     int  sliceDragIndex = -1;
     bool sliceDragMoved = false;
     bool slicePressOnMarker = false;
-    bool slicePressWasPopup = false;   // the press was a right / ctrl click
+    bool sliceLeftPress = false;   // the press was a plain left click (not right / ctrl)
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(WaveformDisplay)
 };
