@@ -1491,6 +1491,28 @@ the view is fully zoomed out. During playback the audio thread owns the playhead
 arrows just pan. JUCE auto-repeats `keyPressed` on hold. Matched by exact `KeyPress` equality
 (keyCode + mods), same idiom as the Space / ⌘Z/X/C/V / ⌘+/- shortcuts.
 
+## Realtime stretch -- knob-drag crackle fix
+
+User: pops/crackles when moving Speed/Pitch/Stretch while a sample is playing. Two causes:
+
+1. **Hard ratio steps into RubberBand.** `renderPlaybackStretched` called `setTimeRatio` /
+   `setPitchScale` with `stretch/speed` and `speed*2^(pitch/12)` fresh every block -- a knob
+   drag is a staircase of abrupt changes -> zipper noise. Now both go through a per-block
+   `juce::SmoothedValue<double, Multiplicative>` (~120 ms ramp, `reset()` in `prepareToPlay`),
+   pushed to the stretcher only when the smoothed value actually moved. `stretchRatioNeedsSnap`
+   (set wherever the stretcher is `reset()`) does `setCurrentAndTargetValue` once so a fresh
+   play pass / bypass<->engage flip starts at the right ratio with no audible slide-in.
+
+2. **Offline preview competing during playback.** `WaveformStretchPreview::kickOffJob` copies
+   the whole document buffer under `document.getLock()` -- while playing, that can make
+   `processBlock`'s `ScopedTryLock` fail for a block (dropped block -> click), plus the offline
+   RubberBand pass fights the RT stretcher for CPU. `update()` now holds off on `kickOffJob`
+   while `document.isPlaying` (the knob move stays `waitingToSettle`; preview refreshes on
+   stop), and the worker thread starts at `juce::Thread::Priority::low`.
+
+Not independently verified by ear here -- flagged for the user to retest. Smoke test's
+WaveformStretchPreview section still passes (no playback in that test, so the gate is inert).
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).
