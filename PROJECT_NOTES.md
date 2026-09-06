@@ -1578,6 +1578,14 @@ also how the dark strip + hand-rolled rounded corners worked). Now:
   chrome). `standaloneWindow` = `p.wrapperType == wrapperType_Standalone`, init'd from the
   ctor param (declared before `processorRef` to keep member-init order clean).
 
+**Follow-up (`b59410a`) -- the window wouldn't move.** Native strip hidden + every pixel a JUCE
+component => `movableByWindowBackground` never fired. `r3wrkBeginWindowDrag()` (in
+`StandaloneWindowShape.mm`) hands the drag to AppKit via `performWindowDragWithEvent:` off
+`NSApp.currentEvent`. Called from `PluginEditor::mouseDown` when the press is in the top
+`kMacTrafficLightInset` band, and from `NotificationArea::mouseDown` (patch) for when the
+"input muted" banner is the thing at the top (its label also gets
+`setInterceptsMouseClicks(false)`).
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).
