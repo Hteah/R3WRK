@@ -1451,6 +1451,30 @@ visible in a screenshot, but the actual double-click / drag / click-to-play feel
 the handle-only delete -- is the user's to try, same as the export-to-hardware step. Smoke test
 passes; all four targets build clean.
 
+## Follow playhead
+
+Ported from Sieve's editor (user: "Sieve's editor has a follow waveform, so when you zoom in
+while it's playing you see where the waveform is"). New toolbar toggle `followButton`
+(`R3WRKLookAndFeel::iconFollow` -- a playhead marker flanked by inward chevrons), sat after
+Slice, same outlined-off / accent-on toggling style as Loop/Scrub/Slice, disabled while
+recording. Drives `AudioDocument::followPlayheadEnabled` (plain bool, message-thread only,
+**session-only** -- not persisted, like the Scrub/Slice tool toggles; not mutually exclusive
+with anything).
+
+`WaveformDisplay::followPlayheadIfNeeded()` runs from the existing 30 Hz `timerCallback` (after
+the view housekeeping, before `repaint()`): when follow is on, playing, and not
+scrubbing/recording, and the view is zoomed in past the whole clip, it slides
+`viewStart/viewEnd` so the playhead sits at centre and calls `rebuildWaveformPath()` (same as
+`panByPixels`). The centre offset is `span / (2 * getTimeScale())` -- `span/2` at identity, but
+`sampleToX()` divides samples-per-pixel by `getTimeScale()`, so the raw span across the width is
+`span/timeScale`. Clamped to `[0, maxViewSpan() - span]`, so the playhead drifts off-centre at
+the clip edges. No-op when zoomed all the way out. A manual pan/zoom still works -- the next
+frame just re-centres (matches Sieve). `TimeRuler` picks up the scrolled view through its own
+30 Hz repaint.
+
+**Not interactively verified** -- can't script playback + zoom here; the toggle button renders
+and the math mirrors Sieve's `followIfNeeded`. Smoke test passes; all four targets build clean.
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).

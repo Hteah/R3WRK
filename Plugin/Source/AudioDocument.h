@@ -106,6 +106,13 @@ public:
     std::atomic<double> scrubVelocity { 0.0 };
 
     //==============================================================================
+    // Follow-playhead: while playing and zoomed in, WaveformDisplay slides its view each
+    // frame to keep the playhead centred (the waveform scrolls under a fixed cursor).
+    // EditorToolbar's Follow toggle -- message-thread only, session-only (not persisted),
+    // like scrubModeEnabled / sliceModeEnabled.
+    bool followPlayheadEnabled = false;
+
+    //==============================================================================
     // Auto-Record: arm this and R3WRK starts recording for real the moment the input level
     // crosses autoRecordThresholdDb -- a level-triggered record standby (a tape deck's
     // voice-activated record), not the plain Record button's "start right now".

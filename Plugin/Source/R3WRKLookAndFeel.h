@@ -9,7 +9,7 @@
     handful of drawn transport icons in place of button text (play triangle, stop square,
     loop's two-arrow circle, play-from-start's bar+triangle, Tools' gear, Scrub's
     notched reel hub, Reverse's leftward arrow, Clear's X, Auto-Record's gauge,
-    Slice's marker flag) -- see drawButtonText().
+    Slice's marker flag, Follow's playhead-on-a-ruler) -- see drawButtonText().
     Reads live from the shared theme, so it stays in sync with theme changes the same way
     the rest of the UI does.
 
@@ -43,6 +43,7 @@ public:
     static constexpr const char* iconClear         = "icon:clear";          // an X
     static constexpr const char* iconAutoRecord    = "icon:autoRecord";     // a gauge (ring + arc + needle)
     static constexpr const char* iconSlice         = "icon:slice";          // a marker flag (pole + pennant)
+    static constexpr const char* iconFollow        = "icon:follow";         // playhead on a ruler + follow chevrons
 
     void drawButtonText(juce::Graphics&, juce::TextButton&,
                        bool isMouseOverButton, bool isButtonDown) override;

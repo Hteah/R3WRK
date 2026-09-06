@@ -223,6 +223,7 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     addAndMakeVisible(loopButton);
     addAndMakeVisible(scrubButton);
     addAndMakeVisible(sliceButton);
+    addAndMakeVisible(followButton);
     addAndMakeVisible(timeLabel);
     addAndMakeVisible(recordButton);
     addAndMakeVisible(toolsButton);
@@ -235,6 +236,7 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     loopButton.setClickingTogglesState(true);
     scrubButton.setClickingTogglesState(true);
     sliceButton.setClickingTogglesState(true);
+    followButton.setClickingTogglesState(true);
     autoRecordButton.setClickingTogglesState(true);
 
     playFromStartButton.setTooltip("Play from start");
@@ -245,6 +247,7 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     sliceButton.setTooltip("Slice tool -- double-click to add a marker, double-click a marker's top/bottom "
                            "handle to delete it, drag a marker to move it, click a slice to play it "
                            "(Tools has the export)");
+    followButton.setTooltip("Follow playhead -- keeps the playhead on screen while playing when zoomed in");
     recordButton.setTooltip("Record");
     toolsButton.setTooltip("Tools");
     reverseButton.setTooltip("Reverse the selection (or the whole clip, if nothing's selected)");
@@ -253,7 +256,8 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
                                 "input crosses the threshold (set in Tools, Auto-Record Threshold)");
 
     for (auto* b : { &playFromStartButton, &playButton, &loopButton, &scrubButton, &sliceButton,
-                     &recordButton, &toolsButton, &reverseButton, &clearButton, &autoRecordButton })
+                     &followButton, &recordButton, &toolsButton, &reverseButton, &clearButton,
+                     &autoRecordButton })
     {
         b->setLookAndFeel(&toolbarLnF);
 
@@ -307,6 +311,11 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
         }
         document.notifyChanged();
     };
+    followButton.onClick = [this]
+    {
+        document.followPlayheadEnabled = followButton.getToggleState();
+        document.notifyChanged();   // WaveformDisplay's 30Hz timer does the actual view-following
+    };
     reverseButton.onClick = [this] { EditActions::reverse(document); };
     clearButton.onClick = [this]
     {
@@ -342,7 +351,8 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
 EditorToolbar::~EditorToolbar()
 {
     for (auto* b : { &playFromStartButton, &playButton, &loopButton, &scrubButton, &sliceButton,
-                     &recordButton, &toolsButton, &reverseButton, &clearButton, &autoRecordButton })
+                     &followButton, &recordButton, &toolsButton, &reverseButton, &clearButton,
+                     &autoRecordButton })
         b->setLookAndFeel(nullptr);   // detach before toolbarLnF is destroyed
     theme->removeChangeListener(this);
     document.changeBroadcaster.removeChangeListener(this);
@@ -383,6 +393,12 @@ void EditorToolbar::applyTheme()
     sliceButton.setColour(juce::TextButton::buttonOnColourId, pal.accent);
     sliceButton.setColour(juce::TextButton::textColourOffId, pal.screenText);
     sliceButton.setColour(juce::TextButton::textColourOnId, pal.windowBg);
+
+    // Follow: same toggling treatment.
+    followButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+    followButton.setColour(juce::TextButton::buttonOnColourId, pal.accent);
+    followButton.setColour(juce::TextButton::textColourOffId, pal.screenText);
+    followButton.setColour(juce::TextButton::textColourOnId, pal.windowBg);
 
     recordButton.setColour(juce::TextButton::buttonColourId, pal.recordButton);
     recordButton.setColour(juce::TextButton::textColourOffId, juce::Colours::white);   // the stop-square ink while recording
@@ -650,9 +666,11 @@ void EditorToolbar::updateTransportButtonText()
     loopButton.setToggleState(document.loopEnabled.load(), juce::dontSendNotification);
     scrubButton.setToggleState(document.scrubModeEnabled, juce::dontSendNotification);
     sliceButton.setToggleState(document.sliceModeEnabled, juce::dontSendNotification);
+    followButton.setToggleState(document.followPlayheadEnabled, juce::dontSendNotification);
     recordButton.setEnabled(! playing || rec);
     scrubButton.setEnabled(! rec);
     sliceButton.setEnabled(! rec);
+    followButton.setEnabled(! rec);
     reverseButton.setEnabled(! rec);
     clearButton.setEnabled(! rec);
     autoRecordButton.setEnabled(! rec);
@@ -841,6 +859,7 @@ void EditorToolbar::resized()
     add(toolsButton, 28);
     add(scrubButton, 28);
     add(sliceButton, 28);
+    add(followButton, 28);
     add(reverseButton, 28);
     add(clearButton, 28);
     fb.items.add(juce::FlexItem().withFlex(1.0f));

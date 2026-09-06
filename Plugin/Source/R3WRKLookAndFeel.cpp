@@ -272,6 +272,40 @@ namespace
         g.setColour (ink);
         g.fillPath (flag);
     }
+
+    // Follow-playhead: a playhead marker (a downward triangle head + a thin line down the
+    // centre) flanked by two inward-pointing chevrons -- "keep the playhead in view". The
+    // chevrons are the follow cue; ported loosely from Sieve's FollowPlayheadIcon.
+    void drawFollowIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
+    {
+        auto a = bounds.reduced (bounds.getHeight() * 0.22f);
+        const float w = a.getWidth(), h = a.getHeight();
+        const float cx = a.getCentreX();
+        const float lineW = juce::jmax (1.4f, h * 0.085f);
+
+        g.setColour (ink);
+
+        // Playhead: triangle head at the top, thin line straight down.
+        const float tw = w * 0.16f, td = h * 0.26f;
+        juce::Path head;
+        head.addTriangle (cx - tw, a.getY(), cx + tw, a.getY(), cx, a.getY() + td);
+        g.fillPath (head);
+        g.fillRect (cx - lineW * 0.5f, a.getY(), lineW, h);
+
+        // Inward chevrons > ... < flanking the line, centred vertically.
+        const float cy = a.getCentreY() + h * 0.06f;
+        const float ch = h * 0.20f, reach = w * 0.40f;
+        juce::Path chev;
+        chev.startNewSubPath (cx - reach + ch, cy - ch);
+        chev.lineTo          (cx - reach,      cy);
+        chev.lineTo          (cx - reach + ch, cy + ch);
+        chev.startNewSubPath (cx + reach - ch, cy - ch);
+        chev.lineTo          (cx + reach,      cy);
+        chev.lineTo          (cx + reach - ch, cy + ch);
+        g.strokePath (chev, juce::PathStrokeType (juce::jmax (1.5f, h * 0.10f),
+                                                  juce::PathStrokeType::curved,
+                                                  juce::PathStrokeType::rounded));
+    }
 }
 
 void R3WRKLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int width, int height,
@@ -355,7 +389,7 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     if (text != iconPlay && text != iconStop && text != iconLoop
         && text != iconPlayFromStart && text != iconTools && text != iconScrub
         && text != iconReverse && text != iconClear && text != iconAutoRecord
-        && text != iconSlice)
+        && text != iconSlice && text != iconFollow)
     {
         juce::LookAndFeel_V4::drawButtonText(g, button, isMouseOverButton, isButtonDown);
         return;
@@ -385,6 +419,11 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     if (text == iconSlice)
     {
         drawSliceIcon(g, bounds, ink);
+        return;
+    }
+    if (text == iconFollow)
+    {
+        drawFollowIcon(g, bounds, ink);
         return;
     }
     if (text == iconReverse)

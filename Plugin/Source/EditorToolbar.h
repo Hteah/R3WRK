@@ -97,6 +97,10 @@ private:
                                                                     // (double-click adds a marker,
                                                                     // etc.); mutually exclusive with
                                                                     // Scrub
+    juce::TextButton followButton { R3WRKLookAndFeel::iconFollow }; // setClickingTogglesState(true)
+                                                                    // -- while playing + zoomed in,
+                                                                    // WaveformDisplay keeps the
+                                                                    // playhead centred
     juce::Label timeLabel;   // also carries the "● REC m:ss" elapsed time while recording
     juce::TextButton recordButton;
     juce::TextButton autoRecordButton { R3WRKLookAndFeel::iconAutoRecord };  // setClickingTogglesState(true)

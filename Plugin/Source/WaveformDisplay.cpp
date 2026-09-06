@@ -44,6 +44,38 @@ bool WaveformDisplay::refitViewIfContentChanged()
     return true;
 }
 
+// Follow-playhead (EditorToolbar's Follow toggle -> document.followPlayheadEnabled): while
+// playing and zoomed in past the whole clip, slide the view each frame so the playhead sits
+// at the centre and the waveform scrolls under it. Clamps at the clip edges (the playhead
+// drifts off-centre there), and does nothing when the whole clip is already visible. Mirrors
+// Sieve's editor. A manual pan/zoom still works -- the next frame just re-centres.
+void WaveformDisplay::followPlayheadIfNeeded()
+{
+    if (! document.followPlayheadEnabled)
+        return;
+    if (! document.isPlaying.load() || document.isScrubbing.load() || document.isRecording.load())
+        return;
+
+    const int64_t span = viewEnd - viewStart;
+    if (span <= 0 || span >= maxViewSpan())        // zoomed all the way out -- nothing to follow
+        return;
+
+    // The playhead is a raw sample index; viewStart/viewEnd are raw sample bounds. sampleToX()
+    // divides samples-per-pixel by getTimeScale(), so the raw span actually across the width is
+    // span/timeScale -- hence the half-offset is span/(2*timeScale), which is span/2 at identity.
+    const double timeScale = juce::jmax(0.0001, document.getTimeScale());
+    const int64_t half   = (int64_t) ((double) span / (2.0 * timeScale));
+    const int64_t maxStart = juce::jmax((int64_t) 0, maxViewSpan() - span);
+    const int64_t target = juce::jlimit((int64_t) 0, maxStart, document.playhead.load() - half);
+
+    if (target == viewStart)
+        return;
+
+    viewStart = target;
+    viewEnd   = target + span;
+    rebuildWaveformPath();
+}
+
 void WaveformDisplay::timerCallback()
 {
     // Rebuild whenever the audio content changed, or the view range is stale / degenerate,
@@ -88,6 +120,8 @@ void WaveformDisplay::timerCallback()
         }
         rebuildWaveformPath();
     }
+
+    followPlayheadIfNeeded();   // after the view is known-good; rebuilds the path itself if it scrolls
     repaint();
 }
 

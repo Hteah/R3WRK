@@ -95,6 +95,7 @@ public:
 private:
     void timerCallback() override;
     bool refitViewIfContentChanged();   // see .cpp -- keeps "show everything" showing everything
+    void followPlayheadIfNeeded();      // slide the view to keep the playhead centred while playing
     void paintRecordingScope(juce::Graphics&);
     void paintSelectionPreview(juce::Graphics&);   // live Amplify/Stretch preview overlay, see .cpp
     void beginSelectionDragExport();   // native file drag of the selection to Ableton / Finder
