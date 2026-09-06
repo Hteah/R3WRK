@@ -43,6 +43,15 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     rtScratchOut.setSize(rtChannels, juce::jmax(8192, juce::jmax(0, samplesPerBlock) * 2));
     rtStretcher->setMaxProcessSize((size_t) inScratch);
 
+    constexpr double ratioRampSeconds = 0.12;
+    smoothedTimeRatio.reset(sampleRate, ratioRampSeconds);
+    smoothedPitchScale.reset(sampleRate, ratioRampSeconds);
+    smoothedTimeRatio.setCurrentAndTargetValue(1.0);
+    smoothedPitchScale.setCurrentAndTargetValue(1.0);
+    lastAppliedTimeRatio  = -1.0;
+    lastAppliedPitchScale = -1.0;
+    stretchRatioNeedsSnap = true;
+
     wasPlaying = false;
     stretcherPrimed = false;
     rtFinished = false;
@@ -126,8 +135,35 @@ void R3WRKAudioProcessor::renderPlaybackStretched(juce::AudioBuffer<float>& out,
     speed   = juce::jlimit(AudioDocument::kMinSpeed,   AudioDocument::kMaxSpeed,   speed);
     pitch   = juce::jlimit(AudioDocument::kMinPitch,   AudioDocument::kMaxPitch,   pitch);
     stretch = juce::jlimit(AudioDocument::kMinStretch, AudioDocument::kMaxStretch, stretch);
-    rtStretcher->setTimeRatio(stretch / speed);
-    rtStretcher->setPitchScale(speed * std::pow(2.0, pitch / 12.0));
+
+    // Ramp the ratios instead of stepping them, so a knob drag mid-playback doesn't machine-gun
+    // RubberBand with abrupt changes (that's the pops/crackle). Sampled once per block; snapped
+    // straight to target on a fresh play pass so playback starts at the right ratio.
+    const double targetTimeRatio  = stretch / juce::jmax(1.0e-4, speed);
+    const double targetPitchScale = speed * std::pow(2.0, pitch / 12.0);
+    if (stretchRatioNeedsSnap)
+    {
+        smoothedTimeRatio.setCurrentAndTargetValue(targetTimeRatio);
+        smoothedPitchScale.setCurrentAndTargetValue(targetPitchScale);
+        stretchRatioNeedsSnap = false;
+    }
+    else
+    {
+        smoothedTimeRatio.setTargetValue(targetTimeRatio);
+        smoothedPitchScale.setTargetValue(targetPitchScale);
+    }
+    const double tr = smoothedTimeRatio.skip(numSamples);
+    const double ps = smoothedPitchScale.skip(numSamples);
+    if (std::abs(tr - lastAppliedTimeRatio) > 1.0e-4 * juce::jmax(1.0, tr))
+    {
+        rtStretcher->setTimeRatio(tr);
+        lastAppliedTimeRatio = tr;
+    }
+    if (std::abs(ps - lastAppliedPitchScale) > 1.0e-4 * juce::jmax(1.0, ps))
+    {
+        rtStretcher->setPitchScale(ps);
+        lastAppliedPitchScale = ps;
+    }
 
     const int rc = rtChannels;
     const int inCap  = rtScratchIn.getNumSamples();
@@ -333,6 +369,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                     rtStretcher->reset();
                     stretcherPrimed = true;
                     rtFinished = false;
+                    stretchRatioNeedsSnap = true;   // start at the current ratio, no 120ms slide in
                 }
                 renderPlaybackStretched(buffer, numCh, numSamples, docBuf, pos,
                                         regionStart, regionEnd, loop, speed, pitch, stretch);

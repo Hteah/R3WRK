@@ -66,6 +66,17 @@ private:
     bool stretcherPrimed = false;   // stretcher holds state from the current play pass
     bool rtFinished = false;        // final block sent; only drain from here on
 
+    // Turning a knob during playback used to feed RubberBand a hard staircase of time-ratio /
+    // pitch-scale steps (one per block), which it renders as zipper noise / pops. Ramp both
+    // toward their target over ~120 ms instead -- multiplicative so equal ratio changes glide
+    // equally -- sampled once per block. `stretchRatioNeedsSnap` jumps straight to target on a
+    // fresh play pass / bypass<->engage flip so playback doesn't start with a 120 ms slide.
+    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Multiplicative> smoothedTimeRatio  { 1.0 };
+    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Multiplicative> smoothedPitchScale { 1.0 };
+    double lastAppliedTimeRatio  = -1.0;
+    double lastAppliedPitchScale = -1.0;
+    bool   stretchRatioNeedsSnap = true;
+
     static bool knobsEngaged(double speed, double pitch, double stretch);
     // Fills the playback branch of processBlock. `pos` is the doc read cursor (also the
     // value stored back into document.playhead).

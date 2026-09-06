@@ -5,7 +5,9 @@
 WaveformStretchPreview::WaveformStretchPreview(AudioDocument& doc)
     : juce::Thread("R3WRK stretch preview"), document(doc)
 {
-    startThread();
+    // Low priority: this is a cosmetic redraw, and an offline RubberBand pass over the whole
+    // clip must never take CPU away from the real-time playback stretcher.
+    startThread(juce::Thread::Priority::low);
 }
 
 WaveformStretchPreview::~WaveformStretchPreview()
@@ -56,7 +58,13 @@ bool WaveformStretchPreview::update()
         return false;
     }
 
-    if (waitingToSettle && juce::Time::getMillisecondCounter() >= settleDeadlineMs)
+    // Don't compute the preview while audio is playing: kickOffJob() copies the whole document
+    // buffer under document.getLock(), which can make processBlock's try-lock fail for a block
+    // (-> a dropped block -> a click), and the offline RubberBand pass would be competing with
+    // the real-time stretcher for CPU. The knob move stays pending (waitingToSettle) and the
+    // preview refreshes once playback stops.
+    if (waitingToSettle && ! document.isPlaying.load()
+        && juce::Time::getMillisecondCounter() >= settleDeadlineMs)
     {
         waitingToSettle = false;
         kickOffJob(speed, pitch, stretch);
