@@ -260,7 +260,7 @@ namespace
         // Banner: a plain rectangle hanging off the top of the pole.
         flag.addRectangle (poleX, top, flagW, flagH);
 
-        const auto target = bounds.reduced (bounds.getHeight() * 0.16f);
+        const auto target = bounds.reduced (bounds.getHeight() * 0.22f);
         auto bb = flag.getBounds();
         const float k = juce::jmin (target.getWidth()  / bb.getWidth(),
                                     target.getHeight() / bb.getHeight());
