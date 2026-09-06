@@ -1520,6 +1520,18 @@ high-speed pitch instead of Finer (R3) + high-quality; `WaveformStretchPreview` 
 true only while the worker is mid-pass) drives a small "Rendering stretch" pill + rotating arc
 bottom-right in `WaveformDisplay::paint()`. Still deferred until playback stops.
 
+**Follow-up (`a6a5e3e`) -- three more, after a 19.4x test took *minutes* to redraw and the
+zoomed-in preview drew as blocks:**
+- `TimeStretchEngine::process` grew its output buffer by `avail` each retrieve with
+  keepExistingContent=true -> realloc+copy the whole thing every ~4k samples -> O(n^2) (minutes
+  at 20x). Now pre-sized to `numFrames*ratio*1.15 + slack`, geometric-double fallback, final
+  trim. Speeds up the destructive Apply too.
+- Preview peak cache was a fixed 64 samples/bin -> blocky past that zoom. `chooseBinSize()`
+  adapts: `minBinSize`=8 for normal ratios, doubling only once bins/ch would exceed
+  `maxBinsPerChannel`=1.5M. `binSize` rides in the `Result`; `getPeakRange()` uses it.
+- Worker thread back to `Priority::normal` (the crackle-fix `low` was pointless once the pass
+  only runs while stopped, and it dragged on a busy machine).
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).
