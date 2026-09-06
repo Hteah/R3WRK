@@ -1597,8 +1597,14 @@ into a sample count at the current zoom -- once past ~2 samples/px that `jmax`'d
 and `AudioDocument::findSliceMarkerNear(xToSample(e.x), 1)` then only matched when the click's
 truncated sample landed within 1 of the marker's, which is integer-truncation luck per marker.
 Replaced with `sliceMarkerAtPixel(x)`: walk the markers, `abs(sampleToX(m) - x) <=
-sliceMarkerHitPx` (7 px), nearest wins. Zoom-independent. `sliceHitTolerance()` removed;
+sliceMarkerHitPx` (now 10 px, `1f5c291`), nearest wins. Zoom-independent. `sliceHitTolerance()` removed;
 `AudioDocument::findSliceMarkerNear` kept (unused now, harmless).
+
+**`2254af8` -- delete gated on the left button.** User: a double *right*-click still deleted a
+marker. Some mice/trackpads don't set `mods.isPopupMenu()` for a right-click, so the old
+`! slicePressWasPopup` gate on the double-click handle-delete could be true for a right press.
+Now `sliceLeftPress = isLeftButtonDown() && ! isPopupMenu()` gates delete + drag; play is
+"anything that isn't a plain left press". A real double right-click can't reach delete.
 
 ## Known gaps / natural next steps
 
