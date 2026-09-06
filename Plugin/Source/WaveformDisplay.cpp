@@ -680,6 +680,10 @@ void WaveformDisplay::paint(juce::Graphics& g)
     // Slice markers (Slice tool): same 2px line + top/bottom handle pills as the selection
     // brackets, so they're the "similar size" the user asked for -- but in the loop-marker
     // colour rather than the selection accent, so the two don't read as the same thing.
+    // Only drawn while the Slice tool is selected; turning it off hides them (they stay in
+    // document.sliceMarkers / plugin state and come back when the tool is re-enabled) and the
+    // mouse handlers above fall through to normal editing.
+    if (document.sliceModeEnabled)
     {
         const auto& marks = document.getSliceMarkers();
         const float h = (float) getHeight();
