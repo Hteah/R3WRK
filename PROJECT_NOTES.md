@@ -1611,6 +1611,16 @@ single-click add fired at odd times. Now (in `mouseDown` on `getNumberOfClicks()
 plain-left double-click adds a marker (and grabs it so a continued drag nudges it); on a
 marker's handle band it deletes. Single left-click does nothing; right-click still plays.
 
+## Slice mode: "blue marker that won't delete" was a selection bracket (`3777dd8`)
+
+`playSliceAt` (right-click to audition a slice) calls `document.setSelection()` over that
+slice so `processBlock`'s play region matches it. The selection's **edge brackets** (accent
+blue, a 2 px line + top/bottom handle pills) are drawn *identically* to a slice marker -- and
+land exactly on the marker at the slice's start. Delete the orange marker and the blue
+bracket stays put, reading as "the marker turned blue and now won't move or delete". Fix:
+`WaveformDisplay::paint()` skips the selection brackets (keeps only the faint wash) while
+`sliceModeEnabled`.
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).
