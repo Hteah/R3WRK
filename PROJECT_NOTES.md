@@ -1589,6 +1589,17 @@ trim boundary. With Loop on and no selection, `processBlock`'s play region is
 marker. R3WRK has no partial-loop UI (a loop is always the whole clip, or the selection), so
 `restoreSnapshot()` now pins `loopStart = 0; loopEnd = getNumSamples()` rather than clamping.
 
+## Slice markers: "some won't delete" (`4cfd570`)
+
+User: hovering a marker's bottom sometimes showed the resize cursor (grab/delete works) and
+sometimes stayed a crosshair (ignored). `WaveformDisplay::sliceHitTolerance()` turned "~6 px"
+into a sample count at the current zoom -- once past ~2 samples/px that `jmax`'d to 1 sample,
+and `AudioDocument::findSliceMarkerNear(xToSample(e.x), 1)` then only matched when the click's
+truncated sample landed within 1 of the marker's, which is integer-truncation luck per marker.
+Replaced with `sliceMarkerAtPixel(x)`: walk the markers, `abs(sampleToX(m) - x) <=
+sliceMarkerHitPx` (7 px), nearest wins. Zoom-independent. `sliceHitTolerance()` removed;
+`AudioDocument::findSliceMarkerNear` kept (unused now, harmless).
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).
