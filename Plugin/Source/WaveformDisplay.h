@@ -105,7 +105,7 @@ private:
     void paintRecordingScope(juce::Graphics&);
     void paintSelectionPreview(juce::Graphics&);   // live Amplify/Stretch preview overlay, see .cpp
     void beginSelectionDragExport();   // native file drag of the selection to Ableton / Finder
-    int  sliceMarkerAtPixel(float x) const;    // nearest slice marker within sliceMarkerHitPx of x, else -1
+    int  sliceMarkerAtPixel(float x, float tolPx) const;   // nearest slice marker within tolPx of x, else -1
     void playSliceAt(int64_t sample);          // Slice tool: play the region containing `sample`
     void rebuildPeakCache();           // scan the buffer once per content change (holds the lock briefly)
     void rebuildWaveformPath();        // build the display path from the cache (no lock) per view change
@@ -177,8 +177,10 @@ private:
     // Gating on isLeftButtonDown() rather than !isPopupMenu() because some mice/trackpads don't
     // reliably set the popup flag for a right-click, which used to let a right double-click hit
     // the delete branch.
-    static constexpr float sliceHandleZonePx = 20.0f;   // top/bottom band that counts as a handle
-    static constexpr float sliceMarkerHitPx  = 10.0f;   // horizontal grab distance to a marker line
+    static constexpr float sliceHandleZonePx  = 20.0f;   // top/bottom band that counts as a handle
+    static constexpr float sliceMarkerHitPx   = 10.0f;   // grab distance for drag / "over a marker"
+    static constexpr float sliceDeleteSnapPx  = 24.0f;   // wider: a double-click in the handle band
+                                                         // is clearly aimed at a marker, so snap to it
     int  sliceDragIndex = -1;
     bool sliceDragMoved = false;
     bool slicePressOnMarker = false;

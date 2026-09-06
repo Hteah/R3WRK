@@ -841,28 +841,33 @@ void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
 
     if (document.sliceModeEnabled)
     {
-        sliceDragIndex     = sliceMarkerAtPixel((float) e.x);
+        sliceDragIndex     = sliceMarkerAtPixel((float) e.x, sliceMarkerHitPx);
         sliceDragMoved     = false;
         slicePressOnMarker = sliceDragIndex >= 0;
         sliceLeftPress     = e.mods.isLeftButtonDown() && ! e.mods.isPopupMenu();
 
-        // A plain-left double-click: on a marker's top/bottom handle band -> delete it;
-        // on empty space -> add a marker there (and let a continued drag nudge it).
+        // A plain-left double-click: in the top/bottom handle band -> delete the nearest marker
+        // (wide snap -- the y position already means "delete", so don't require a precise x);
+        // in the body -> add a marker there (and grab it so a continued drag nudges it).
         if (sliceLeftPress && e.getNumberOfClicks() >= 2)
         {
-            const bool onHandle = (float) e.y <= sliceHandleZonePx
-                               || (float) e.y >= (float) getHeight() - sliceHandleZonePx;
+            const bool inHandleBand = (float) e.y <= sliceHandleZonePx
+                                   || (float) e.y >= (float) getHeight() - sliceHandleZonePx;
 
-            if (sliceDragIndex >= 0 && onHandle)
+            if (inHandleBand)
             {
-                document.removeSliceMarker(sliceDragIndex);
-                sliceDragIndex = -1;
-                slicePressOnMarker = false;
+                const int idx = sliceMarkerAtPixel((float) e.x, sliceDeleteSnapPx);
+                if (idx >= 0)
+                {
+                    document.removeSliceMarker(idx);
+                    sliceDragIndex = -1;
+                    slicePressOnMarker = false;
+                }
             }
             else if (sliceDragIndex < 0)
             {
                 document.addSliceMarker(xToSample((float) e.x));
-                sliceDragIndex     = sliceMarkerAtPixel((float) e.x);   // grab it for an immediate drag
+                sliceDragIndex     = sliceMarkerAtPixel((float) e.x, sliceMarkerHitPx);   // grab for an immediate drag
                 slicePressOnMarker = sliceDragIndex >= 0;
             }
         }
@@ -913,14 +918,14 @@ void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
     dragAnchor = f;
 }
 
-int WaveformDisplay::sliceMarkerAtPixel(float x) const
+int WaveformDisplay::sliceMarkerAtPixel(float x, float tolPx) const
 {
     // Hit-test in pixel space, not sample space: a "6 px in samples" tolerance collapses to 1
     // sample when zoomed in past ~2 samples/px, and then whether a click lands on a marker
-    // comes down to integer-truncation luck per marker -- which is the "some won't delete" bug.
+    // comes down to integer-truncation luck per marker -- which was the "some won't delete" bug.
     const auto& marks = document.getSliceMarkers();
     int best = -1;
-    float bestDist = sliceMarkerHitPx;
+    float bestDist = tolPx;
     for (int i = 0; i < (int) marks.size(); ++i)
     {
         const float d = std::abs(sampleToX(marks[(size_t) i]) - x);
@@ -1085,9 +1090,14 @@ void WaveformDisplay::mouseMove(const juce::MouseEvent& e)
 {
     if (document.sliceModeEnabled)
     {
-        const bool overMarker = sliceMarkerAtPixel((float) e.x) >= 0;
+        // Wider "you can delete here" zone in the top/bottom handle band, matching mouseDown's
+        // snap; the tighter grab zone in the body.
+        const bool inHandleBand = (float) e.y <= sliceHandleZonePx
+                               || (float) e.y >= (float) getHeight() - sliceHandleZonePx;
+        const bool overMarker = sliceMarkerAtPixel((float) e.x,
+                                                   inHandleBand ? sliceDeleteSnapPx : sliceMarkerHitPx) >= 0;
         setMouseCursor(overMarker ? juce::MouseCursor::LeftRightResizeCursor    // drag to move / dbl-click a handle to delete
-                                  : juce::MouseCursor::CrosshairCursor);         // left-click to add a marker
+                                  : juce::MouseCursor::CrosshairCursor);         // dbl-click the body to add a marker
         return;
     }
 
