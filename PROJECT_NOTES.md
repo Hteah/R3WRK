@@ -1578,6 +1578,17 @@ component => `movableByWindowBackground` never fired. `r3wrkBeginWindowDrag()` (
 "input muted" banner is the thing at the top (its label also gets
 `setInterceptsMouseClicks(false)`).
 
+## Phantom loop marker after Trim + Undo (`2b13baf`)
+
+User: selection -> right-click Trim -> Undo left a stray yellow/orange vertical line mid-clip
+that also stopped playback there. It's a **loop marker**: `AudioDocument::restoreSnapshot()`
+(runs on undo/redo) only *clamped* `loopStart`/`loopEnd` to the new length. Trim to a short
+selection shrank `loopEnd`; the Undo restored the long buffer but left `loopEnd` at the old
+trim boundary. With Loop on and no selection, `processBlock`'s play region is
+`[loopStart, loopEnd]`, so playback capped there, and `WaveformDisplay::paint()` drew the
+marker. R3WRK has no partial-loop UI (a loop is always the whole clip, or the selection), so
+`restoreSnapshot()` now pins `loopStart = 0; loopEnd = getNumSamples()` rather than clamping.
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).
