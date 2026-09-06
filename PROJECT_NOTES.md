@@ -1606,6 +1606,11 @@ marker. Some mice/trackpads don't set `mods.isPopupMenu()` for a right-click, so
 Now `sliceLeftPress = isLeftButtonDown() && ! isPopupMenu()` gates delete + drag; play is
 "anything that isn't a plain left press". A real double right-click can't reach delete.
 
+**`87759d8` -- add moved to a double-left-click.** User instinctively double-clicks, so the
+single-click add fired at odd times. Now (in `mouseDown` on `getNumberOfClicks() >= 2`): empty
+plain-left double-click adds a marker (and grabs it so a continued drag nudges it); on a
+marker's handle band it deletes. Single left-click does nothing; right-click still plays.
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).
