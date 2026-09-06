@@ -378,7 +378,12 @@ void WaveformDisplay::rebuildPeakCache()
 {
     juce::AudioBuffer<float> copy;
     {
-        const juce::ScopedLock sl(document.getLock());   // held only for the copy, not the scan
+        // Try-lock, never block: if processBlock is mid-callback holding this, keep the old
+        // cache and let rebuildWaveformPath() retry next tick. A blocking lock here on the
+        // message thread would stall the audio thread's own try-lock -> a dropped block -> click.
+        const juce::CriticalSection::ScopedTryLockType sl(document.getLock());
+        if (! sl.isLocked())
+            return;
         copy.makeCopyOf(document.getBuffer());
         peakVersion = document.getBufferVersion();
     }
@@ -444,7 +449,10 @@ void WaveformDisplay::rebuildWaveformPath()
 
     // Deep zoom (fewer than one peak-cache bin per pixel): copy just the actually-visible raw
     // span (w * samplesPerPixel raw samples -- bounded even at extreme Stretch, unlike the full
-    // [viewStart,viewEnd) range) out from under the lock once, then read it per-sample below.
+    // [viewStart,viewEnd) range) so the per-pixel loop below can read real samples. Try-lock
+    // only -- with follow-playhead on during playback this runs every frame, and a blocking
+    // lock would keep beating processBlock's try-lock -> dropped block -> crackle. If we can't
+    // get it, `raw` stays empty and the loop falls back to the (coarser) bin cache this frame.
     juce::AudioBuffer<float> raw;
     int64_t rawStart = 0;
     if (samplesPerPixel < (double) peakBinSize)
@@ -452,14 +460,17 @@ void WaveformDisplay::rebuildWaveformPath()
         rawStart = juce::jlimit((int64_t) 0, total, viewStart);
         const int64_t visibleSamples = (int64_t) (samplesPerPixel * (double) w) + 2;
         const int rawLen = (int) juce::jlimit((int64_t) 0, total - rawStart, visibleSamples);
-        const juce::ScopedLock sl(document.getLock());
-        auto& src = document.getBuffer();
-        const int copyLen = juce::jmin(rawLen, src.getNumSamples() - (int) rawStart);
-        if (copyLen > 0)
+        const juce::CriticalSection::ScopedTryLockType sl(document.getLock());
+        if (sl.isLocked())
         {
-            raw.setSize(src.getNumChannels(), copyLen);
-            for (int ch = 0; ch < src.getNumChannels(); ++ch)
-                raw.copyFrom(ch, 0, src, ch, (int) rawStart, copyLen);
+            auto& src = document.getBuffer();
+            const int copyLen = juce::jmin(rawLen, src.getNumSamples() - (int) rawStart);
+            if (copyLen > 0)
+            {
+                raw.setSize(src.getNumChannels(), copyLen);
+                for (int ch = 0; ch < src.getNumChannels(); ++ch)
+                    raw.copyFrom(ch, 0, src, ch, (int) rawStart, copyLen);
+            }
         }
     }
 
@@ -619,7 +630,9 @@ void WaveformDisplay::paintSelectionPreview(juce::Graphics& g)
 
     juce::AudioBuffer<float> raw;
     {
-        const juce::ScopedLock sl(document.getLock());
+        const juce::CriticalSection::ScopedTryLockType sl(document.getLock());   // never block the audio thread
+        if (! sl.isLocked())
+            return;   // skip this frame's overlay; it'll draw on the next paint
         auto& src = document.getBuffer();
         const int len = (int) juce::jlimit((int64_t) 0, (int64_t) src.getNumSamples() - sel.getStart(), selLen);
         if (len <= 0)
