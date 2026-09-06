@@ -234,8 +234,14 @@ void AudioDocument::restoreSnapshot(const juce::AudioBuffer<float>& newBuffer, i
     }
     selPacked.store(packSelection(newSelStart, newSelEnd), std::memory_order_relaxed);
     playhead = juce::jlimit((int64_t) 0, getNumSamples(), playhead.load());
-    loopStart = juce::jlimit((int64_t) 0, getNumSamples(), loopStart.load());
-    loopEnd = juce::jlimit((int64_t) 0, getNumSamples(), loopEnd.load());
+
+    // Loop is always "the whole clip" (there's no UI for a partial loop region -- processBlock
+    // uses the selection when there is one, else [0, numSamples]). Pin it back to the full
+    // buffer, not just clamp it: otherwise a Trim shrinks loopEnd, and the Undo that restores
+    // the long buffer leaves loopEnd stranded mid-clip -- a phantom loop marker that also caps
+    // playback there.
+    loopStart = 0;
+    loopEnd = getNumSamples();
 
     // A length-changing edit (trim/cut/paste/stretch/...) invalidates every slice marker's
     // absolute position, so drop them rather than leave them silently pointing at the wrong
