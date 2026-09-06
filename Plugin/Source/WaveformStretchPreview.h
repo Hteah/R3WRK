@@ -16,9 +16,10 @@
     a background juce::Thread, since an offline pass over a long file at an extreme ratio can
     take real time; the UI keeps showing whatever it already had until a new result lands.
 
-    The background thread also bins the processed audio into a peak (min/max per
-    `peakBinSize` samples) cache before delivering it, the same way WaveformDisplay's own
-    rebuildPeakCache() does for the raw buffer -- *not* handing back the raw processed audio
+    The background thread also bins the processed audio into a peak (min/max per bin) cache
+    before delivering it -- bin size adapts to the length, see chooseBinSize -- the same way
+    WaveformDisplay's own rebuildPeakCache() does for the raw buffer, *not* handing back the
+    raw processed audio
     for the message thread to scan itself. At an extreme ratio the processed buffer can run to
     tens of millions of samples; scanning that directly on the message thread once it lands
     would block the UI (mouse events included -- this is what broke making selections, and
@@ -53,11 +54,14 @@ public:
     int getNumChannels() const { return (int) peakMin.size(); }
 
     // Min/max over processed-domain samples [p0, p1) for channel `channel`, via the peak
-    // cache -- same bin-scanning approach as WaveformDisplay's raw-buffer fallback path.
-    // Leaves outMin/outMax at 0 (silence) if out of range or channel is invalid.
+    // cache. The cache resolution adapts to the processed length (see chooseBinSize) -- as fine
+    // as `minBinSize` samples/bin for normal ratios so a zoomed-in preview still shows a wave
+    // rather than blocks, coarser only when the processed audio is huge. Leaves outMin/outMax
+    // at 0 (silence) if out of range or channel is invalid.
     void getPeakRange(int channel, int64_t p0, int64_t p1, float& outMin, float& outMax) const;
 
-    static constexpr int peakBinSize = 64;   // must match WaveformDisplay's own constant
+    static constexpr int   minBinSize        = 8;         // finest cache resolution
+    static constexpr int64_t maxBinsPerChannel = 1'500'000;   // memory cap -> coarser bins past this
 
     // True while the background thread is actually running an offline stretch pass -- for a
     // "rendering..." indicator (the pass can still take a moment at extreme ratios even with
@@ -67,6 +71,7 @@ public:
 private:
     void run() override;
     void kickOffJob(double speed, double pitch, double stretch);
+    static int chooseBinSize(int64_t processedSamples);   // minBinSize, doubled while over the cap
 
     AudioDocument& document;
     static constexpr uint32_t debounceMs = 250;
@@ -78,6 +83,7 @@ private:
     bool waitingToSettle = false;
     std::vector<std::vector<float>> peakMin, peakMax;
     int64_t processedLength = 0;
+    int binSize = minBinSize;              // resolution of the currently-delivered cache
 
     // Cross-thread handoff: the message thread overwrites the request (under `requestLock`)
     // and signals `wakeEvent`; the worker claims whatever's current when it wakes; if a newer
@@ -95,6 +101,7 @@ private:
     {
         std::vector<std::vector<float>> peakMin, peakMax;
         int64_t length = 0;
+        int binSize = minBinSize;
     };
     juce::CriticalSection resultLock;
     Result pendingResult;

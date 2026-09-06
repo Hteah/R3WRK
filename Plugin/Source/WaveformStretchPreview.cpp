@@ -5,9 +5,9 @@
 WaveformStretchPreview::WaveformStretchPreview(AudioDocument& doc)
     : juce::Thread("R3WRK stretch preview"), document(doc)
 {
-    // Low priority: this is a cosmetic redraw, and an offline RubberBand pass over the whole
-    // clip must never take CPU away from the real-time playback stretcher.
-    startThread(juce::Thread::Priority::low);
+    // Normal priority: the pass only runs while playback is stopped (see update()), so there's
+    // no real-time thread to protect -- and low priority just made it drag on a busy machine.
+    startThread(juce::Thread::Priority::normal);
 }
 
 WaveformStretchPreview::~WaveformStretchPreview()
@@ -76,6 +76,7 @@ bool WaveformStretchPreview::update()
         peakMin = std::move(pendingResult.peakMin);
         peakMax = std::move(pendingResult.peakMax);
         processedLength = pendingResult.length;
+        binSize = juce::jmax(1, pendingResult.binSize);
         return true;
     }
     return false;
@@ -99,13 +100,21 @@ void WaveformStretchPreview::getPeakRange(int channel, int64_t p0, int64_t p1, f
     if (p1 <= p0)
         return;
 
-    const int b0 = juce::jlimit(0, nBins - 1, (int) (p0 / peakBinSize));
-    const int b1 = juce::jlimit(b0, nBins - 1, (int) ((p1 - 1) / peakBinSize));
+    const int b0 = juce::jlimit(0, nBins - 1, (int) (p0 / binSize));
+    const int b1 = juce::jlimit(b0, nBins - 1, (int) ((p1 - 1) / binSize));
     for (int b = b0; b <= b1; ++b)
     {
         outMin = juce::jmin(outMin, mn[(size_t) b]);
         outMax = juce::jmax(outMax, mx[(size_t) b]);
     }
+}
+
+int WaveformStretchPreview::chooseBinSize(int64_t processedSamples)
+{
+    int bs = minBinSize;
+    while (processedSamples / bs > maxBinsPerChannel && bs < 4096)
+        bs *= 2;
+    return bs;
 }
 
 void WaveformStretchPreview::kickOffJob(double speed, double pitch, double stretch)
@@ -165,15 +174,18 @@ void WaveformStretchPreview::run()
         if (processed.getNumSamples() <= 0)
             continue;
 
-        // Bin into a peak (min/max per peakBinSize samples) cache here, on this thread, same
-        // approach as WaveformDisplay::rebuildPeakCache() -- see the class comment for why:
-        // the processed buffer itself can be huge at an extreme ratio, and the message thread
-        // must never be the one scanning it.
+        // Bin into a peak (min/max per bin) cache here, on this thread, same approach as
+        // WaveformDisplay::rebuildPeakCache() -- see the class comment for why: the processed
+        // buffer itself can be huge at an extreme ratio, and the message thread must never be
+        // the one scanning it. Bin size adapts to the length (chooseBinSize) so a normal-ratio
+        // preview stays fine enough to zoom into without going blocky.
         Result result;
         const int numCh = processed.getNumChannels();
         const int64_t total = processed.getNumSamples();
-        const int nBins = (int) ((total + peakBinSize - 1) / peakBinSize);
+        const int bs = chooseBinSize(total);
+        const int nBins = (int) ((total + bs - 1) / bs);
         result.length = total;
+        result.binSize = bs;
         result.peakMin.assign((size_t) numCh, std::vector<float>((size_t) juce::jmax(0, nBins), 0.0f));
         result.peakMax.assign((size_t) numCh, std::vector<float>((size_t) juce::jmax(0, nBins), 0.0f));
 
@@ -184,8 +196,8 @@ void WaveformStretchPreview::run()
             auto& mx = result.peakMax[(size_t) ch];
             for (int b = 0; b < nBins; ++b)
             {
-                const int64_t s0 = (int64_t) b * peakBinSize;
-                const int64_t s1 = juce::jmin(total, s0 + peakBinSize);
+                const int64_t s0 = (int64_t) b * bs;
+                const int64_t s1 = juce::jmin(total, s0 + bs);
                 const auto r = juce::FloatVectorOperations::findMinAndMax(d + s0, (int) (s1 - s0));
                 mn[(size_t) b] = r.getStart();
                 mx[(size_t) b] = r.getEnd();

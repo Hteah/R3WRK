@@ -1,5 +1,6 @@
 #include "TimeStretchEngine.h"
 #include <rubberband/RubberBandStretcher.h>
+#include <climits>
 
 namespace TimeStretchEngine
 {
@@ -34,7 +35,16 @@ juce::AudioBuffer<float> process(const juce::AudioBuffer<float>& input, double s
 
     const int blockSize = 4096;
 
-    juce::AudioBuffer<float> output(numCh, 0);
+    // Pre-size to the expected output length. The old code grew `output` by exactly `avail`
+    // samples on every retrieve, with keepExistingContent=true -- i.e. reallocating and copying
+    // the whole buffer-so-far each time. At a 20x ratio that's an accidental O(n^2): millions
+    // of output samples in ~4k chunks -> billions of sample-copies -> minutes. Size it once up
+    // front (+ slack for RubberBand's rounding and end tail), track a write cursor, and only
+    // double capacity in the rare case the estimate falls short.
+    const int64_t estOut = (int64_t) ((double) numFrames * juce::jmax(0.01, stretchRatio) * 1.15)
+                         + blockSize * 4;
+    juce::AudioBuffer<float> output(numCh, (int) juce::jlimit((int64_t) blockSize, (int64_t) INT_MAX, estOut));
+    int writePos = 0;
     std::vector<float*> outPtrs((size_t) numCh);
 
     auto pullAvailable = [&]
@@ -42,13 +52,14 @@ juce::AudioBuffer<float> process(const juce::AudioBuffer<float>& input, double s
         int avail = stretcher.available();
         while (avail > 0)
         {
-            int startSample = output.getNumSamples();
-            output.setSize(numCh, startSample + avail, true, true, true);
+            if (writePos + avail > output.getNumSamples())
+                output.setSize(numCh, (writePos + avail) * 2, /*keep*/ true, false, /*avoidRealloc*/ true);
             for (int ch = 0; ch < numCh; ++ch)
-                outPtrs[(size_t) ch] = output.getWritePointer(ch) + startSample;
+                outPtrs[(size_t) ch] = output.getWritePointer(ch) + writePos;
             size_t got = stretcher.retrieve(outPtrs.data(), (size_t) avail);
+            writePos += (int) got;
             if ((int) got < avail)
-                output.setSize(numCh, startSample + (int) got, true, true, true);
+                break;
             avail = stretcher.available();
         }
     };
@@ -85,6 +96,7 @@ juce::AudioBuffer<float> process(const juce::AudioBuffer<float>& input, double s
     }
 
     pullAvailable();
+    output.setSize(numCh, writePos, /*keep*/ true, false, /*avoidRealloc*/ true);   // trim to actual
     return output;
 }
 
