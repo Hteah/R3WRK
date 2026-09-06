@@ -841,8 +841,7 @@ void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
 
     if (document.sliceModeEnabled)
     {
-        const int64_t sample = xToSample((float) e.x);
-        sliceDragIndex     = document.findSliceMarkerNear(sample, sliceHitTolerance());
+        sliceDragIndex     = sliceMarkerAtPixel((float) e.x);
         sliceDragMoved     = false;
         slicePressOnMarker = sliceDragIndex >= 0;
         slicePressWasPopup = e.mods.isPopupMenu();
@@ -903,12 +902,20 @@ void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
     dragAnchor = f;
 }
 
-int64_t WaveformDisplay::sliceHitTolerance() const
+int WaveformDisplay::sliceMarkerAtPixel(float x) const
 {
-    // ~6 screen px, converted to samples at the current zoom -- measured mid-view so xToSample()'s
-    // 0..numSamples clamp at the edges doesn't skew it.
-    const float mid = (float) getWidth() * 0.5f;
-    return juce::jmax((int64_t) 1, xToSample(mid + 6.0f) - xToSample(mid - 6.0f));
+    // Hit-test in pixel space, not sample space: a "6 px in samples" tolerance collapses to 1
+    // sample when zoomed in past ~2 samples/px, and then whether a click lands on a marker
+    // comes down to integer-truncation luck per marker -- which is the "some won't delete" bug.
+    const auto& marks = document.getSliceMarkers();
+    int best = -1;
+    float bestDist = sliceMarkerHitPx;
+    for (int i = 0; i < (int) marks.size(); ++i)
+    {
+        const float d = std::abs(sampleToX(marks[(size_t) i]) - x);
+        if (d <= bestDist) { bestDist = d; best = i; }
+    }
+    return best;
 }
 
 void WaveformDisplay::playSliceAt(int64_t sample)
@@ -1070,7 +1077,7 @@ void WaveformDisplay::mouseMove(const juce::MouseEvent& e)
 {
     if (document.sliceModeEnabled)
     {
-        const bool overMarker = document.findSliceMarkerNear(xToSample((float) e.x), sliceHitTolerance()) >= 0;
+        const bool overMarker = sliceMarkerAtPixel((float) e.x) >= 0;
         setMouseCursor(overMarker ? juce::MouseCursor::LeftRightResizeCursor    // drag to move / dbl-click a handle to delete
                                   : juce::MouseCursor::CrosshairCursor);         // left-click to add a marker
         return;

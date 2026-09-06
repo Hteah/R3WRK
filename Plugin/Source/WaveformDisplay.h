@@ -105,8 +105,8 @@ private:
     void paintRecordingScope(juce::Graphics&);
     void paintSelectionPreview(juce::Graphics&);   // live Amplify/Stretch preview overlay, see .cpp
     void beginSelectionDragExport();   // native file drag of the selection to Ableton / Finder
-    int64_t sliceHitTolerance() const;         // ~6 screen px in samples, for hitting a marker
-    void    playSliceAt(int64_t sample);       // Slice tool: play the region containing `sample`
+    int  sliceMarkerAtPixel(float x) const;    // nearest slice marker within sliceMarkerHitPx of x, else -1
+    void playSliceAt(int64_t sample);          // Slice tool: play the region containing `sample`
     void rebuildPeakCache();           // scan the buffer once per content change (holds the lock briefly)
     void rebuildWaveformPath();        // build the display path from the cache (no lock) per view change
     void zoomToward(double spanFactor, float pointerX);   // wheel zoom (Sieve model)
@@ -174,6 +174,7 @@ private:
     //   double-click on a marker's  -> delete that marker (the only delete)
     //     top/bottom handle band
     static constexpr float sliceHandleZonePx = 20.0f;   // top/bottom band that counts as a handle
+    static constexpr float sliceMarkerHitPx  = 7.0f;    // horizontal grab distance to a marker line
     int  sliceDragIndex = -1;
     bool sliceDragMoved = false;
     bool slicePressOnMarker = false;
