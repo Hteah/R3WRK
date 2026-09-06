@@ -1513,6 +1513,13 @@ User: pops/crackles when moving Speed/Pitch/Stretch while a sample is playing. T
 Not independently verified by ear here -- flagged for the user to retest. Smoke test's
 WaveformStretchPreview section still passes (no playback in that test, so the gate is inert).
 
+**Follow-up (`d7827a8`):** with the clicks gone the user found the preview slow to appear.
+`TimeStretchEngine::process` gained a `fastPreview` flag -- Faster (R2) engine + short window +
+high-speed pitch instead of Finer (R3) + high-quality; `WaveformStretchPreview` passes it true
+(destructive Apply stays full quality). And `WaveformStretchPreview::isProcessing()` (atomic,
+true only while the worker is mid-pass) drives a small "Rendering stretch" pill + rotating arc
+bottom-right in `WaveformDisplay::paint()`. Still deferred until playback stops.
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).
