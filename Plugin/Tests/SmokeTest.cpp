@@ -477,6 +477,43 @@ int main()
         tempFile.deleteFile();
     }
 
+    // --- Slice export bakes the knobs AND moves the markers with the stretch ---
+    {
+        std::cout << "-- slice export: knobs baked, markers scaled with the stretch --" << std::endl;
+        AudioDocument doc;
+        const int oneSec = (int) sr;
+        setDocumentContent(doc, makeSineBuffer(2, oneSec, sr, 330.0, 0.5f), sr);
+
+        doc.addSliceMarker(oneSec / 4);   // 0.25 s
+        doc.addSliceMarker(oneSec / 2);   // 0.50 s
+        check(doc.getSliceRegions().size() == 3, "2 markers -> 3 slice regions");
+
+        doc.playbackStretch.store(2.0);   // everything twice as long, same pitch
+
+        auto dir = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                       .getChildFile("r3wrk_test_slices");
+        dir.deleteRecursively();
+        const int n = EditActions::sliceToFolder(doc, dir, "s");
+        check(n == 3, "wrote 3 slice files");
+
+        auto lenOf = [](const juce::File& f) -> double
+        {
+            AudioDocument d;
+            return d.loadFromFile(f) ? (double) d.getNumSamples() : -1.0;
+        };
+        const double l0 = lenOf(dir.getChildFile("s 01.wav"));
+        const double l1 = lenOf(dir.getChildFile("s 02.wav"));
+        const double l2 = lenOf(dir.getChildFile("s 03.wav"));
+
+        // Raw slices are 0.25 s / 0.25 s / 0.50 s; at 2x stretch -> ~0.5 / 0.5 / 1.0 s.
+        checkNear(l0, sr * 0.5, sr * 0.05, "slice 1 stretched to ~0.5 s");
+        checkNear(l1, sr * 0.5, sr * 0.05, "slice 2 stretched to ~0.5 s");
+        checkNear(l2, sr * 1.0, sr * 0.05, "slice 3 stretched to ~1.0 s");
+        checkNear(l0 + l1 + l2, sr * 2.0, sr * 0.1, "slices still tile the whole 2x-long render");
+
+        dir.deleteRecursively();
+    }
+
     std::cout << "===========================================" << std::endl;
     if (failures == 0)
         std::cout << "ALL CHECKS PASSED" << std::endl;

@@ -646,10 +646,24 @@ and `EditActions::exportSelection()` renders the extracted region the same way.
 The in-memory document and the knob positions are left untouched — this only
 changes what lands in the file. Synchronous on the message thread, like the
 offline Stretch/Pitch "Apply"; a big ratio on a long clip makes the save take a
-few seconds. **Not** applied to the slice / Octatrack-chain exports — those write
-raw-sample slice regions and would need the markers rescaled by `timeScale`
-first; left dry for now. Smoke test covers the round trip (3× Stretch → saved
-file is ~3× longer and non-silent).
+few seconds. Smoke test covers the round trip (3× Stretch → saved file is ~3×
+longer and non-silent).
+
+**Slice / Octatrack export follow the stretch too.** User: "I would like the
+slice export to have the same behaviour ... if the slice markers stretched
+(changed place) with the audio being stretched." Slice markers are stored as
+**raw-sample** positions and drawn via `sampleToX()`, which already divides by
+`getTimeScale()` — so on screen the markers already ride along when the Stretch/
+Speed knob reshapes the waveform. The export now matches: `sliceToFolder()` and
+`exportOctatrackChain()` render the whole buffer through `renderWithPlaybackKnobs()`
+once, then `scaleRegions()` (anon helper in `EditActions.cpp`) maps every region
+boundary by `renderedLen / rawLen` — endpoints stay exact so the slices still
+tile `[0, renderedLen]` gaplessly — and the rendered buffer is cut at those
+scaled points. The `.ot` gets the scaled slice grid + rendered length so the
+`.wav` and `.ot` agree. No-op when the knobs are centred (`scaleRegions` returns
+its input, `renderWithPlaybackKnobs` returns a plain copy). Smoke test: 2 markers
+at 0.25 s / 0.5 s on a 1 s clip at 2× Stretch → three files of ~0.5 / 0.5 / 1.0 s
+that still sum to the full 2 s render.
 
 ## Custom look (R3WRKLookAndFeel)
 

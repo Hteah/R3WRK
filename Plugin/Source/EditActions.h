@@ -41,7 +41,10 @@ namespace EditActions
     bool exportSelection(const AudioDocument& doc, const juce::File& file);
 
     //==============================================================================
-    // Slice export (see AudioDocument's slice-marker section).
+    // Slice export (see AudioDocument's slice-marker section). Both bake the Speed/Pitch/
+    // Stretch knobs into the exported audio (like Save As) and scale the slice-marker
+    // positions along with the stretch, so each slice still cuts the same moment it did on
+    // screen -- a no-op when the knobs are centred.
 
     // Writes each region between the document's slice markers as its own 24-bit WAV into
     // `folder` (created if needed), named "<baseName> 01.wav", "<baseName> 02.wav", ...

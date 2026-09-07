@@ -1,8 +1,33 @@
 #include "EditActions.h"
 #include "OctatrackOtFile.h"
+#include <cmath>
 
 namespace
 {
+    // Maps contiguous raw-sample slice regions into a buffer of `renderedLen` samples by
+    // scaling every boundary proportionally. After renderWithPlaybackKnobs() has dilated or
+    // compressed time (Speed/Stretch), the cuts still land on the same audio; endpoints stay
+    // exact (0 -> 0, rawLen -> renderedLen) so the regions still tile [0, renderedLen] with
+    // no gaps. Returns the regions unchanged when nothing stretched.
+    std::vector<juce::Range<int64_t>> scaleRegions(const std::vector<juce::Range<int64_t>>& regions,
+                                                   int64_t rawLen, int64_t renderedLen)
+    {
+        if (regions.empty() || rawLen <= 0 || renderedLen <= 0 || rawLen == renderedLen)
+            return regions;
+
+        const double s = (double) renderedLen / (double) rawLen;
+        auto mapPos = [&](int64_t p)
+        {
+            return juce::jlimit((int64_t) 0, renderedLen, (int64_t) std::llround((double) p * s));
+        };
+
+        std::vector<juce::Range<int64_t>> out;
+        out.reserve(regions.size());
+        for (const auto& r : regions)
+            out.push_back({ mapPos(r.getStart()), mapPos(r.getEnd()) });
+        return out;
+    }
+
     juce::AudioBuffer<float> extractRange(const juce::AudioBuffer<float>& src, int64_t start, int64_t end)
     {
         start = juce::jlimit((int64_t) 0, (int64_t) src.getNumSamples(), start);
@@ -243,9 +268,15 @@ bool exportSelection(const AudioDocument& doc, const juce::File& file)
 
 int sliceToFolder(const AudioDocument& doc, const juce::File& folder, const juce::String& baseName)
 {
-    const auto regions = doc.getSliceRegions();
-    if (regions.empty())
+    const auto rawRegions = doc.getSliceRegions();
+    if (rawRegions.empty())
         return 0;
+
+    // Bake Speed/Pitch/Stretch into the audio (a no-op copy when the knobs are centred), then
+    // slice the rendered buffer -- scaleRegions() moves each marker along with the stretch so
+    // every slice still cuts the same musical moment it did on screen.
+    const auto rendered = doc.renderWithPlaybackKnobs(doc.getBuffer());
+    const auto regions  = scaleRegions(rawRegions, doc.getNumSamples(), rendered.getNumSamples());
 
     folder.createDirectory();
     const auto name = baseName.isNotEmpty() ? baseName : juce::String("slice");
@@ -254,7 +285,7 @@ int sliceToFolder(const AudioDocument& doc, const juce::File& folder, const juce
     for (int i = 0; i < (int) regions.size(); ++i)
     {
         const auto file = folder.getChildFile(name + " " + juce::String(i + 1).paddedLeft('0', 2) + ".wav");
-        if (writeWav(file, extractRange(doc.getBuffer(), regions[(size_t) i].getStart(), regions[(size_t) i].getEnd()),
+        if (writeWav(file, extractRange(rendered, regions[(size_t) i].getStart(), regions[(size_t) i].getEnd()),
                      doc.getSampleRate()))
             ++written;
     }
@@ -263,17 +294,26 @@ int sliceToFolder(const AudioDocument& doc, const juce::File& folder, const juce
 
 bool exportOctatrackChain(const AudioDocument& doc, const juce::File& wavFile, double bpm)
 {
-    const int64_t len = doc.getNumSamples();
+    const int64_t rawLen = doc.getNumSamples();
+    if (rawLen <= 0)
+        return false;
+
+    // Same as sliceToFolder: render the knobs into the audio, then scale the slice points to
+    // match so the .wav and the .ot slice grid agree.
+    const auto rendered = doc.renderWithPlaybackKnobs(doc.getBuffer());
+    const int64_t len = rendered.getNumSamples();
     if (len <= 0)
         return false;
 
-    auto regions = doc.getSliceRegions();
-    if (regions.empty())
-        regions.push_back({ (int64_t) 0, len });          // no markers -> one whole-clip slice
+    auto rawRegions = doc.getSliceRegions();
+    if (rawRegions.empty())
+        rawRegions.push_back({ (int64_t) 0, rawLen });      // no markers -> one whole-clip slice
+
+    auto regions = scaleRegions(rawRegions, rawLen, len);
     if ((int) regions.size() > OctatrackOtFile::kMaxSlices)
         regions.resize(OctatrackOtFile::kMaxSlices);        // Octatrack's hard limit
 
-    if (! writeWav(wavFile, extractRange(doc.getBuffer(), 0, len), doc.getSampleRate()))
+    if (! writeWav(wavFile, rendered, doc.getSampleRate()))
         return false;
 
     return OctatrackOtFile::writeToFile(wavFile.withFileExtension("ot"), len, regions, bpm);
