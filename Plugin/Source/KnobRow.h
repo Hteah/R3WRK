@@ -22,7 +22,8 @@ class KnobRow : public juce::Component,
                 private juce::ChangeListener
 {
 public:
-    explicit KnobRow(AudioDocument& document);
+    // `standalone` -- the app build, not a plugin -- gets the extra output "Gain" knob.
+    KnobRow(AudioDocument& document, bool standalone);
     ~KnobRow() override;
 
     void resized() override;

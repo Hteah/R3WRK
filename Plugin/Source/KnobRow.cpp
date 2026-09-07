@@ -21,7 +21,7 @@ namespace
     }
 }
 
-KnobRow::KnobRow(AudioDocument& doc)
+KnobRow::KnobRow(AudioDocument& doc, bool standalone)
     : document(doc)
 {
     //== Pitch =================================================================
@@ -168,6 +168,24 @@ KnobRow::KnobRow(AudioDocument& doc)
             return (double) document.getSelectionEnd()
                  / (double) juce::jmax((int64_t) 1, document.getNumSamples());
         };
+    }
+
+    //== Gain (Standalone only -- output level) ==============================
+    if (standalone)
+    {
+        auto& k = addKnob("Gain");
+        k.slider.setRange(AudioDocument::kMinGainDb, AudioDocument::kMaxGainDb, 0.0);
+        k.slider.setDoubleClickReturnValue(true, 0.0);   // 0 dB = default volume
+        k.slider.textFromValueFunction = [](double db)
+        {
+            if (db <= AudioDocument::kMinGainDb + 0.05)
+                return juce::String::fromUTF8("-\xE2\x88\x9E dB");   // "-∞ dB" (mute)
+            return (db > 0.0 ? "+" : "") + juce::String(db, 1) + " dB";
+        };
+        k.slider.setValue(document.playbackGainDb.load(), juce::dontSendNotification);
+        k.slider.updateText();
+        k.apply = [this](double v) { document.playbackGainDb.store(v); };
+        k.pull  = [this] { return document.playbackGainDb.load(); };
     }
 
     applyTheme();

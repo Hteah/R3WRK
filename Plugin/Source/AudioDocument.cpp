@@ -77,7 +77,7 @@ void AudioDocument::newEmptyDocument(int numChannels, double sr)
     // carried over -- visually and audibly -- into the next file loaded into the same
     // instance.)
     playbackSpeed = 1.0; playbackPitch = 0.0; playbackStretch = 1.0;
-    filterMode = 0; filterCutoffHz = 1000.0; filterResonance = 0.0;
+    filterMode = 0; filterCutoffHz = 1000.0; filterResonance = 0.0; playbackGainDb = 0.0;
     previewActive = false; previewGainLinear = 1.0f; previewStretchRatio = 1.0;
     channelFocus = ChannelFocus::stereo;
     sliceMarkers.clear();
@@ -128,7 +128,7 @@ bool AudioDocument::loadFromFile(const juce::File& file, double resampleToRate)
     loopEnd = getNumSamples();
     loopEnabled = false;
     playbackSpeed = 1.0; playbackPitch = 0.0; playbackStretch = 1.0;   // see newEmptyDocument()
-    filterMode = 0; filterCutoffHz = 1000.0; filterResonance = 0.0;
+    filterMode = 0; filterCutoffHz = 1000.0; filterResonance = 0.0; playbackGainDb = 0.0;
     previewActive = false; previewGainLinear = 1.0f; previewStretchRatio = 1.0;
     channelFocus = ChannelFocus::stereo;
     sliceMarkers.clear();
@@ -151,7 +151,9 @@ bool AudioDocument::timePitchKnobsEngaged() const
 
 bool AudioDocument::playbackKnobsEngaged() const
 {
-    return timePitchKnobsEngaged() || filterMode.load(std::memory_order_relaxed) != 0;
+    return timePitchKnobsEngaged()
+        || filterMode.load(std::memory_order_relaxed) != 0
+        || std::abs(playbackGainDb.load(std::memory_order_relaxed)) > 1.0e-3;
 }
 
 juce::AudioBuffer<float> AudioDocument::renderWithPlaybackKnobs(const juce::AudioBuffer<float>& src) const
@@ -194,6 +196,12 @@ juce::AudioBuffer<float> AudioDocument::renderWithPlaybackKnobs(const juce::Audi
             bq.processBlock(out.getWritePointer(ch), out.getNumSamples());
         }
     }
+
+    // 3. Gain -- last, like the real-time output chain.
+    const double gainDb = playbackGainDb.load(std::memory_order_relaxed);
+    if (std::abs(gainDb) > 1.0e-3 && out.getNumSamples() > 0)
+        out.applyGain(juce::Decibels::decibelsToGain((float) juce::jlimit(kMinGainDb, kMaxGainDb, gainDb),
+                                                     (float) kMinGainDb));
 
     return out;
 }

@@ -8,7 +8,8 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
       standaloneWindow(p.wrapperType == juce::AudioProcessor::wrapperType_Standalone),
       processorRef(p),
       header(p.document), waveformDisplay(p.document), spectrogramDisplay(p.document),
-      timeRuler(waveformDisplay, p.document), toolbar(p, p.document), knobRow(p.document)
+      timeRuler(waveformDisplay, p.document), toolbar(p, p.document),
+      knobRow(p.document, standaloneWindow)
 {
     addAndMakeVisible(header);
     addAndMakeVisible(waveformDisplay);

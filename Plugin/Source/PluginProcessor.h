@@ -111,6 +111,11 @@ private:
     void applyPlaybackFilter (juce::AudioBuffer<float>& buffer, int numCh, int numSamples,
                               bool freshPlayPass);
 
+    // Output "Gain" knob -- applied last, as a per-block ramp so a knob drag doesn't zipper.
+    // 0 dB by default, so a no-op unless the Standalone's Gain knob is turned.
+    juce::SmoothedValue<float> smoothedGain { 1.0f };
+    void applyPlaybackGain (juce::AudioBuffer<float>& buffer, int numCh, int numSamples);
+
     static bool knobsEngaged(double speed, double pitch, double stretch);
     // Fills the playback branch of processBlock. `pos` is the doc read cursor (also the
     // value stored back into document.playhead).

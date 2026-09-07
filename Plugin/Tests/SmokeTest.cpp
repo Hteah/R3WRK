@@ -516,6 +516,16 @@ int main()
         check((int64_t) filt.getNumSamples() == n, "filter render keeps the length");
         check(rms(filt, 0) < rms(fdoc.getBuffer(), 0) * 0.85,
               "LP at 500 Hz measurably lowers the 200+8000 Hz mix");
+
+        // Gain knob: 0 dB is a passthrough; -6 dB bakes in as ~half the level.
+        AudioDocument gdoc;
+        setDocumentContent(gdoc, makeSineBuffer(1, n, sr, 440.0, 0.5f), sr);
+        check(! gdoc.playbackKnobsEngaged(), "gain at 0 dB -> knobs disengaged");
+        gdoc.playbackGainDb.store(-6.0);
+        check(gdoc.playbackKnobsEngaged(), "gain != 0 -> playbackKnobsEngaged() true");
+        auto quieter = gdoc.renderWithPlaybackKnobs(gdoc.getBuffer());
+        checkNear(rms(quieter, 0), rms(gdoc.getBuffer(), 0) * juce::Decibels::decibelsToGain(-6.0f), 0.005,
+                  "-6 dB Gain bakes in as a -6 dB level drop");
     }
 
     // --- Save bakes the Speed/Pitch/Stretch knobs into the written audio ----

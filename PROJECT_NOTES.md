@@ -594,6 +594,15 @@ points, else the whole clip) straight from the buffer under a try-lock. The
   "extreme stretch" (smeary by design). Skewed so 1× sits mid-travel.
 - **Filter / Cutoff / Res** — a multi-mode filter on the playback output (see
   "Multi-mode filter" below).
+- **Gain** — *Standalone build only.* Output level in dB, `kMinGainDb`(−60)…
+  `kMaxGainDb`(+12), **0 dB = unity / default volume** (double-click returns
+  there), −60 reads "−∞ dB" and is a true mute. `AudioDocument::playbackGainDb`
+  (atomic, on everyone but only KnobRow's standalone branch adds the knob).
+  Applied last in the real-time chain (`PluginProcessor::applyPlaybackGain`, a
+  per-block `SmoothedValue` ramp so a drag doesn't zipper — on both the playback
+  and scrub outputs) and **baked into Save/Export** by `renderWithPlaybackKnobs`
+  like the other playback knobs. `KnobRow(document, standalone)` takes the flag
+  from `PluginEditor`'s `standaloneWindow`.
 - **Start / End** — normalised (0–1) knobs on the document selection edges,
   reading out as `m:ss.mmm` and following bracket drags. Start slides the whole
   window (End moves with it, length preserved, pegs at the buffer end); End
@@ -643,9 +652,10 @@ Stretch are.
   Off/LP/HP/BP/Notch), **Cutoff** (log-skewed at 1 kHz, "1.00 kHz" / "440 Hz"),
   **Res** (0–100%). `resized()` now auto-fits knob width (46–78 px) so all 8 fit
   at the minimum window size.
-- **State**: `kStateMagic` bumped `'R3W5'`→`'R3W6'`, appends mode/cutoff/res;
-  `setStateInformation` still reads `'R3W5'` blobs (filter defaults off), so an
-  existing persisted standalone session survives the upgrade.
+- **State**: `kStateMagic` `'R3W5'`→`'R3W6'` (filter mode/cutoff/res) →`'R3W7'`
+  (adds `playbackGainDb`). `setStateInformation` still reads `'R3W6'` and `'R3W5'`
+  blobs (missing fields default off / 0 dB), so an existing persisted standalone
+  session survives each upgrade.
 - Smoke test: RBJ LP/HP/notch each crush an out-of-band / on-notch tone;
   `renderWithPlaybackKnobs` with LP@500 measurably lowers a 200+8000 Hz mix and
   keeps the length; filter-on flips `playbackKnobsEngaged()` with the stretch

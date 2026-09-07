@@ -257,10 +257,17 @@ public:
     std::atomic<double> filterCutoffHz  { 1000.0 };
     std::atomic<double> filterResonance { 0.0 };
 
+    // Output "Gain" knob (Standalone only -- KnobRow adds the knob just in that build; the
+    // atomic sits here for everyone but stays at 0). In dB, 0 = unity (default volume);
+    // kMinGainDb reads as a true mute. Applied last on the playback/scrub output and baked
+    // into Save/Export by renderWithPlaybackKnobs, same as the other playback knobs.
+    std::atomic<double> playbackGainDb { 0.0 };
+
     static constexpr double kMinSpeed = 0.25, kMaxSpeed = 4.0;
     static constexpr double kMinPitch = -12.0, kMaxPitch = 12.0;
     static constexpr double kMinStretch = 0.25, kMaxStretch = 50.0;
     static constexpr double kFilterMinHz = 20.0, kFilterMaxHz = 20000.0;
+    static constexpr double kMinGainDb = -60.0, kMaxGainDb = 12.0;
 
     // How much longer (>1) or shorter (<1) played-back audio is than stored audio, given
     // the current Speed/Pitch/Stretch knobs -- pitch doesn't affect duration, only the

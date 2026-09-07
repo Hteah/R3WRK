@@ -5,8 +5,9 @@
 
 namespace
 {
-    constexpr int kStateMagic     = 0x52335736;   // 'R3W6' - adds filter mode/cutoff/resonance
-    constexpr int kStateMagicR3W5 = 0x52335735;   // 'R3W5' - legacy (no filter fields); still read
+    constexpr int kStateMagic     = 0x52335737;   // 'R3W7' - adds playbackGainDb
+    constexpr int kStateMagicR3W6 = 0x52335736;   // 'R3W6' - filter fields, no gain
+    constexpr int kStateMagicR3W5 = 0x52335735;   // 'R3W5' - no filter, no gain
     constexpr int kMaxStateChannels = 32;
 }
 
@@ -64,6 +65,12 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     playbackFilter[0].reset();
     playbackFilter[1].reset();
     lastFilterMode = 0;
+
+    smoothedGain.reset(sampleRate, 0.02);
+    smoothedGain.setCurrentAndTargetValue(
+        juce::Decibels::decibelsToGain((float) juce::jlimit(AudioDocument::kMinGainDb, AudioDocument::kMaxGainDb,
+                                                            document.playbackGainDb.load()),
+                                       (float) AudioDocument::kMinGainDb));
 }
 
 void R3WRKAudioProcessor::releaseResources()
@@ -337,6 +344,8 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             renderScrub(buffer, numCh, numSamples, document.getBuffer());
         }
 
+        applyPlaybackGain(buffer, numCh, numSamples);   // Gain knob rides scrub monitoring too
+
         wasScrubbing = true;
         wasPlaying = false;   // so normal playback resets the stretcher cleanly if it resumes
         return;
@@ -403,6 +412,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         // Multi-mode filter, last in the chain -- applied whether the try-lock was held or not
         // (a filtered near-silent block is still correct), and to both direct + stretched paths.
         applyPlaybackFilter(buffer, numCh, numSamples, ! wasPlaying);
+        applyPlaybackGain(buffer, numCh, numSamples);
 
         wasPlaying = true;
         return;
@@ -459,6 +469,24 @@ void R3WRKAudioProcessor::applyPlaybackFilter(juce::AudioBuffer<float>& buffer, 
         playbackFilter[ch].setCoeffs(fmode, fc, q, currentSampleRate);
         playbackFilter[ch].processBlock(buffer.getWritePointer(ch), numSamples);
     }
+}
+
+void R3WRKAudioProcessor::applyPlaybackGain(juce::AudioBuffer<float>& buffer, int numCh, int numSamples)
+{
+    const double gainDb = document.playbackGainDb.load(std::memory_order_relaxed);
+    const float target = std::abs(gainDb) > 1.0e-3
+        ? juce::Decibels::decibelsToGain((float) juce::jlimit(AudioDocument::kMinGainDb, AudioDocument::kMaxGainDb, gainDb),
+                                         (float) AudioDocument::kMinGainDb)
+        : 1.0f;
+
+    smoothedGain.setTargetValue(target);
+    const float g0 = smoothedGain.getCurrentValue();
+    const float g1 = smoothedGain.skip(numSamples);
+    if (g0 == 1.0f && g1 == 1.0f)
+        return;
+
+    for (int ch = 0; ch < numCh; ++ch)
+        buffer.applyGainRamp(ch, 0, numSamples, g0, g1);
 }
 
 void R3WRKAudioProcessor::startRecording()
@@ -668,6 +696,7 @@ void R3WRKAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     out.writeInt(document.filterMode.load());
     out.writeDouble(document.filterCutoffHz.load());
     out.writeDouble(document.filterResonance.load());
+    out.writeDouble(document.playbackGainDb.load());
 
     auto& buf = document.getBuffer();
     for (int ch = 0; ch < buf.getNumChannels(); ++ch)
@@ -683,9 +712,10 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     juce::MemoryInputStream in(data, (size_t) sizeInBytes, false);
     const int magic = in.readInt();
-    if (magic != kStateMagic && magic != kStateMagicR3W5)
+    if (magic != kStateMagic && magic != kStateMagicR3W6 && magic != kStateMagicR3W5)
         return;
-    const bool hasFilterFields = (magic == kStateMagic);
+    const bool hasFilterFields = (magic == kStateMagic || magic == kStateMagicR3W6);
+    const bool hasGainField    = (magic == kStateMagic);
 
     double sr = in.readDouble();
     int numCh = in.readInt();
@@ -703,12 +733,15 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     int    fMode = 0;
     double fCut  = 1000.0;
     double fRes  = 0.0;
+    double gDb   = 0.0;
     if (hasFilterFields)
     {
         fMode = in.readInt();
         fCut  = in.readDouble();
         fRes  = in.readDouble();
     }
+    if (hasGainField)
+        gDb = in.readDouble();
 
     if (numCh <= 0 || numCh > kMaxStateChannels || numSamples < 0 || numSamples > 0x7fffffff)
         return;
@@ -740,6 +773,7 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     document.filterCutoffHz.store(juce::jlimit(AudioDocument::kFilterMinHz, AudioDocument::kFilterMaxHz,
                                               fCut > 0.0 ? fCut : 1000.0));
     document.filterResonance.store(juce::jlimit(0.0, 1.0, fRes));
+    document.playbackGainDb.store(juce::jlimit(AudioDocument::kMinGainDb, AudioDocument::kMaxGainDb, gDb));
 
     document.clearSliceMarkers();   // session-only; a restored document starts with no markers
 
