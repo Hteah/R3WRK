@@ -690,6 +690,7 @@ void EditorToolbar::showToolsMenu()
            idCut, idCopy, idPaste,
            idTrim, idDelete, idSilence,
            idChanBoth, idChanLeft, idChanRight, idMatchPeak, idMatchRms,
+           idToMono, idToStereo,
            idNormalize, idAmplify, idFadeIn, idFadeOut, idReverse,
            idStretch, idExportSel,
            idSliceToFolder, idExportOt, idClearSlices,
@@ -753,6 +754,9 @@ void EditorToolbar::showToolsMenu()
         m.addSubMenu(juce::String::fromUTF8("Match Channels\xE2\x80\xA6"), matchMenu, chanOK);
     }
     m.addSeparator();
+    m.addItem(idToMono,   "Convert to Mono",   ! empty && stereoDoc);
+    m.addItem(idToStereo, "Convert to Stereo", ! empty && ! stereoDoc);
+    m.addSeparator();
     m.addItem(idNormalize, "Normalize",  ! empty);
     m.addItem(idAmplify,   juce::String::fromUTF8("Amplify\xE2\x80\xA6"), ! empty);
     m.addItem(idFadeIn,    "Fade In",    ! empty);
@@ -797,6 +801,10 @@ void EditorToolbar::showToolsMenu()
                                 if (onStatusMessage && msg.isNotEmpty()) onStatusMessage(msg); break; }
             case idMatchRms:  { const auto msg = EditActions::matchChannels(document, true);
                                 if (onStatusMessage && msg.isNotEmpty()) onStatusMessage(msg); break; }
+            case idToMono:    EditActions::convertToMono(document);
+                              if (onStatusMessage) onStatusMessage("Converted to mono"); break;
+            case idToStereo:  EditActions::convertToStereo(document);
+                              if (onStatusMessage) onStatusMessage("Converted to stereo"); break;
 
             case idNormalize: EditActions::normalize(document);      break;
             case idAmplify:   showAmplifyCallout(toolsButton.getScreenBounds()); break;

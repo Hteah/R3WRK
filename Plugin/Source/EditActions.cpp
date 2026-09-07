@@ -368,4 +368,38 @@ juce::String matchChannels(AudioDocument& doc, bool useRms)
                                    quietCh == 0 ? "Left" : "Right");
 }
 
+void convertToMono(AudioDocument& doc)
+{
+    const auto& src = doc.getBuffer();
+    const int n  = src.getNumSamples();
+    const int nc = src.getNumChannels();
+    if (n <= 0 || nc < 2)
+        return;
+
+    juce::AudioBuffer<float> mono(1, n);
+    mono.clear();
+    for (int ch = 0; ch < nc; ++ch)
+        mono.addFrom(0, 0, src, ch, 0, n, 1.0f / (float) nc);   // average -- headroom-safe downmix
+
+    doc.channelFocus = AudioDocument::ChannelFocus::stereo;
+    doc.beginChange();
+    doc.commitChange(std::move(mono), "Convert to Mono");
+}
+
+void convertToStereo(AudioDocument& doc)
+{
+    const auto& src = doc.getBuffer();
+    const int n = src.getNumSamples();
+    if (n <= 0 || src.getNumChannels() != 1)
+        return;
+
+    juce::AudioBuffer<float> stereo(2, n);
+    stereo.copyFrom(0, 0, src, 0, 0, n);
+    stereo.copyFrom(1, 0, src, 0, 0, n);   // dual mono
+
+    doc.channelFocus = AudioDocument::ChannelFocus::stereo;
+    doc.beginChange();
+    doc.commitChange(std::move(stereo), "Convert to Stereo");
+}
+
 } // namespace EditActions

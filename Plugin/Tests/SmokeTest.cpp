@@ -619,6 +619,39 @@ int main()
         check(EditActions::matchChannels(monoDoc, false).isEmpty(), "Match Channels is a no-op on a mono clip");
     }
 
+    // --- Convert to Mono / Convert to Stereo -----------------------------
+    {
+        std::cout << "-- convert stereo<->mono --" << std::endl;
+        const int n = (int) sr;
+        juce::AudioBuffer<float> st(2, n);
+        for (int i = 0; i < n; ++i)
+        {
+            const float s = std::sin(2.0 * juce::MathConstants<double>::pi * 200.0 * i / sr);
+            st.setSample(0, i, 0.30f * s);
+            st.setSample(1, i, 0.70f * s);
+        }
+        AudioDocument doc;
+        setDocumentContent(doc, std::move(st), sr);
+
+        EditActions::convertToMono(doc);
+        check(doc.getNumChannels() == 1, "convertToMono -> 1 channel");
+        check(doc.getNumSamples() == (int64_t) n, "convertToMono kept the length");
+        checkNear(doc.getBuffer().getMagnitude(0, 0, n), 0.5f, 0.02f, "mono is the average of L+R (~0.5 peak)");
+
+        EditActions::convertToMono(doc);   // already mono
+        check(doc.getNumChannels() == 1, "convertToMono on a mono clip is a no-op");
+
+        EditActions::convertToStereo(doc);
+        check(doc.getNumChannels() == 2, "convertToStereo -> 2 channels");
+        checkNear(doc.getBuffer().getMagnitude(0, 0, n),
+                  doc.getBuffer().getMagnitude(1, 0, n), 1.0e-5f, "convertToStereo makes dual mono (channels identical)");
+
+        doc.undoManager.undo();
+        check(doc.getNumChannels() == 1, "undo of convertToStereo returns to mono");
+        doc.undoManager.undo();
+        check(doc.getNumChannels() == 2, "undo of convertToMono returns to stereo");
+    }
+
     std::cout << "===========================================" << std::endl;
     if (failures == 0)
         std::cout << "ALL CHECKS PASSED" << std::endl;

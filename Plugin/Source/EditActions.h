@@ -39,6 +39,12 @@ namespace EditActions
     // string when it did nothing (mono, silence, already matched).
     juce::String matchChannels(AudioDocument& doc, bool useRms);
 
+    // Whole-clip channel-count conversion, one undo step. convertToMono averages every channel
+    // down to one; convertToStereo duplicates a single channel into a dual-mono pair. Each is a
+    // no-op if the clip is empty or already that layout. Both reset the channel focus.
+    void convertToMono(AudioDocument& doc);
+    void convertToStereo(AudioDocument& doc);
+
     // Replace the current effective range with newRegion (used by time-stretch/pitch-shift).
     void replaceRangeWith(AudioDocument& doc, juce::Range<int64_t> range, const juce::AudioBuffer<float>& newRegion,
                            const juce::String& actionName);

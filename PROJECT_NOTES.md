@@ -1064,6 +1064,20 @@ Smoke test: focus=Left + Normalize leaves Right untouched and brings Left to ~�
 Match Channels (peak) on a 0.20/0.80 stereo clip lifts Left to meet Right and reports it;
 mono is a no-op.
 
+### Convert to Mono / Convert to Stereo
+
+User: "another part of the tools list for converting a stereo file to mono and a mono file to
+stereo." Own separator group right after the channel-focus section.
+`EditActions::convertToMono()` averages every channel down to one (`addFrom` with
+`1/numChannels` gain — headroom-safe, no clip risk for correlated content);
+`convertToStereo()` duplicates the single channel into a dual-mono pair. Whole clip, one
+undo step via `beginChange`/`commitChange` (length unchanged, so slice markers survive);
+both reset `channelFocus` to stereo. Menu items are mutually exclusive by state —
+`idToMono` enabled only when `getNumChannels() >= 2`, `idToStereo` only when mono — and the
+handler flashes "Converted to mono/stereo". Playback needs no `prepareToPlay` — the
+render paths already `jmin(ch, docBuf.getNumChannels()-1)`, so a mid-session channel-count
+change just works.
+
 ## Reverse button
 
 User: "Can you make a button for reverse? Round button with arrow going to the left."
