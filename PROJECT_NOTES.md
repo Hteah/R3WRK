@@ -811,11 +811,12 @@ Play/Loop/Record/Tools on the left with the time readout pinned to the right
 
 Section dividers (faint 1 px hairlines drawn in `paint()` at the mid-gap
 between two buttons/knobs, low-alpha theme ink, repositioned on `resized()`):
-- **`EditorToolbar`** — two, standalone-only, bracketing the secondary
-  recording group: `autoRecordButton | desktopRecButton` and
-  `captureOutButton | reverseButton`. Button order is Play-from-start / Play /
-  Loop / Record / Auto-Record │ Record-Desktop / Capture-Output │ Reverse /
-  Scrub / Slice / Follow / Tools / Clear (Reverse sits left of Scrub).
+- **`EditorToolbar`** — `autoRecordButton | desktopRecButton` and
+  `captureOutButton | reverseButton` (standalone-only, bracketing the
+  secondary recording group), plus `followButton | toolsButton` (every build).
+  Button order is Play-from-start / Play / Loop / Record / Auto-Record │
+  Record-Desktop / Capture-Output │ Reverse / Scrub / Slice / Follow │ Tools /
+  Clear (Reverse sits left of Scrub).
 - **`KnobRow`** — three, in the gaps before knob index 3 / 6 / 8, marking
   `Pitch·Speed·Stretch │ Base·Width·Q │ Start·End │ Gain`; the last is
   standalone-only (the Gain knob only exists there).

@@ -599,23 +599,26 @@ void EditorToolbar::paint(juce::Graphics& g)
     g.setColour(theme->palette().panelBg);
     g.fillRoundedRectangle(getLocalBounds().toFloat(), 10.0f);
 
-    // Standalone: faint hairlines bracketing the secondary recording controls (Record
-    // Desktop, Capture Output) -- one after the primary recording controls (Record,
-    // Auto-Record), one before the waveform tools (Reverse, Scrub, ...).
+    // Faint group hairlines (mid-gap between two buttons, repositioned on resized()):
+    //   [standalone] around the secondary recording group -- after Record/Auto-Record and
+    //   before Reverse -- and, in every build, between the waveform tools (Follow) and the
+    //   Tools menu.
+    g.setColour(theme->palette().screenText.withAlpha(0.22f));
+    const float y0 = 5.0f, y1 = (float) getHeight() - 5.0f;
+    auto hairlineBetween = [&](const juce::Component& left, const juce::Component& right)
+    {
+        if (right.getX() <= left.getRight())
+            return;   // not laid out yet
+        const float x = (float) juce::roundToInt((left.getRight() + right.getX()) * 0.5) + 0.5f;
+        g.drawLine(x, y0, x, y1, 1.0f);
+    };
+
     if (standaloneApp)
     {
-        g.setColour(theme->palette().screenText.withAlpha(0.22f));
-        const float y0 = 5.0f, y1 = (float) getHeight() - 5.0f;
-        auto hairlineBetween = [&](const juce::Component& left, const juce::Component& right)
-        {
-            if (right.getX() <= left.getRight())
-                return;   // not laid out yet
-            const float x = (float) juce::roundToInt((left.getRight() + right.getX()) * 0.5) + 0.5f;
-            g.drawLine(x, y0, x, y1, 1.0f);
-        };
         hairlineBetween(autoRecordButton, desktopRecButton);
         hairlineBetween(captureOutButton, reverseButton);
     }
+    hairlineBetween(followButton, toolsButton);
 }
 
 //==============================================================================
