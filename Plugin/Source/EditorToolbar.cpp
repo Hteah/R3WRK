@@ -598,6 +598,24 @@ void EditorToolbar::paint(juce::Graphics& g)
     // ruler) behind the whole transport row.
     g.setColour(theme->palette().panelBg);
     g.fillRoundedRectangle(getLocalBounds().toFloat(), 10.0f);
+
+    // Standalone: faint hairlines bracketing the secondary recording controls (Record
+    // Desktop, Capture Output) -- one after the primary recording controls (Record,
+    // Auto-Record), one before the waveform tools (Reverse, Scrub, ...).
+    if (standaloneApp)
+    {
+        g.setColour(theme->palette().screenText.withAlpha(0.22f));
+        const float y0 = 5.0f, y1 = (float) getHeight() - 5.0f;
+        auto hairlineBetween = [&](const juce::Component& left, const juce::Component& right)
+        {
+            if (right.getX() <= left.getRight())
+                return;   // not laid out yet
+            const float x = (float) juce::roundToInt((left.getRight() + right.getX()) * 0.5) + 0.5f;
+            g.drawLine(x, y0, x, y1, 1.0f);
+        };
+        hairlineBetween(autoRecordButton, desktopRecButton);
+        hairlineBetween(captureOutButton, reverseButton);
+    }
 }
 
 //==============================================================================
@@ -1294,10 +1312,11 @@ void EditorToolbar::resized()
         fb.items.add(juce::FlexItem(c).withWidth((float) w).withMinWidth(22.0f)
                          .withMargin(juce::FlexItem::Margin(0, (float) gap, 0, 0)));
     };
-    // Order set by the user: transport (Play-from-start, Play, Loop) -> record (Record,
-    // Auto-Record, and Record-Desktop in the standalone) -> waveform tools (Scrub, Reverse,
-    // Slice, Follow) -> Tools menu -> Clear, with the time readout pinned right. All round
-    // icon buttons.
+    // Order set by the user: transport (Play-from-start, Play, Loop) -> primary record
+    // (Record, Auto-Record) -> secondary record (Record Desktop, Capture Output; standalone
+    // only) -> waveform tools (Reverse, Scrub, Slice, Follow) -> Tools menu -> Clear, with
+    // the time readout pinned right. All round icon buttons. paint() draws hairlines around
+    // the secondary-record group.
     add(playFromStartButton, 28);
     add(playButton, 28);
     add(loopButton, 28);
@@ -1308,8 +1327,8 @@ void EditorToolbar::resized()
         add(desktopRecButton, 28);
         add(captureOutButton, 28);
     }
-    add(scrubButton, 28);
     add(reverseButton, 28);
+    add(scrubButton, 28);
     add(sliceButton, 28);
     add(followButton, 28);
     add(toolsButton, 28);
@@ -1317,4 +1336,5 @@ void EditorToolbar::resized()
     fb.items.add(juce::FlexItem().withFlex(1.0f));
     add(timeLabel, 150);
     fb.performLayout(row);
+    repaint();   // keep the recording-section divider aligned with the new button positions
 }

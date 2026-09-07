@@ -27,6 +27,7 @@ public:
     ~KnobRow() override;
 
     void resized() override;
+    void paint(juce::Graphics&) override;   // faint group dividers between the knob sections
 
 private:
     void timerCallback() override;

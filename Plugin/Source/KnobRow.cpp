@@ -275,4 +275,29 @@ void KnobRow::resized()
         k->slider.setBounds(col);
         r.removeFromLeft(gap);
     }
+    repaint();   // reposition the section dividers for the new knob width
+}
+
+void KnobRow::paint(juce::Graphics& g)
+{
+    // A faint hairline in the gap before each of these knob indices, marking the section
+    // boundaries: time/pitch | filter | selection | output gain. Index 8 (Gain) only exists
+    // in the Standalone build.
+    static constexpr int boundaryBefore[] = { 3 /*Base*/, 6 /*Start*/, 8 /*Gain*/ };
+
+    g.setColour(theme->palette().text.withAlpha(0.18f));
+    const float y0 = 3.0f;
+    const float y1 = (float) getHeight() - 3.0f;
+
+    for (int idx : boundaryBefore)
+    {
+        if (idx <= 0 || idx >= knobs.size())
+            continue;
+        const auto left  = knobs[idx - 1]->slider.getBounds();
+        const auto right = knobs[idx]->slider.getBounds();
+        if (right.getX() <= left.getRight())
+            continue;   // not laid out yet
+        const float x = (float) juce::roundToInt((left.getRight() + right.getX()) * 0.5) + 0.5f;
+        g.drawLine(x, y0, x, y1, 1.0f);
+    }
 }
