@@ -585,26 +585,27 @@ void EditorToolbar::paint(juce::Graphics& g)
     g.setColour(theme->palette().panelBg);
     g.fillRoundedRectangle(getLocalBounds().toFloat(), 10.0f);
 
-    // Faint group hairlines (mid-gap between two buttons, repositioned on resized()):
-    //   [standalone] around the secondary recording group -- after Record/Auto-Record and
-    //   before Reverse -- and, in every build, between the waveform tools (Slice) and the
-    //   Tools menu.
-    g.setColour(theme->palette().screenText.withAlpha(0.22f));
-    const float y0 = 5.0f, y1 = (float) getHeight() - 5.0f;
-    auto hairlineBetween = [&](const juce::Component& left, const juce::Component& right)
+    // A single small dot centred in the (widened, see resized()) gap between two buttons, at
+    // each group boundary: [standalone] around the secondary recording group -- after
+    // Record/Auto-Record and before Reverse -- and, in every build, between the waveform
+    // tools (Slice) and the Tools menu.
+    g.setColour(theme->palette().screenText.withAlpha(0.45f));
+    auto dotBetween = [&](const juce::Component& left, const juce::Component& right)
     {
         if (right.getX() <= left.getRight())
             return;   // not laid out yet
-        const float x = (float) juce::roundToInt((left.getRight() + right.getX()) * 0.5) + 0.5f;
-        g.drawLine(x, y0, x, y1, 1.0f);
+        const float x  = (left.getRight() + right.getX()) * 0.5f;
+        const float cy = (float) getHeight() * 0.5f;
+        constexpr float radius = 2.0f;
+        g.fillEllipse(x - radius, cy - radius, radius * 2.0f, radius * 2.0f);
     };
 
     if (standaloneApp)
     {
-        hairlineBetween(autoRecordButton, desktopRecButton);
-        hairlineBetween(captureOutButton, reverseButton);
+        dotBetween(autoRecordButton, desktopRecButton);
+        dotBetween(captureOutButton, reverseButton);
     }
-    hairlineBetween(sliceButton, toolsButton);
+    dotBetween(sliceButton, toolsButton);
 }
 
 //==============================================================================
@@ -1290,37 +1291,39 @@ void EditorToolbar::chooseOutputFolder()
 void EditorToolbar::resized()
 {
     auto row = getLocalBounds().reduced(8, 5);   // inset so pills clear the band's rounded corners
-    const int gap = 16;   // trying wider spacing between the transport buttons
+    const int gap    = 16;   // spacing between the transport buttons
+    const int dotGap = 14;   // extra spacing where a group-divider dot sits (see paint())
 
     juce::FlexBox fb;
     fb.flexDirection = juce::FlexBox::Direction::row;
-    auto add = [&](juce::Component& c, int w)
+    auto addWide = [&](juce::Component& c, int w, int rightMargin)
     {
         fb.items.add(juce::FlexItem(c).withWidth((float) w).withMinWidth(22.0f)
-                         .withMargin(juce::FlexItem::Margin(0, (float) gap, 0, 0)));
+                         .withMargin(juce::FlexItem::Margin(0, (float) rightMargin, 0, 0)));
     };
+    auto add = [&](juce::Component& c, int rightMargin = 16) { addWide(c, 28, rightMargin); };
     // Order set by the user: transport (Play-from-start, Play, Loop) -> primary record
     // (Record, Auto-Record) -> secondary record (Record Desktop, Capture Output; standalone
     // only) -> waveform tools (Reverse, Scrub, Slice) -> Tools menu -> Clear, with the time
-    // readout pinned right. All round icon buttons. paint() draws the section hairlines.
-    // (Follow-playhead moved to the header row next to Float-on-top -- see PluginEditor.)
-    add(playFromStartButton, 28);
-    add(playButton, 28);
-    add(loopButton, 28);
-    add(recordButton, 28);
-    add(autoRecordButton, 28);
+    // readout pinned right. All round icon buttons. paint() drops a divider dot in each
+    // widened (gap + dotGap) gap. (Follow-playhead moved to the header row -- see PluginEditor.)
+    add(playFromStartButton);
+    add(playButton);
+    add(loopButton);
+    add(recordButton);
+    add(autoRecordButton, standaloneApp ? gap + dotGap : gap);   // dot before Record Desktop
     if (standaloneApp)
     {
-        add(desktopRecButton, 28);
-        add(captureOutButton, 28);
+        add(desktopRecButton);
+        add(captureOutButton, gap + dotGap);                     // dot before Reverse
     }
-    add(reverseButton, 28);
-    add(scrubButton, 28);
-    add(sliceButton, 28);
-    add(toolsButton, 28);
-    add(clearButton, 28);
+    add(reverseButton);
+    add(scrubButton);
+    add(sliceButton, gap + dotGap);                              // dot before Tools
+    add(toolsButton);
+    add(clearButton);
     fb.items.add(juce::FlexItem().withFlex(1.0f));
-    add(timeLabel, 150);
+    addWide(timeLabel, 150, gap);
     fb.performLayout(row);
     repaint();   // keep the recording-section divider aligned with the new button positions
 }

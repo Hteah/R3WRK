@@ -824,18 +824,22 @@ Play/Loop/Record/Tools on the left with the time readout pinned to the right
 (dropped the separate "● REC" label; `timeLabel` carries that text and turns
 `playhead`-coloured while recording instead).
 
-Section dividers (faint 1 px hairlines drawn in `paint()` at the mid-gap
-between two buttons/knobs, low-alpha theme ink, repositioned on `resized()`):
+Section dividers — a single small dot (radius 2, low-alpha theme ink) drawn in
+`paint()` centred in the mid-gap between two buttons/knobs, repositioned on
+`resized()`:
 - **`EditorToolbar`** — `autoRecordButton | desktopRecButton` and
   `captureOutButton | reverseButton` (standalone-only, bracketing the
   secondary recording group), plus `sliceButton | toolsButton` (every build).
-  Button order is Play-from-start / Play / Loop / Record / Auto-Record │
-  Record-Desktop / Capture-Output │ Reverse / Scrub / Slice │ Tools / Clear
-  (Reverse sits left of Scrub). **Follow-playhead is not on this strip** — it
-  moved to the header row (see below).
-- **`KnobRow`** — three, in the gaps before knob index 3 / 6 / 8, marking
+  The button *before* each dot gets a widened right margin (`gap + dotGap`,
+  16 + 14) in `resized()` so the dot has breathing room. Button order is
+  Play-from-start / Play / Loop / Record / Auto-Record ·│· Record-Desktop /
+  Capture-Output ·│· Reverse / Scrub / Slice ·│· Tools / Clear (Reverse sits
+  left of Scrub). **Follow-playhead is not on this strip** — it moved to the
+  header row (see below).
+- **`KnobRow`** — dots in the gaps before knob index 3 / 6 / 8, marking
   `Pitch·Speed·Stretch │ Base·Width·Q │ Start·End │ Gain`; the last is
-  standalone-only (the Gain knob only exists there).
+  standalone-only (the Gain knob only exists there). Knob spacing itself is
+  unchanged.
 
 **Header-row corner buttons** (`R3WRKAudioProcessorEditor`, not `HeaderBar` —
 editor-level children overlaid on the header strip's right end, sharing one

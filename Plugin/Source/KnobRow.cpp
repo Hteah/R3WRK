@@ -282,14 +282,14 @@ void KnobRow::resized()
 
 void KnobRow::paint(juce::Graphics& g)
 {
-    // A faint hairline in the gap before each of these knob indices, marking the section
-    // boundaries: time/pitch | filter | selection | output gain. Index 8 (Gain) only exists
-    // in the Standalone build.
+    // A single small dot, centred in the gap before each of these knob indices, marking the
+    // section boundaries: time/pitch | filter | selection | output gain. Index 8 (Gain) only
+    // exists in the Standalone build.
     static constexpr int boundaryBefore[] = { 3 /*Base*/, 6 /*Start*/, 8 /*Gain*/ };
 
-    g.setColour(theme->palette().text.withAlpha(0.18f));
-    const float y0 = 3.0f;
-    const float y1 = (float) getHeight() - 3.0f;
+    g.setColour(theme->palette().text.withAlpha(0.4f));
+    const float cy = (float) getHeight() * 0.5f;
+    constexpr float radius = 2.0f;
 
     for (int idx : boundaryBefore)
     {
@@ -299,7 +299,7 @@ void KnobRow::paint(juce::Graphics& g)
         const auto right = knobs[idx]->slider.getBounds();
         if (right.getX() <= left.getRight())
             continue;   // not laid out yet
-        const float x = (float) juce::roundToInt((left.getRight() + right.getX()) * 0.5) + 0.5f;
-        g.drawLine(x, y0, x, y1, 1.0f);
+        const float x = (float) (left.getRight() + right.getX()) * 0.5f;
+        g.fillEllipse(x - radius, cy - radius, radius * 2.0f, radius * 2.0f);
     }
 }
