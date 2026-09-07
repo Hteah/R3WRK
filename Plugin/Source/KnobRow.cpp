@@ -261,7 +261,7 @@ void KnobRow::timerCallback()
 void KnobRow::resized()
 {
     auto r = getLocalBounds().reduced(4, 2);
-    const int gap = 3;
+    const int gap = 2;
     const int n = juce::jmax(1, knobs.size());
 
     // Auto-fit: prefer a fairly tight column, but shrink further so every knob still shows at
@@ -270,7 +270,7 @@ void KnobRow::resized()
     // packs the knobs closer without shrinking them; the cap keeps the time readouts (Start /
     // End) from clipping.
     const int avail = juce::jmax(0, r.getWidth() - gap * (n - 1));
-    const int knobW = juce::jlimit(46, 58, avail / n);
+    const int knobW = juce::jlimit(46, 53, avail / n);
 
     for (auto* k : knobs)
     {
