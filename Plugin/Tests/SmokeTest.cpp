@@ -514,6 +514,33 @@ int main()
         dir.deleteRecursively();
     }
 
+    // --- Octatrack chain export is always 16-bit / 44.1 kHz ----------------
+    {
+        std::cout << "-- Octatrack chain: forced to 16-bit / 44100 --" << std::endl;
+        AudioDocument doc;
+        const double srcRate = 48000.0;
+        setDocumentContent(doc, makeSineBuffer(2, (int) srcRate, srcRate, 220.0, 0.5f), srcRate);
+        doc.addSliceMarker((int64_t) srcRate / 2);
+
+        auto wav = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("r3wrk_ot.wav");
+        auto ot  = wav.withFileExtension("ot");
+        wav.deleteFile(); ot.deleteFile();
+
+        check(EditActions::exportOctatrackChain(doc, wav, 120.0), "exportOctatrackChain wrote the files");
+        check(ot.existsAsFile(), "the .ot sits next to the .wav");
+
+        juce::AudioFormatManager fm; fm.registerBasicFormats();
+        std::unique_ptr<juce::AudioFormatReader> rd(fm.createReaderFor(wav));
+        check(rd != nullptr, "the chain .wav reads back");
+        if (rd != nullptr)
+        {
+            checkNear(rd->sampleRate, 44100.0, 1.0, "chain .wav is 44100 Hz even though the doc was 48000");
+            check(rd->bitsPerSample == 16, "chain .wav is 16-bit");
+            checkNear((double) rd->lengthInSamples, 44100.0, 44100.0 * 0.02, "chain .wav length resampled to ~1 s");
+        }
+        wav.deleteFile(); ot.deleteFile();
+    }
+
     // --- saveToFile(opts): container format + sample rate + bit depth ------
     {
         std::cout << "-- save options: format / sample rate / bit depth --" << std::endl;

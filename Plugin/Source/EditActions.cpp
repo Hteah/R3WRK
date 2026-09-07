@@ -39,8 +39,10 @@ namespace
         return out;
     }
 
-    // Writes `region` to `file` as a 24-bit WAV, overwriting anything already there.
-    bool writeWav(const juce::File& file, const juce::AudioBuffer<float>& region, double sampleRate)
+    // Writes `region` to `file` as a WAV (24-bit unless told otherwise), overwriting anything
+    // already there.
+    bool writeWav(const juce::File& file, const juce::AudioBuffer<float>& region, double sampleRate,
+                  int bitsPerSample = 24)
     {
         if (region.getNumSamples() <= 0)
             return false;
@@ -54,7 +56,7 @@ namespace
         auto writer = wavFormat.createWriterFor(stream, juce::AudioFormatWriterOptions{}
                                                             .withSampleRate(sampleRate)
                                                             .withNumChannels(region.getNumChannels())
-                                                            .withBitsPerSample(24));
+                                                            .withBitsPerSample(bitsPerSample));
         if (writer == nullptr)
             return false;
 
@@ -294,13 +296,19 @@ int sliceToFolder(const AudioDocument& doc, const juce::File& folder, const juce
 
 bool exportOctatrackChain(const AudioDocument& doc, const juce::File& wavFile, double bpm)
 {
+    // The Octatrack only reads 16-bit / 44.1 kHz WAVs, so a chain is always written that way
+    // regardless of the Save Options -- it's a device format, not a user choice.
+    constexpr double kOtRate = 44100.0;
+    constexpr int    kOtBits = 16;
+
     const int64_t rawLen = doc.getNumSamples();
     if (rawLen <= 0)
         return false;
 
-    // Same as sliceToFolder: render the knobs into the audio, then scale the slice points to
-    // match so the .wav and the .ot slice grid agree.
-    const auto rendered = doc.renderWithPlaybackKnobs(doc.getBuffer());
+    // Bake the knobs, force 44.1 kHz, then scale the slice points to the resampled length so
+    // the .wav and the .ot slice grid agree.
+    auto rendered = doc.renderWithPlaybackKnobs(doc.getBuffer());
+    rendered = AudioDocument::resampled(rendered, doc.getSampleRate(), kOtRate);
     const int64_t len = rendered.getNumSamples();
     if (len <= 0)
         return false;
@@ -313,7 +321,7 @@ bool exportOctatrackChain(const AudioDocument& doc, const juce::File& wavFile, d
     if ((int) regions.size() > OctatrackOtFile::kMaxSlices)
         regions.resize(OctatrackOtFile::kMaxSlices);        // Octatrack's hard limit
 
-    if (! writeWav(wavFile, rendered, doc.getSampleRate()))
+    if (! writeWav(wavFile, rendered, kOtRate, kOtBits))
         return false;
 
     return OctatrackOtFile::writeToFile(wavFile.withFileExtension("ot"), len, regions, bpm);

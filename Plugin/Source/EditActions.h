@@ -51,9 +51,10 @@ namespace EditActions
     // Returns the number of files written (0 if there are no slice markers).
     int sliceToFolder(const AudioDocument& doc, const juce::File& folder, const juce::String& baseName);
 
-    // Writes an Octatrack sample chain: the whole clip to `wavFile` as a 24-bit WAV, plus a
-    // sibling "<wavFile without extension>.ot" carrying the slice points (see OctatrackOtFile).
-    // Falls back to a single whole-clip slice if there are no markers. Caps at the Octatrack's
+    // Writes an Octatrack sample chain: the whole clip to `wavFile` as a 16-bit / 44.1 kHz WAV
+    // (the device's required format -- always, regardless of the Save Options), plus a sibling
+    // "<wavFile without extension>.ot" carrying the slice points (see OctatrackOtFile). Falls
+    // back to a single whole-clip slice if there are no markers. Caps at the Octatrack's
     // 64-slice limit. `bpm` only feeds the .ot's tempo field. Returns false on a write failure.
     bool exportOctatrackChain(const AudioDocument& doc, const juce::File& wavFile, double bpm = 120.0);
 }

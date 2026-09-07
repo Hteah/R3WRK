@@ -169,26 +169,24 @@ juce::AudioBuffer<float> AudioDocument::renderWithPlaybackKnobs(const juce::Audi
     return out;
 }
 
-namespace
+// Straight Lagrange resample of every channel by srcRate/dstRate -- same interpolator the
+// load path uses. Returns `src` untouched when the rates already match.
+juce::AudioBuffer<float> AudioDocument::resampled(const juce::AudioBuffer<float>& src,
+                                                 double srcRate, double dstRate)
 {
-    // Straight Lagrange resample of every channel by srcRate/dstRate -- same interpolator the
-    // load path uses. Returns `src` untouched when the rates already match.
-    juce::AudioBuffer<float> resampleBuffer(const juce::AudioBuffer<float>& src, double srcRate, double dstRate)
-    {
-        if (srcRate <= 0.0 || dstRate <= 0.0 || std::abs(srcRate - dstRate) < 0.5 || src.getNumSamples() <= 0)
-            return src;
+    if (srcRate <= 0.0 || dstRate <= 0.0 || std::abs(srcRate - dstRate) < 0.5 || src.getNumSamples() <= 0)
+        return src;
 
-        const double ratio = srcRate / dstRate;
-        const int newLen = (int) std::ceil((double) src.getNumSamples() / ratio) + 1;
-        juce::AudioBuffer<float> out(src.getNumChannels(), newLen);
-        for (int ch = 0; ch < src.getNumChannels(); ++ch)
-        {
-            juce::LagrangeInterpolator interp;
-            interp.reset();
-            interp.process(ratio, src.getReadPointer(ch), out.getWritePointer(ch), newLen);
-        }
-        return out;
+    const double ratio = srcRate / dstRate;
+    const int newLen = (int) std::ceil((double) src.getNumSamples() / ratio) + 1;
+    juce::AudioBuffer<float> out(src.getNumChannels(), newLen);
+    for (int ch = 0; ch < src.getNumChannels(); ++ch)
+    {
+        juce::LagrangeInterpolator interp;
+        interp.reset();
+        interp.process(ratio, src.getReadPointer(ch), out.getWritePointer(ch), newLen);
     }
+    return out;
 }
 
 bool AudioDocument::saveToFile(const juce::File& file) const
@@ -249,7 +247,7 @@ bool AudioDocument::saveToFile(const juce::File& file, const AudioSaveOptions& o
             targetRate = best;
         }
     }
-    rendered = resampleBuffer(rendered, sampleRate, targetRate);
+    rendered = resampled(rendered, sampleRate, targetRate);
 
     // Bit depth: 32 means float (WAV only). Clamp to what the format supports.
     int depth = opts.bitDepth;

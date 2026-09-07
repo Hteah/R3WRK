@@ -94,6 +94,11 @@ public:
     static juce::File findLameBinary();
     static bool mp3ExportAvailable() { return findLameBinary().existsAsFile(); }
 
+    // Lagrange resample every channel from srcRate to dstRate (returns `src` unchanged when
+    // the rates already match). Used by saveToFile() and the fixed-rate Octatrack export.
+    static juce::AudioBuffer<float> resampled(const juce::AudioBuffer<float>& src,
+                                              double srcRate, double dstRate);
+
     const juce::AudioBuffer<float>& getBuffer() const { return buffer; }
 
     double getSampleRate() const { return sampleRate; }

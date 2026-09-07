@@ -672,8 +672,15 @@ to choose the file type, sample rate and bit depth."
   32-float item enabled for WAV only; 96 kHz disabled for MP3; clamps on change.
 - Recording **auto-save stays a plain 24-bit WAV** (fast, lossless, never fails);
   it sets `currentFile` so a later ⌘S / Save As re-emits in the chosen format.
-- Slice / Octatrack exports keep their own 24-bit WAV writer (separate "chain"
-  concept) — unaffected.
+- **Export Slices** uses its own 24-bit WAV writer at the document rate (the Save
+  Options don't apply — it's a batch dump, and the knob bake / marker scaling from
+  the previous section still happen).
+- **Export Octatrack Chain** always writes **16-bit / 44.1 kHz** — the device's
+  required format, not a user choice. `exportOctatrackChain()` bakes the knobs,
+  `AudioDocument::resampled()`s to 44100 (shared static, factored out of the anon
+  `resampleBuffer` helper), `scaleRegions()`s the slice grid to the *resampled*
+  length so the `.wav` and `.ot` still agree, and `writeWav(..., 44100, 16)`
+  (`writeWav` gained an optional `bitsPerSample`).
 
 ### Save bakes the Speed/Pitch/Stretch knobs into the file
 
