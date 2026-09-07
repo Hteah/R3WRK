@@ -53,3 +53,37 @@ public:
 private:
     juce::SharedResourcePointer<ThemeManager> theme;
 };
+
+/**
+    Same drawn icons as R3WRKLookAndFeel, but the button background is a small-radius rounded
+    rectangle with a faint constant tint (stronger on hover/press) rather than a fully-rounded
+    pill/circle -- for the standalone "float on top" toggle, which is a universal glyph that
+    reads better standing on its own, the way RCRDR and Sieve draw it. Filled with
+    buttonOnColourId while the toggle is on.
+*/
+class R3WRKIconRectLookAndFeel : public R3WRKLookAndFeel
+{
+public:
+    void drawButtonBackground(juce::Graphics& g, juce::Button& button, const juce::Colour&,
+                              bool isHighlighted, bool isDown) override
+    {
+        auto bounds = button.getLocalBounds().toFloat().reduced(0.5f);
+        const float radius = 5.0f;
+
+        if (button.getToggleState())
+        {
+            juce::Colour fill = button.findColour(juce::TextButton::buttonOnColourId);
+            if (isDown)             fill = fill.darker(0.18f);
+            else if (isHighlighted) fill = fill.brighter(0.08f);
+            g.setColour(fill);
+            g.fillRoundedRectangle(bounds, radius);
+            return;
+        }
+
+        const juce::Colour ink = button.findColour(juce::TextButton::textColourOffId);
+        g.setColour(ink.withAlpha(isDown ? 0.18f : isHighlighted ? 0.12f : 0.06f));
+        g.fillRoundedRectangle(bounds, radius);
+        g.setColour(ink.withAlpha(0.28f));
+        g.drawRoundedRectangle(bounds, radius, 1.0f);
+    }
+};

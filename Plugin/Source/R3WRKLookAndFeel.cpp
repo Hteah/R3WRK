@@ -337,10 +337,10 @@ namespace
     // is on.
     void drawFloatTopIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
     {
-        // A centred landscape "window" rectangle (the icon box itself is near-square, so this
-        // gives it a proper window aspect regardless of the button shape).
-        const float iw = bounds.getWidth() * 0.72f;
-        const float ih = iw * 0.80f;
+        // A centred landscape "window" rectangle. Height off the button height (with margin),
+        // width from a fixed window aspect -- clamped so it can't overrun a narrow button.
+        const float ih = juce::jmin (bounds.getHeight() * 0.68f, bounds.getWidth() * 0.62f);
+        const float iw = ih / 0.80f;
         juce::Rectangle<float> win (bounds.getCentreX() - iw * 0.5f,
                                     bounds.getCentreY() - ih * 0.5f, iw, ih);
         const float stroke = juce::jmax (1.5f, ih * 0.13f);

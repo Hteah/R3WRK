@@ -65,9 +65,9 @@ private:
     juce::SharedResourcePointer<OutputSettings> outputSettings;
 
     // Standalone only: a pip.enter-style toggle at the far right of the header row (in line
-    // with the file name) that keeps the window above other apps. Native NSWindow level,
-    // persisted.
-    R3WRKLookAndFeel floatButtonLnF;
+    // with the file name) that keeps the window above other apps. Drawn as a small rounded
+    // rect (not the pill/circle the other buttons use). Native NSWindow level, persisted.
+    R3WRKIconRectLookAndFeel floatButtonLnF;
     juce::TextButton floatOnTopButton { R3WRKLookAndFeel::iconFloatTop };
     bool floatStateApplied = false;
 

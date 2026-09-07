@@ -1733,10 +1733,13 @@ corrected to the **right** side; wants RCRDR's icon -- the `pip.enter` SF Symbol
 apps). `PluginEditor` owns a toggling `floatOnTopButton` (`R3WRKLookAndFeel::iconFloatTop` +
 `drawFloatTopIcon` -- a freehand of `pip.enter`: a landscape rounded-rect "window", a filled
 box in its bottom-right corner, a short ↘ arrow into that box), added only when
-`standaloneWindow`; `resized()` carves 26px off the **right** of the header row for it, in
-line with the file name (below the traffic lights). Outlined/chrome-ink off, accent fill on
--- same idiom as the toolbar's Loop pill, but with `pal.text`/`windowBg` since the header row
-is on `windowBg`, not the dark band (`applyFloatButtonTheme()`, re-run on theme change).
+`standaloneWindow`; `resized()` carves a 34px slot off the **right** of the header row (button
+32x24, vertically centred), in line with the file name (below the traffic lights). Unlike the
+other buttons it's **not** a pill/circle -- `R3WRKIconRectLookAndFeel` (subclass of
+`R3WRKLookAndFeel`, keeps the icon rendering) draws a small-radius rounded rect with a faint
+constant tint + hairline border, accent-filled while on -- the way RCRDR / Sieve draw their
+float toggle. `applyFloatButtonTheme()` sets `pal.text`/`windowBg` ink (header row is on
+`windowBg`, not the dark band), re-run on theme change.
 Persisted in `OutputSettings` (`floatOnTop` key); `maybeApplyPersistedFloatOnTop()` applies it
 once the window peer exists (called from both `parentHierarchyChanged()` and the first
 `resized()`, guarded by `floatStateApplied`).
