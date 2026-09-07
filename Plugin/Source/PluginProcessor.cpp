@@ -278,6 +278,15 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     const int numSamples = buffer.getNumSamples();
     const int numCh = buffer.getNumChannels();
 
+    if (desktopRecording.load(std::memory_order_relaxed))
+    {
+        // ScreenCaptureKit is doing the capture on its own queue (appendDesktopSamples) --
+        // nothing here to record or monitor.
+        buffer.clear();
+        wasPlaying = false;
+        return;
+    }
+
     if (document.isRecording.load(std::memory_order_relaxed))
     {
         ensureRecordingCapacity(numCh, numSamples);
@@ -436,6 +445,132 @@ void R3WRKAudioProcessor::stopRecording()
     document.loopStart = 0;
     document.loopEnd = document.getNumSamples();
     document.markAsOriginal();   // this take is the new "Revert to Original" baseline
+}
+
+//==============================================================================
+void R3WRKAudioProcessor::startDesktopRecording()
+{
+    if (! DesktopAudioCapture::isSupported())
+    {
+        if (onDesktopStatus) onDesktopStatus("Desktop capture needs macOS 13 or later");
+        return;
+    }
+
+    {
+        const juce::ScopedLock sl(desktopRecLock);
+        desktopRecBuffer.setSize(2, 0);
+        desktopRecWritePos = 0;
+        desktopRecChannels = 2;
+        desktopRecRate = 48000.0;
+    }
+    document.resetRecordingScope();
+    document.isPlaying = false;
+
+    desktopCapture.start(
+        [this](const float* const* d, int nc, int nf, double sr) { appendDesktopSamples(d, nc, nf, sr); },
+        [this]
+        {
+            juce::MessageManager::callAsync([this]
+            {
+                desktopRecording = true;
+                document.isRecording = true;
+                document.notifyChanged();
+            });
+        },
+        [this](juce::String msg)
+        {
+            juce::MessageManager::callAsync([this, msg]
+            {
+                const bool wasRunning = desktopRecording.exchange(false);
+                document.isRecording = false;
+                if (onDesktopStatus)
+                    onDesktopStatus(msg.isNotEmpty() ? msg
+                                                    : juce::String("Couldn't start desktop capture"));
+                if (wasRunning)
+                    finalizeDesktopRecording();   // stream died mid-take -- keep what landed
+                document.notifyChanged();
+            });
+        });
+}
+
+void R3WRKAudioProcessor::stopDesktopRecording()
+{
+    desktopCapture.stop();          // sets running=false, stops the stream, drains the queue
+    desktopRecording = false;
+    document.isRecording = false;
+    finalizeDesktopRecording();
+}
+
+void R3WRKAudioProcessor::appendDesktopSamples(const float* const* data, int numChannels, int numFrames, double sr)
+{
+    if (numFrames <= 0 || numChannels <= 0 || data == nullptr)
+        return;
+
+    const juce::ScopedLock sl(desktopRecLock);
+    const int ch = juce::jlimit(1, 2, numChannels);
+    desktopRecChannels = ch;
+    desktopRecRate = sr > 0.0 ? sr : 48000.0;
+
+    const int64_t needed = desktopRecWritePos + numFrames;
+    if ((int64_t) desktopRecBuffer.getNumSamples() < needed || desktopRecBuffer.getNumChannels() < ch)
+    {
+        int64_t cap = juce::jmax((int64_t) desktopRecBuffer.getNumSamples(),
+                                 (int64_t) (desktopRecRate * 8.0));
+        while (cap < needed) cap *= 2;
+        desktopRecBuffer.setSize(ch, (int) cap, true, true, true);
+    }
+    for (int c = 0; c < ch; ++c)
+        if (data[c] != nullptr)
+            desktopRecBuffer.copyFrom(c, (int) desktopRecWritePos, data[c], numFrames);
+    desktopRecWritePos += numFrames;
+
+    // Feed the live scope, same shape as the input-record path.
+    constexpr int hop = 256;
+    for (int s = 0; s < numFrames; s += hop)
+    {
+        const int nn = juce::jmin(hop, numFrames - s);
+        float mn = 0.0f, mx = 0.0f;
+        for (int c = 0; c < ch; ++c)
+        {
+            if (data[c] == nullptr) continue;
+            const auto r = juce::FloatVectorOperations::findMinAndMax(data[c] + s, nn);
+            mn = juce::jmin(mn, r.getStart());
+            mx = juce::jmax(mx, r.getEnd());
+        }
+        const int wpos = document.scopeWritePos.load(std::memory_order_relaxed);
+        document.scopeMin[wpos] = mn;
+        document.scopeMax[wpos] = mx;
+        document.scopeWritePos.store((wpos + 1) % AudioDocument::scopeSize, std::memory_order_release);
+    }
+    document.recordedSamples.store(desktopRecWritePos, std::memory_order_relaxed);
+}
+
+void R3WRKAudioProcessor::finalizeDesktopRecording()
+{
+    juce::AudioBuffer<float> finalBuf;
+    double rate = 48000.0;
+    {
+        const juce::ScopedLock sl(desktopRecLock);
+        if (desktopRecWritePos <= 0)
+        {
+            if (onDesktopStatus) onDesktopStatus("No desktop audio captured");
+            return;
+        }
+        finalBuf.setSize(desktopRecChannels, (int) desktopRecWritePos);
+        for (int c = 0; c < desktopRecChannels; ++c)
+            finalBuf.copyFrom(c, 0, desktopRecBuffer, c, 0, (int) desktopRecWritePos);
+        rate = desktopRecRate;
+        desktopRecBuffer.setSize(0, 0);
+        desktopRecWritePos = 0;
+    }
+
+    document.beginChange();
+    document.setSampleRate(rate);
+    document.commitChange(std::move(finalBuf), "Record Desktop");
+    document.loopStart = 0;
+    document.loopEnd = document.getNumSamples();
+    document.markAsOriginal();
+    if (onDesktopStatus) onDesktopStatus("Desktop recording captured");
 }
 
 void R3WRKAudioProcessor::startPlayback()

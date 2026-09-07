@@ -306,6 +306,30 @@ namespace
                                                   juce::PathStrokeType::curved,
                                                   juce::PathStrokeType::rounded));
     }
+
+    // Record Desktop (Standalone only): a computer-monitor outline (rounded screen + a short
+    // stand) with a filled record dot centred on the screen -- "capture what's playing on
+    // this Mac".
+    void drawDesktopRecIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
+    {
+        auto a = bounds.reduced (bounds.getHeight() * 0.24f);
+        const float w = a.getWidth(), h = a.getHeight();
+        const float stroke = juce::jmax (1.4f, h * 0.09f);
+
+        // Screen: a rounded rectangle taking the top ~72% of the icon box.
+        juce::Rectangle<float> screen (a.getX(), a.getY(), w, h * 0.72f);
+        g.setColour (ink);
+        g.drawRoundedRectangle (screen.reduced (stroke * 0.5f), h * 0.10f, stroke);
+
+        // Stand: a short neck + a base foot centred under the screen.
+        const float cx = a.getCentreX();
+        g.fillRect (cx - stroke * 0.6f, screen.getBottom(), stroke * 1.2f, h * 0.12f);
+        g.fillRect (cx - w * 0.20f, a.getBottom() - stroke, w * 0.40f, stroke);
+
+        // Record dot on the screen.
+        const float r = juce::jmin (screen.getWidth(), screen.getHeight()) * 0.24f;
+        g.fillEllipse (cx - r, screen.getCentreY() - r, r * 2.0f, r * 2.0f);
+    }
 }
 
 void R3WRKLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int width, int height,
@@ -389,7 +413,7 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     if (text != iconPlay && text != iconStop && text != iconLoop
         && text != iconPlayFromStart && text != iconTools && text != iconScrub
         && text != iconReverse && text != iconClear && text != iconAutoRecord
-        && text != iconSlice && text != iconFollow)
+        && text != iconSlice && text != iconFollow && text != iconDesktopRec)
     {
         juce::LookAndFeel_V4::drawButtonText(g, button, isMouseOverButton, isButtonDown);
         return;
@@ -424,6 +448,11 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     if (text == iconFollow)
     {
         drawFollowIcon(g, bounds, ink);
+        return;
+    }
+    if (text == iconDesktopRec)
+    {
+        drawDesktopRecIcon(g, bounds, ink);
         return;
     }
     if (text == iconReverse)

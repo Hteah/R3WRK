@@ -216,7 +216,9 @@ namespace
 
 //==============================================================================
 EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
-    : processor(proc), document(doc)
+    : processor(proc), document(doc),
+      standaloneApp(proc.wrapperType == juce::AudioProcessor::wrapperType_Standalone
+                    && R3WRKAudioProcessor::isDesktopCaptureSupported())
 {
     addAndMakeVisible(playFromStartButton);
     addAndMakeVisible(playButton);
@@ -230,6 +232,8 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     addAndMakeVisible(reverseButton);
     addAndMakeVisible(clearButton);
     addAndMakeVisible(autoRecordButton);
+    if (standaloneApp)
+        addAndMakeVisible(desktopRecButton);
 
     timeLabel.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::plain));
     timeLabel.setJustificationType(juce::Justification::centredRight);
@@ -254,6 +258,9 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     clearButton.setTooltip("Clear -- empties the waveform and resets Pitch/Speed/Stretch/Start/End");
     autoRecordButton.setTooltip("Auto-Record -- arm it and recording starts on its own once the "
                                 "input crosses the threshold (set in Tools, Auto-Record Threshold)");
+    desktopRecButton.setTooltip("Record Desktop -- captures whatever audio is playing on this Mac "
+                                "straight into the editor (first use asks for Screen Recording "
+                                "permission in System Settings)");
 
     for (auto* b : { &playFromStartButton, &playButton, &loopButton, &scrubButton, &sliceButton,
                      &followButton, &recordButton, &toolsButton, &reverseButton, &clearButton,
@@ -268,6 +275,21 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
         // handler. These are a transport strip, not a tab-navigable form, so keep keyboard
         // focus off them entirely and let Space always mean "toggle play".
         b->setWantsKeyboardFocus(false);
+    }
+
+    if (standaloneApp)
+    {
+        desktopRecButton.setLookAndFeel(&toolbarLnF);
+        desktopRecButton.setWantsKeyboardFocus(false);
+        desktopRecButton.onClick = [this] { toggleDesktopRecording(); };
+
+        // The capture wrapper reports start/stop/errors on a background queue; PluginProcessor
+        // already marshals to the message thread before calling this, so just surface it.
+        processor.onDesktopStatus = [this](juce::String m)
+        {
+            if (onStatusMessage) onStatusMessage(m);
+            updateTransportButtonText();
+        };
     }
 
     recordButton.onClick        = [this] { toggleTransport(); };
@@ -354,6 +376,8 @@ EditorToolbar::~EditorToolbar()
                      &followButton, &recordButton, &toolsButton, &reverseButton, &clearButton,
                      &autoRecordButton })
         b->setLookAndFeel(nullptr);   // detach before toolbarLnF is destroyed
+    desktopRecButton.setLookAndFeel(nullptr);
+    processor.onDesktopStatus = nullptr;
     theme->removeChangeListener(this);
     document.changeBroadcaster.removeChangeListener(this);
 }
@@ -424,6 +448,12 @@ void EditorToolbar::applyTheme()
     autoRecordButton.setColour(juce::TextButton::textColourOffId, pal.screenText);
     autoRecordButton.setColour(juce::TextButton::textColourOnId, pal.windowBg);
 
+    // Record Desktop: outlined (it's a Standalone extra, not the primary Record), inked in
+    // the record red so it still reads as a capture control. A stop square appears on it,
+    // same as the main Record button, while system audio is being captured.
+    desktopRecButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+    desktopRecButton.setColour(juce::TextButton::textColourOffId, pal.recordButton);
+
     // timeLabel's colour flips to pal.playhead while recording -- see timerCallback().
     timeLabel.setColour(juce::Label::textColourId, pal.screenTextDim);
     repaint();
@@ -450,6 +480,28 @@ void EditorToolbar::toggleTransport()
     else if (document.isPlaying.load())   processor.stopPlayback();
     else                                { processor.startRecording();
                                           if (onSourceNameChanged) onSourceNameChanged({}); }
+    updateTransportButtonText();
+}
+
+void EditorToolbar::toggleDesktopRecording()
+{
+    if (processor.isDesktopRecording())
+    {
+        processor.stopDesktopRecording();   // synchronous: drains the queue + commits to the document
+        autoSaveRecording();
+    }
+    else
+    {
+        if (document.isRecording.load())          // don't run mic + desktop capture at once
+        {
+            processor.stopRecording();
+            autoSaveRecording();
+        }
+        if (document.isPlaying.load())
+            processor.stopPlayback();
+        if (onSourceNameChanged) onSourceNameChanged({});
+        processor.startDesktopRecording();        // async -- document.isRecording flips on the started cb
+    }
     updateTransportButtonText();
 }
 
@@ -664,20 +716,29 @@ void EditorToolbar::showAutoRecordThresholdCallout()
 void EditorToolbar::updateTransportButtonText()
 {
     const bool rec = document.isRecording.load();
+    const bool desktopRec = processor.isDesktopRecording();
+    const bool micRec = rec && ! desktopRec;   // document.isRecording is shared by both paths
     const bool playing = document.isPlaying.load();
-    recordButton.setButtonText(rec ? R3WRKLookAndFeel::iconStop : juce::String());
+    recordButton.setButtonText(micRec ? R3WRKLookAndFeel::iconStop : juce::String());
     playButton.setButtonText(playing ? R3WRKLookAndFeel::iconStop : R3WRKLookAndFeel::iconPlay);
     loopButton.setToggleState(document.loopEnabled.load(), juce::dontSendNotification);
     scrubButton.setToggleState(document.scrubModeEnabled, juce::dontSendNotification);
     sliceButton.setToggleState(document.sliceModeEnabled, juce::dontSendNotification);
     followButton.setToggleState(document.followPlayheadEnabled, juce::dontSendNotification);
-    recordButton.setEnabled(! playing || rec);
+    recordButton.setEnabled((! playing || micRec) && ! desktopRec);
     scrubButton.setEnabled(! rec);
     sliceButton.setEnabled(! rec);
     followButton.setEnabled(! rec);
     reverseButton.setEnabled(! rec);
     clearButton.setEnabled(! rec);
     autoRecordButton.setEnabled(! rec);
+
+    if (standaloneApp)
+    {
+        desktopRecButton.setButtonText(desktopRec ? R3WRKLookAndFeel::iconStop
+                                                  : R3WRKLookAndFeel::iconDesktopRec);
+        desktopRecButton.setEnabled(desktopRec || (! micRec && ! playing));
+    }
 }
 
 void EditorToolbar::timerCallback()
@@ -857,6 +918,8 @@ void EditorToolbar::resized()
     add(playButton, 28);
     add(recordButton, 28);
     add(autoRecordButton, 28);
+    if (standaloneApp)
+        add(desktopRecButton, 28);
     add(loopButton, 28);
     add(scrubButton, 28);
     add(reverseButton, 28);

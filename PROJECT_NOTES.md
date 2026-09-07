@@ -1643,6 +1643,41 @@ back on the next tick. Now `followPlayheadIfNeeded()` reads the playhead once in
 `WaveformDisplay::playheadDrawSample()` (that anchor while follow is actively scrolling, the
 live playhead otherwise). Half-offset now `std::llround`ed rather than truncated.
 
+## "Record Desktop" -- system-audio capture (Standalone only)
+
+User: "So, I can use the standalone R3WRK to record what the audio from my desktop? Like
+RCRDR? ... Yes. Please." A new record button on the transport strip, shown **only in the
+Standalone app** (a VST3/AU plugin is handed audio by its host and has no business grabbing
+system output), captures whatever is playing on the Mac straight into the editor buffer.
+
+- `DesktopAudioCapture.{h,mm}` -- a pimpl ObjC++ wrapper around ScreenCaptureKit (macOS 13+).
+  SCK only vends audio as part of a screen-capture stream, so it takes a 2x2 "video" feed it
+  never reads and keeps the audio; `excludesCurrentProcessAudio = YES` so R3WRK never records
+  its own output. `start()` is async: permission check -> `SCShareableContent` -> build the
+  filter/config/stream -> `startCaptureWithCompletionHandler`. Callbacks (`onSamples`,
+  `onStarted`, `onError`) fire on a background dispatch queue. The framework is
+  `-weak_framework`-linked so a build still launches on a host without it; `isSupported()`
+  gates everything. Compiled `-fobjc-arc` (per-file in `Plugin/CMakeLists.txt`).
+- `PluginProcessor`: `startDesktopRecording()` / `stopDesktopRecording()` /
+  `appendDesktopSamples()` / `finalizeDesktopRecording()`. Samples land (off the audio
+  thread, under `desktopRecLock`) in a geometrically-grown buffer and feed the same live
+  scope (`document.scopeMin/Max`, `recordedSamples`) the mic-record path uses.
+  `document.isRecording` flips true on the stream's own "started" callback (after the
+  permission prompt), so the existing REC timer / scope UI just work; `isDesktopRecording()`
+  disambiguates which button owns the take. `processBlock` early-returns (silent) while
+  desktop capture is active. `stopDesktopRecording()` is synchronous -- `stop()` drains the
+  SCK queue -- then `finalizeDesktopRecording()` commits via
+  `beginChange`/`setSampleRate`/`commitChange(buf, "Record Desktop")` + `markAsOriginal`,
+  identical to `stopRecording()`. `onDesktopStatus` surfaces errors/status to the toolbar.
+- `EditorToolbar`: `desktopRecButton` (icon `iconDesktopRec` -- a monitor outline + record
+  dot in `R3WRKLookAndFeel`), added/wired only when `standaloneApp` (`wrapperType ==
+  wrapperType_Standalone && isDesktopCaptureSupported()`). Outlined, inked record-red; shows
+  a stop square while capturing. `toggleDesktopRecording()` stops mic-record/playback first,
+  then starts; on stop it auto-saves the take like the mic path.
+- First click triggers the system **Screen Recording** permission prompt (System Settings >
+  Privacy & Security > Screen Recording). Ad-hoc-signed rebuilds can reset that grant, so it
+  may need re-approving after a fresh build.
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).

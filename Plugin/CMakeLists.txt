@@ -83,7 +83,13 @@ target_sources(R3WRK
         Source/ThemeEditor.cpp
         Source/OutputSettings.cpp
         Source/OctatrackOtFile.cpp
-        Source/StandaloneWindowShape.mm)
+        Source/StandaloneWindowShape.mm
+        Source/DesktopAudioCapture.mm)
+
+# DesktopAudioCapture.mm is ObjC++ against ScreenCaptureKit -- ARC-managed, and the
+# framework is weak-linked so an ad-hoc build still launches on hosts without it.
+set_source_files_properties(Source/DesktopAudioCapture.mm PROPERTIES
+    COMPILE_FLAGS "-fobjc-arc")
 
 target_compile_definitions(R3WRK
     PUBLIC
@@ -101,6 +107,8 @@ target_link_libraries(R3WRK
         juce::juce_dsp
         juce::juce_gui_extra
         rubberband_dep
+        "-framework CoreMedia"
+        "-weak_framework ScreenCaptureKit"
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags

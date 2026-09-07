@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "AudioDocument.h"
+#include "DesktopAudioCapture.h"
 
 namespace RubberBand { class RubberBandStretcher; }
 
@@ -41,6 +42,17 @@ public:
     void startPlayback();
     void stopPlayback();
 
+    // "Record Desktop" (Standalone only): captures the Mac's system audio via ScreenCaptureKit
+    // straight into the editor buffer. document.isRecording drives the same UI (scope, stop
+    // square); isDesktopRecording() disambiguates so the editor greys the right buttons.
+    // startDesktopRecording is async -- document.isRecording flips true on the stream's own
+    // "started" callback (after the Screen Recording prompt); onDesktopStatus surfaces errors.
+    void startDesktopRecording();
+    void stopDesktopRecording();
+    bool isDesktopRecording() const { return desktopRecording.load(std::memory_order_relaxed); }
+    static bool isDesktopCaptureSupported() { return DesktopAudioCapture::isSupported(); }
+    std::function<void(juce::String)> onDesktopStatus;
+
     // Live playback knobs (Speed/Pitch/Stretch) live on `document` now -- see
     // AudioDocument.h -- so the views can read them too, not just the audio thread. All
     // three are realised by a real-time RubberBand stretcher on the playback stream; the
@@ -56,6 +68,18 @@ private:
     juce::AudioBuffer<float> recordingAccumulator;
     int64_t recordingWritePos = 0;
     void ensureRecordingCapacity(int numChannels, int64_t additionalSamples);
+
+    // Desktop capture: fed from ScreenCaptureKit's background queue (not the audio thread), so
+    // a plain CriticalSection guards the growable buffer -- processBlock never touches it.
+    DesktopAudioCapture desktopCapture;
+    std::atomic<bool> desktopRecording { false };
+    juce::CriticalSection desktopRecLock;
+    juce::AudioBuffer<float> desktopRecBuffer;
+    int64_t desktopRecWritePos = 0;
+    double  desktopRecRate = 48000.0;
+    int     desktopRecChannels = 2;
+    void appendDesktopSamples(const float* const* data, int numChannels, int numFrames, double sr);
+    void finalizeDesktopRecording();
 
     //==============================================================================
     // Real-time pitch/tape engine, rebuilt in prepareToPlay().
