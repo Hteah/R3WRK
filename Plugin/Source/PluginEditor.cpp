@@ -77,12 +77,36 @@ void R3WRKAudioProcessorEditor::paint(juce::Graphics& g)
 void R3WRKAudioProcessorEditor::mouseDown(const juce::MouseEvent& e)
 {
    #if JUCE_MAC
-    // Standalone/macOS: the native title-bar strip is hidden, so let the reserved band at the
-    // top of our own UI (where the traffic lights float) drag the whole window, like grabbing
-    // a title bar. Everywhere else the child components handle their own clicks and never
-    // reach here.
+    // Standalone/macOS: the native title-bar strip is hidden, so the reserved band at the top
+    // of our own UI (where the traffic lights float) stands in for a title bar -- drag it to
+    // move the window, double-click it to zoom. Only arm here; the move starts on mouseDrag so
+    // a double-click isn't swallowed by AppKit's nested drag loop. Child components handle
+    // their own clicks and never reach here.
+    windowDragArmed = standaloneWindow && e.position.y < (float) kMacTrafficLightInset;
+    windowDragActive = false;
+   #else
+    juce::ignoreUnused(e);
+   #endif
+}
+
+void R3WRKAudioProcessorEditor::mouseDrag(const juce::MouseEvent& e)
+{
+   #if JUCE_MAC
+    if (windowDragArmed && ! windowDragActive)
+    {
+        windowDragActive = true;
+        r3wrkBeginWindowDrag(this);   // AppKit runs the native window-move loop from here
+    }
+   #else
+    juce::ignoreUnused(e);
+   #endif
+}
+
+void R3WRKAudioProcessorEditor::mouseDoubleClick(const juce::MouseEvent& e)
+{
+   #if JUCE_MAC
     if (standaloneWindow && e.position.y < (float) kMacTrafficLightInset)
-        r3wrkBeginWindowDrag(this);
+        r3wrkTitleBarDoubleClick(this);   // fill the screen (or the user's title-bar pref)
    #else
     juce::ignoreUnused(e);
    #endif

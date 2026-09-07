@@ -1578,6 +1578,18 @@ component => `movableByWindowBackground` never fired. `r3wrkBeginWindowDrag()` (
 "input muted" banner is the thing at the top (its label also gets
 `setInterceptsMouseClicks(false)`).
 
+**Follow-up -- double-click the top band to zoom, like a native title bar.** User: "when you
+double click on the top bar it fills the screen, like native mac apps." Added
+`r3wrkTitleBarDoubleClick()` (`StandaloneWindowShape.mm`): reads `AppleActionOnDoubleClick`
+from `NSGlobalDomain` and does `[NSWindow zoom:]` (default / "Maximize"), `miniaturize:`
+("Minimize"), or nothing ("None") -- matching System Settings > Desktop & Dock. The window
+move was moved off `PluginEditor::mouseDown` onto a new `mouseDrag` (armed in `mouseDown`,
+fires once on first movement via `windowDragArmed`/`windowDragActive`) so `mouseDown` no
+longer starts AppKit's nested `performWindowDragWithEvent:` loop on the first click of a
+double-click -- otherwise that loop eats the second click and `mouseDoubleClick` never fires.
+`PluginEditor::mouseDoubleClick` calls the helper when the press is in the top
+`kMacTrafficLightInset` band.
+
 ## Phantom loop marker after Trim + Undo (`2b13baf`)
 
 User: selection -> right-click Trim -> Undo left a stray yellow/orange vertical line mid-clip

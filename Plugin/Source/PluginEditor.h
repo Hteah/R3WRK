@@ -20,7 +20,12 @@ public:
     void paint(juce::Graphics&) override;
     void resized() override;
     bool keyPressed(const juce::KeyPress&) override;
-    void mouseDown(const juce::MouseEvent&) override;   // drag the window by the top inset (Standalone/macOS)
+    // Standalone/macOS: the reserved top inset stands in for a hidden title bar -- drag it to
+    // move the window, double-click it to zoom (fill the screen). The move only begins on
+    // mouseDrag so a plain double-click still reaches mouseDoubleClick.
+    void mouseDown(const juce::MouseEvent&) override;
+    void mouseDrag(const juce::MouseEvent&) override;
+    void mouseDoubleClick(const juce::MouseEvent&) override;
 
     // Drag a sample in from Finder (or a DAW's browser) and drop it anywhere on the window to
     // load it, same as Tools ▾ -> "Open…" -- covers the whole editor rather than just the
@@ -42,6 +47,12 @@ private:
     // the top for them. Zero in a plugin (the DAW owns the window chrome).
     static constexpr int kMacTrafficLightInset = 22;
     const bool standaloneWindow;
+
+    // A press in the top inset arms a window move; it only actually starts once the mouse
+    // moves (mouseDrag), so AppKit's nested drag loop never runs for a plain double-click and
+    // that click reaches mouseDoubleClick -> zoom, like a native title bar.
+    bool windowDragArmed = false;
+    bool windowDragActive = false;
 
     R3WRKAudioProcessor& processorRef;
     juce::SharedResourcePointer<ThemeManager> theme;

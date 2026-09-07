@@ -64,4 +64,30 @@ void r3wrkBeginWindowDrag (void* componentPtr)
     if (nsWindow != nil && ev != nil)
         [nsWindow performWindowDragWithEvent: ev];   // AppKit takes over the move loop
 }
+
+void r3wrkTitleBarDoubleClick (void* componentPtr)
+{
+    auto* comp = static_cast<juce::Component*> (componentPtr);
+    if (comp == nullptr)
+        return;
+
+    auto* peer = comp->getPeer();
+    if (peer == nullptr)
+        return;
+
+    NSView* view = (NSView*) peer->getNativeHandle();
+    NSWindow* nsWindow = view.window;
+    if (nsWindow == nil)
+        return;
+
+    // Honour System Settings > Desktop & Dock > "Double-click a window's title bar to".
+    // AppleActionOnDoubleClick lives in NSGlobalDomain: "Maximize" (zoom to fill the screen),
+    // "Minimize", or "None"; absent means the default, Maximize.
+    NSString* action = [[NSUserDefaults standardUserDefaults] stringForKey: @"AppleActionOnDoubleClick"];
+
+    if ([action isEqualToString: @"Minimize"])
+        [nsWindow miniaturize: nil];
+    else if (! [action isEqualToString: @"None"])
+        [nsWindow zoom: nil];   // to the screen's visible frame; a second call restores
+}
 #endif
