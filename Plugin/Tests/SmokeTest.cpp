@@ -5,6 +5,7 @@
 #include "../Source/AudioDocument.h"
 #include "../Source/EditActions.h"
 #include "../Source/TimeStretchEngine.h"
+#include "../Source/BiquadFilter.h"
 
 namespace
 {
@@ -461,6 +462,60 @@ int main()
                   "resampled length roughly doubled to match the new rate");
 
         tempFile.deleteFile();
+    }
+
+    // --- Multi-mode filter: the biquad + it bakes into renderWithPlaybackKnobs ----
+    {
+        std::cout << "-- multi-mode filter --" << std::endl;
+
+        auto rms = [](const juce::AudioBuffer<float>& b, int ch)
+        {
+            return (double) b.getRMSLevel(ch, 0, b.getNumSamples());
+        };
+
+        // Biquad unit checks: LP well below the tone kills it; HP well above kills it;
+        // notch on the tone kills it.
+        const int n = (int) sr;
+        auto tone8k  = makeSineBuffer(1, n, sr, 8000.0, 0.5f);
+        auto tone200 = makeSineBuffer(1, n, sr, 200.0,  0.5f);
+
+        auto runBiquad = [&](juce::AudioBuffer<float> buf, int mode, double fc, double q)
+        {
+            r3wrk::Biquad bq; bq.setCoeffs(mode, fc, q, sr);
+            bq.processBlock(buf.getWritePointer(0), buf.getNumSamples());
+            return buf;
+        };
+
+        check(rms(runBiquad(tone8k,  r3wrk::filterLP, 300.0, 0.7), 0) < rms(tone8k, 0)  * 0.15,
+              "LP at 300 Hz crushes an 8 kHz tone");
+        check(rms(runBiquad(tone200, r3wrk::filterHP, 4000.0, 0.7), 0) < rms(tone200, 0) * 0.15,
+              "HP at 4 kHz crushes a 200 Hz tone");
+        {
+            auto tone1k = makeSineBuffer(1, n, sr, 1000.0, 0.5f);
+            check(rms(runBiquad(tone1k, r3wrk::filterNotch, 1000.0, 4.0), 0) < rms(tone1k, 0) * 0.3,
+                  "notch at 1 kHz cuts a 1 kHz tone");
+        }
+
+        // renderWithPlaybackKnobs applies the filter: LP at 500 Hz on a 200+8000 Hz mix
+        // drops the level (the 8 kHz half is removed); Off is a passthrough.
+        juce::AudioBuffer<float> mix(1, n);
+        for (int i = 0; i < n; ++i)
+            mix.setSample(0, i, tone200.getSample(0, i) + tone8k.getSample(0, i));
+
+        AudioDocument fdoc;
+        setDocumentContent(fdoc, juce::AudioBuffer<float>(mix), sr);
+
+        check(! fdoc.playbackKnobsEngaged(), "filter off -> knobs disengaged");
+        auto dry = fdoc.renderWithPlaybackKnobs(fdoc.getBuffer());
+        checkNear((double) dry.getNumSamples(), (double) n, 1.0, "filter off -> render is a passthrough (length)");
+
+        fdoc.filterMode.store(r3wrk::filterLP);
+        fdoc.filterCutoffHz.store(500.0);
+        check(fdoc.playbackKnobsEngaged(), "filter on -> playbackKnobsEngaged() true even with stretch centred");
+        auto filt = fdoc.renderWithPlaybackKnobs(fdoc.getBuffer());
+        check((int64_t) filt.getNumSamples() == n, "filter render keeps the length");
+        check(rms(filt, 0) < rms(fdoc.getBuffer(), 0) * 0.85,
+              "LP at 500 Hz measurably lowers the 200+8000 Hz mix");
     }
 
     // --- Save bakes the Speed/Pitch/Stretch knobs into the written audio ----

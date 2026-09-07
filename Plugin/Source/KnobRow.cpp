@@ -1,10 +1,23 @@
 #include "KnobRow.h"
+#include <cmath>
 
 namespace
 {
     int64_t fracToSample(double frac, int64_t numSamples)
     {
         return (int64_t) (juce::jlimit(0.0, 1.0, frac) * (double) juce::jmax((int64_t) 1, numSamples));
+    }
+
+    juce::String filterModeName(int mode)
+    {
+        switch (mode)
+        {
+            case 1:  return "LP";
+            case 2:  return "HP";
+            case 3:  return "BP";
+            case 4:  return "Notch";
+            default: return "Off";
+        }
     }
 }
 
@@ -53,6 +66,47 @@ KnobRow::KnobRow(AudioDocument& doc)
         k.slider.updateText();
         k.apply = [this](double v) { document.playbackStretch.store(v); };
         k.pull  = [this] { return document.playbackStretch.load(); };
+    }
+
+    //== Filter (multi-mode) =================================================
+    {
+        auto& k = addKnob("Filter");
+        k.slider.setRange(0.0, 4.0, 1.0);   // stepped: Off / LP / HP / BP / Notch
+        k.slider.setDoubleClickReturnValue(true, 0.0);
+        k.slider.textFromValueFunction = [](double v) { return filterModeName((int) std::round(v)); };
+        k.slider.setValue((double) document.filterMode.load(), juce::dontSendNotification);
+        k.slider.updateText();
+        k.apply = [this](double v) { document.filterMode.store((int) std::round(v)); };
+        k.pull  = [this] { return (double) document.filterMode.load(); };
+    }
+
+    //== Cutoff =============================================================
+    {
+        auto& k = addKnob("Cutoff");
+        k.slider.setRange(AudioDocument::kFilterMinHz, AudioDocument::kFilterMaxHz, 0.0);
+        k.slider.setSkewFactorFromMidPoint(1000.0);   // fine control low, room up to 20 kHz
+        k.slider.setDoubleClickReturnValue(true, 1000.0);
+        k.slider.textFromValueFunction = [](double hz)
+        {
+            return hz >= 1000.0 ? juce::String(hz / 1000.0, hz < 10000.0 ? 2 : 1) + " kHz"
+                                : juce::String(juce::roundToInt(hz)) + " Hz";
+        };
+        k.slider.setValue(document.filterCutoffHz.load(), juce::dontSendNotification);
+        k.slider.updateText();
+        k.apply = [this](double v) { document.filterCutoffHz.store(v); };
+        k.pull  = [this] { return document.filterCutoffHz.load(); };
+    }
+
+    //== Res (filter resonance) =============================================
+    {
+        auto& k = addKnob("Res");
+        k.slider.setRange(0.0, 1.0, 0.0);
+        k.slider.setDoubleClickReturnValue(true, 0.0);
+        k.slider.textFromValueFunction = [](double v) { return juce::String(juce::roundToInt(v * 100.0)) + "%"; };
+        k.slider.setValue(document.filterResonance.load(), juce::dontSendNotification);
+        k.slider.updateText();
+        k.apply = [this](double v) { document.filterResonance.store(v); };
+        k.pull  = [this] { return document.filterResonance.load(); };
     }
 
     //== Start / End (selection edges) ========================================
@@ -196,8 +250,13 @@ void KnobRow::timerCallback()
 void KnobRow::resized()
 {
     auto r = getLocalBounds().reduced(4, 2);
-    const int knobW = 78;
     const int gap = 6;
+    const int n = juce::jmax(1, knobs.size());
+
+    // Auto-fit: prefer 78 px, but shrink so every knob is shown even at the minimum window
+    // width (8 knobs now: Pitch/Speed/Stretch/Filter/Cutoff/Res/Start/End).
+    const int avail = juce::jmax(0, r.getWidth() - gap * (n - 1));
+    const int knobW = juce::jlimit(46, 78, avail / n);
 
     for (auto* k : knobs)
     {

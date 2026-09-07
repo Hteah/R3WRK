@@ -580,6 +580,8 @@ points, else the whole clip) straight from the buffer under a try-lock. The
   can detune without changing the playback rate.
 - **Stretch** — pure time-stretch, pitch preserved. 1.0 = off; up to 50× for
   "extreme stretch" (smeary by design). Skewed so 1× sits mid-travel.
+- **Filter / Cutoff / Res** — a multi-mode filter on the playback output (see
+  "Multi-mode filter" below).
 - **Start / End** — normalised (0–1) knobs on the document selection edges,
   reading out as `m:ss.mmm` and following bracket drags. Start slides the whole
   window (End moves with it, length preserved, pegs at the buffer end); End
@@ -597,10 +599,45 @@ doc-region samples in `getSamplesRequired()`-sized blocks from preallocated
 scratch buffers and drained via `available()`/`retrieve()`; it's `reset()` at the
 start of each play pass and whenever the knobs cross the bypass/engaged line, and
 the `rtFinished` flag makes sure the end-of-region final block is sent exactly
-once. The stored audio is never modified — Export Selection still writes the dry
-clip. The red playhead tracks the doc read cursor, so it runs slightly ahead of
-what you hear by the stretcher latency when the knobs are engaged (more so at
-high Stretch).
+once. The stored audio is never modified. The red playhead tracks the doc read
+cursor, so it runs slightly ahead of what you hear by the stretcher latency when
+the knobs are engaged (more so at high Stretch).
+
+## Multi-mode filter (Filter / Cutoff / Res knobs)
+
+User: "add a multi mode filter to the knobs bar." A non-destructive playback
+filter, live on the knobs and baked into Save/Export the same way Speed/Pitch/
+Stretch are.
+
+- **`Source/BiquadFilter.h`** (new, header-only, **not** `juce::dsp`): a
+  hand-rolled RBJ biquad (transposed DF-II) + `r3wrk::filterResonanceToQ()`
+  (`0.5·24^res` → Q 0.5…12). Header-only and juce_dsp-free on purpose —
+  `AudioDocument.cpp` bakes the same filter and is compiled into the headless
+  smoke-test target, which doesn't link juce_dsp. So the *identical* coefficient
+  math runs in the real-time path and the offline bake.
+- **`AudioDocument`**: `filterMode` (0 off / 1 LP / 2 HP / 3 BP / 4 notch),
+  `filterCutoffHz` (20–20000, `kFilterMinHz/MaxHz`), `filterResonance` (0–1) —
+  `std::atomic`, reset to off/1000/0 on load/new/clear. `playbackKnobsEngaged()`
+  is now `timePitchKnobsEngaged() || filterMode != 0`; `renderWithPlaybackKnobs`
+  was split so the RubberBand pass only runs when the time/pitch/stretch knobs
+  are off-centre, then the biquad runs over the (stretched) buffer per channel
+  when `filterMode != 0`.
+- **`PluginProcessor`**: `r3wrk::Biquad playbackFilter[2]` + a per-block-smoothed
+  `smoothedCutoff` (`SmoothedValue`, 30 ms) so a knob sweep doesn't zipper the
+  coefficients. `applyPlaybackFilter()` runs last in the playback chain (after
+  both the direct and stretched renders), resets the biquads on a fresh play pass
+  or a mode change, updates coefficients once per block. Scrub is left dry.
+- **`KnobRow`**: three knobs after Stretch — **Filter** (stepped 0–4, text
+  Off/LP/HP/BP/Notch), **Cutoff** (log-skewed at 1 kHz, "1.00 kHz" / "440 Hz"),
+  **Res** (0–100%). `resized()` now auto-fits knob width (46–78 px) so all 8 fit
+  at the minimum window size.
+- **State**: `kStateMagic` bumped `'R3W5'`→`'R3W6'`, appends mode/cutoff/res;
+  `setStateInformation` still reads `'R3W5'` blobs (filter defaults off), so an
+  existing persisted standalone session survives the upgrade.
+- Smoke test: RBJ LP/HP/notch each crush an out-of-band / on-notch tone;
+  `renderWithPlaybackKnobs` with LP@500 measurably lowers a 200+8000 Hz mix and
+  keeps the length; filter-on flips `playbackKnobsEngaged()` with the stretch
+  centred.
 
 ## Saving / output folder
 

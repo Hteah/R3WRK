@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "AudioDocument.h"
 #include "DesktopAudioCapture.h"
+#include "BiquadFilter.h"
 
 namespace RubberBand { class RubberBandStretcher; }
 
@@ -100,6 +101,15 @@ private:
     double lastAppliedTimeRatio  = -1.0;
     double lastAppliedPitchScale = -1.0;
     bool   stretchRatioNeedsSnap = true;
+
+    // Multi-mode filter on the playback output (after the stretcher). One biquad per channel;
+    // cutoff is per-block-smoothed so a knob sweep doesn't zipper the coefficients. Reset on a
+    // fresh play pass and when the mode changes, so re-enabling doesn't thump.
+    r3wrk::Biquad playbackFilter[2];
+    juce::SmoothedValue<double> smoothedCutoff { 1000.0 };
+    int lastFilterMode = 0;
+    void applyPlaybackFilter (juce::AudioBuffer<float>& buffer, int numCh, int numSamples,
+                              bool freshPlayPass);
 
     static bool knobsEngaged(double speed, double pitch, double stretch);
     // Fills the playback branch of processBlock. `pos` is the doc read cursor (also the

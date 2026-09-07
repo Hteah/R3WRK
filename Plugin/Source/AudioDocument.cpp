@@ -1,5 +1,6 @@
 #include "AudioDocument.h"
 #include "TimeStretchEngine.h"
+#include "BiquadFilter.h"
 #include <algorithm>
 #include <cmath>
 
@@ -76,6 +77,7 @@ void AudioDocument::newEmptyDocument(int numChannels, double sr)
     // carried over -- visually and audibly -- into the next file loaded into the same
     // instance.)
     playbackSpeed = 1.0; playbackPitch = 0.0; playbackStretch = 1.0;
+    filterMode = 0; filterCutoffHz = 1000.0; filterResonance = 0.0;
     previewActive = false; previewGainLinear = 1.0f; previewStretchRatio = 1.0;
     channelFocus = ChannelFocus::stereo;
     sliceMarkers.clear();
@@ -126,6 +128,7 @@ bool AudioDocument::loadFromFile(const juce::File& file, double resampleToRate)
     loopEnd = getNumSamples();
     loopEnabled = false;
     playbackSpeed = 1.0; playbackPitch = 0.0; playbackStretch = 1.0;   // see newEmptyDocument()
+    filterMode = 0; filterCutoffHz = 1000.0; filterResonance = 0.0;
     previewActive = false; previewGainLinear = 1.0f; previewStretchRatio = 1.0;
     channelFocus = ChannelFocus::stereo;
     sliceMarkers.clear();
@@ -136,7 +139,7 @@ bool AudioDocument::loadFromFile(const juce::File& file, double resampleToRate)
     return true;
 }
 
-bool AudioDocument::playbackKnobsEngaged() const
+bool AudioDocument::timePitchKnobsEngaged() const
 {
     const double speed   = playbackSpeed.load(std::memory_order_relaxed);
     const double pitch   = playbackPitch.load(std::memory_order_relaxed);
@@ -146,28 +149,52 @@ bool AudioDocument::playbackKnobsEngaged() const
         || std::abs(stretch - 1.0) > 1.0e-4;
 }
 
+bool AudioDocument::playbackKnobsEngaged() const
+{
+    return timePitchKnobsEngaged() || filterMode.load(std::memory_order_relaxed) != 0;
+}
+
 juce::AudioBuffer<float> AudioDocument::renderWithPlaybackKnobs(const juce::AudioBuffer<float>& src) const
 {
     juce::AudioBuffer<float> out;
+    out.makeCopyOf(src);
 
-    if (src.getNumSamples() <= 0 || src.getNumChannels() <= 0 || ! playbackKnobsEngaged())
-    {
-        out.makeCopyOf(src);
+    if (out.getNumSamples() <= 0 || out.getNumChannels() <= 0)
         return out;
+
+    // 1. Time / pitch / stretch -- only run the (lossy, slow) RubberBand pass when those
+    //    knobs are actually off-centre.
+    if (timePitchKnobsEngaged())
+    {
+        const double speed   = juce::jlimit(kMinSpeed,   kMaxSpeed,   playbackSpeed.load(std::memory_order_relaxed));
+        const double pitch   = juce::jlimit(kMinPitch,   kMaxPitch,   playbackPitch.load(std::memory_order_relaxed));
+        const double stretch = juce::jlimit(kMinStretch, kMaxStretch, playbackStretch.load(std::memory_order_relaxed));
+
+        // Same mapping as PluginProcessor::renderPlaybackStretched -- tape speed compresses
+        // time and lifts pitch, Pitch layers on extra semitones, Stretch dilates time only.
+        const double timeRatio = stretch / juce::jmax(1.0e-4, speed);
+        const double semitones = 12.0 * std::log2(juce::jmax(1.0e-4, speed)) + pitch;
+
+        auto stretched = TimeStretchEngine::process(out, sampleRate, timeRatio, semitones);
+        if (stretched.getNumSamples() > 0)
+            out = std::move(stretched);
+        // else: engine failure -- keep the un-stretched audio rather than nothing
     }
 
-    const double speed   = juce::jlimit(kMinSpeed,   kMaxSpeed,   playbackSpeed.load(std::memory_order_relaxed));
-    const double pitch   = juce::jlimit(kMinPitch,   kMaxPitch,   playbackPitch.load(std::memory_order_relaxed));
-    const double stretch = juce::jlimit(kMinStretch, kMaxStretch, playbackStretch.load(std::memory_order_relaxed));
+    // 2. Filter -- the same biquad the real-time path uses, run over the stretched buffer.
+    const int fmode = filterMode.load(std::memory_order_relaxed);
+    if (fmode != 0 && out.getNumSamples() > 0)
+    {
+        const double fc = juce::jlimit(kFilterMinHz, kFilterMaxHz, filterCutoffHz.load(std::memory_order_relaxed));
+        const double q  = r3wrk::filterResonanceToQ(filterResonance.load(std::memory_order_relaxed));
+        for (int ch = 0; ch < out.getNumChannels(); ++ch)
+        {
+            r3wrk::Biquad bq;
+            bq.setCoeffs(fmode, fc, q, sampleRate);
+            bq.processBlock(out.getWritePointer(ch), out.getNumSamples());
+        }
+    }
 
-    // Same mapping as PluginProcessor::renderPlaybackStretched -- tape speed compresses time
-    // and lifts pitch, the Pitch knob layers on extra semitones, Stretch dilates time only.
-    const double timeRatio = stretch / juce::jmax(1.0e-4, speed);
-    const double semitones = 12.0 * std::log2(juce::jmax(1.0e-4, speed)) + pitch;
-
-    out = TimeStretchEngine::process(src, sampleRate, timeRatio, semitones);
-    if (out.getNumSamples() <= 0)          // engine failure -> fall back to the dry audio
-        out.makeCopyOf(src);
     return out;
 }
 

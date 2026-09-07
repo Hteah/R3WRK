@@ -247,9 +247,20 @@ public:
     std::atomic<double> playbackPitch   { 0.0 };
     std::atomic<double> playbackStretch { 1.0 };
 
+    // Multi-mode filter on the playback stream (after the stretcher). Also non-destructive and
+    // baked into Save/Export by renderWithPlaybackKnobs. See BiquadFilter.h.
+    //   filterMode      : 0 off, 1 low-pass, 2 high-pass, 3 band-pass, 4 notch (KnobRow's
+    //                     stepped "Filter" knob).
+    //   filterCutoffHz  : corner frequency, 20..20000 Hz ("Cutoff" knob, log-skewed).
+    //   filterResonance : 0..1, mapped to Q by r3wrk::filterResonanceToQ ("Res" knob).
+    std::atomic<int>    filterMode      { 0 };
+    std::atomic<double> filterCutoffHz  { 1000.0 };
+    std::atomic<double> filterResonance { 0.0 };
+
     static constexpr double kMinSpeed = 0.25, kMaxSpeed = 4.0;
     static constexpr double kMinPitch = -12.0, kMaxPitch = 12.0;
     static constexpr double kMinStretch = 0.25, kMaxStretch = 50.0;
+    static constexpr double kFilterMinHz = 20.0, kFilterMaxHz = 20000.0;
 
     // How much longer (>1) or shorter (<1) played-back audio is than stored audio, given
     // the current Speed/Pitch/Stretch knobs -- pitch doesn't affect duration, only the
@@ -261,16 +272,20 @@ public:
              / juce::jmax(0.0001, playbackSpeed.load(std::memory_order_relaxed));
     }
 
-    // True when Speed/Pitch/Stretch are not all at their identity (centre) values.
+    // True when the Speed/Pitch/Stretch knobs are not all at identity (centre).
+    bool timePitchKnobsEngaged() const;
+
+    // True when ANY playback knob (time/pitch/stretch OR the filter) would change the sound.
     bool playbackKnobsEngaged() const;
 
-    // Renders `src` through the current Speed/Pitch/Stretch knobs with the OFFLINE stretch
-    // engine, using the same tape/pitch/stretch mapping the real-time playback path uses:
-    //   timeRatio  = stretch / speed          (speed compresses time, stretch dilates it)
-    //   semitones  = 12*log2(speed) + pitch   (pitch rides the tape speed, plus the extra shift)
-    // Returns a plain copy of `src` when the knobs are all at identity, or if the engine
-    // fails. Used by the Save As / auto-save / Export Selection paths so a written file
-    // captures the sound, not the knob positions.
+    // Renders `src` through the current playback knobs so a written file captures the sound,
+    // not the knob positions:
+    //   time/pitch/stretch  -- the OFFLINE stretch engine, same mapping the real-time path
+    //                          uses: timeRatio = stretch/speed, semitones = 12*log2(speed)+pitch
+    //   filter              -- the same r3wrk::Biquad the real-time path uses, run over the
+    //                          (already stretched) buffer
+    // Returns a plain copy of `src` when every knob is at identity, or if the stretch engine
+    // fails. Used by Save As / auto-save / Export Selection / slice export.
     juce::AudioBuffer<float> renderWithPlaybackKnobs(const juce::AudioBuffer<float>& src) const;
 
     //==============================================================================
