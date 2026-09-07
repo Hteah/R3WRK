@@ -42,4 +42,9 @@ extern "C" void r3wrkBeginWindowDrag (void* component);
 // component's mouseDoubleClick. `component` is any juce::Component with a live peer in the
 // window.
 extern "C" void r3wrkTitleBarDoubleClick (void* component);
+
+// "Float on top": keeps the Standalone window above other apps' windows (same as RCRDR /
+// Sieve -- sets the NSWindow level to NSFloatingWindowLevel, or back to normal). `component`
+// is any juce::Component with a live peer in the window.
+extern "C" void r3wrkSetWindowFloatOnTop (void* component, bool onTop);
 #endif

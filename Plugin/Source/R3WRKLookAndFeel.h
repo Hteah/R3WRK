@@ -45,6 +45,7 @@ public:
     static constexpr const char* iconSlice         = "icon:slice";          // a marker flag (pole + pennant)
     static constexpr const char* iconFollow        = "icon:follow";         // playhead on a ruler + follow chevrons
     static constexpr const char* iconDesktopRec    = "icon:desktopRec";     // a monitor/display outline + record dot
+    static constexpr const char* iconPinTop        = "icon:pinTop";         // a push-pin / thumbtack (float on top)
 
     void drawButtonText(juce::Graphics&, juce::TextButton&,
                        bool isMouseOverButton, bool isButtonDown) override;

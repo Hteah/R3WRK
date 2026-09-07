@@ -330,6 +330,27 @@ namespace
         const float r = juce::jmin (screen.getWidth(), screen.getHeight()) * 0.24f;
         g.fillEllipse (cx - r, screen.getCentreY() - r, r * 2.0f, r * 2.0f);
     }
+
+    // Float on top: a push-pin / thumbtack -- a round head near the top and a short tapered
+    // needle pointing down. Filled while the toggle is on (window kept above others).
+    void drawPinTopIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
+    {
+        auto a = bounds.reduced (bounds.getHeight() * 0.28f);
+        const float cx     = a.getCentreX();
+        const float headR  = a.getWidth() * 0.30f;
+        const float headCy = a.getY() + headR + a.getHeight() * 0.04f;
+
+        g.setColour (ink);
+        g.fillEllipse (cx - headR, headCy - headR, headR * 2.0f, headR * 2.0f);
+
+        juce::Path needle;
+        const float ny0 = headCy + headR * 0.65f;
+        needle.startNewSubPath (cx - headR * 0.55f, ny0);
+        needle.lineTo (cx + headR * 0.55f, ny0);
+        needle.lineTo (cx, a.getBottom());
+        needle.closeSubPath();
+        g.fillPath (needle);
+    }
 }
 
 void R3WRKLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int width, int height,
@@ -413,7 +434,8 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     if (text != iconPlay && text != iconStop && text != iconLoop
         && text != iconPlayFromStart && text != iconTools && text != iconScrub
         && text != iconReverse && text != iconClear && text != iconAutoRecord
-        && text != iconSlice && text != iconFollow && text != iconDesktopRec)
+        && text != iconSlice && text != iconFollow && text != iconDesktopRec
+        && text != iconPinTop)
     {
         juce::LookAndFeel_V4::drawButtonText(g, button, isMouseOverButton, isButtonDown);
         return;
@@ -453,6 +475,11 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     if (text == iconDesktopRec)
     {
         drawDesktopRecIcon(g, bounds, ink);
+        return;
+    }
+    if (text == iconPinTop)
+    {
+        drawPinTopIcon(g, bounds, ink);
         return;
     }
     if (text == iconReverse)

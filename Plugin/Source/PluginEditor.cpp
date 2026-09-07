@@ -49,6 +49,17 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
     // Slice tool: clicking a slice has already set the selection + playhead; kick off playback.
     waveformDisplay.onSlicePlay = [this] { processorRef.startPlayback(); };
 
+    if (standaloneWindow)
+    {
+        floatOnTopButton.setClickingTogglesState(true);
+        floatOnTopButton.setWantsKeyboardFocus(false);
+        floatOnTopButton.setTooltip("Float on top -- keep this window above other apps");
+        floatOnTopButton.setLookAndFeel(&floatButtonLnF);
+        floatOnTopButton.onClick = [this] { applyFloatOnTop(floatOnTopButton.getToggleState()); };
+        addAndMakeVisible(floatOnTopButton);
+        applyFloatButtonTheme();
+    }
+
     theme->addChangeListener(this);
 
     const int topInset = standaloneWindow ? kMacTrafficLightInset : 0;
@@ -60,7 +71,55 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
 
 R3WRKAudioProcessorEditor::~R3WRKAudioProcessorEditor()
 {
+    floatOnTopButton.setLookAndFeel(nullptr);
     theme->removeChangeListener(this);
+}
+
+void R3WRKAudioProcessorEditor::changeListenerCallback(juce::ChangeBroadcaster*)
+{
+    applyFloatButtonTheme();
+    repaint();
+}
+
+void R3WRKAudioProcessorEditor::applyFloatButtonTheme()
+{
+    const auto& pal = theme->palette();
+    // The header row sits on windowBg (chrome), not the dark screen band -- so chrome ink,
+    // accent fill while the toggle is on. Same outline/fill idiom as the toolbar's Loop pill.
+    floatOnTopButton.setColour(juce::TextButton::buttonColourId,   juce::Colours::transparentBlack);
+    floatOnTopButton.setColour(juce::TextButton::buttonOnColourId, pal.accent);
+    floatOnTopButton.setColour(juce::TextButton::textColourOffId,  pal.text);
+    floatOnTopButton.setColour(juce::TextButton::textColourOnId,   pal.windowBg);
+}
+
+void R3WRKAudioProcessorEditor::applyFloatOnTop(bool on)
+{
+   #if JUCE_MAC
+    if (standaloneWindow)
+        r3wrkSetWindowFloatOnTop(this, on);
+   #endif
+    outputSettings->setFloatOnTop(on);
+}
+
+void R3WRKAudioProcessorEditor::maybeApplyPersistedFloatOnTop()
+{
+    // The native window level can only be set once a peer exists; the ctor runs too early.
+    // Called from parentHierarchyChanged() and the first resized() -- whichever wins once the
+    // window is actually on screen -- and guarded so it only takes effect once.
+    if (! standaloneWindow || floatStateApplied || getPeer() == nullptr)
+        return;
+
+    floatStateApplied = true;
+    const bool on = outputSettings->floatOnTop();
+    floatOnTopButton.setToggleState(on, juce::dontSendNotification);
+   #if JUCE_MAC
+    r3wrkSetWindowFloatOnTop(this, on);
+   #endif
+}
+
+void R3WRKAudioProcessorEditor::parentHierarchyChanged()
+{
+    maybeApplyPersistedFloatOnTop();
 }
 
 void R3WRKAudioProcessorEditor::paint(juce::Graphics& g)
@@ -119,7 +178,16 @@ void R3WRKAudioProcessorEditor::resized()
     if (standaloneWindow)
         area.removeFromTop(kMacTrafficLightInset);   // clear of the floating macOS traffic lights
 
-    header.setBounds(area.removeFromTop(30));
+    {
+        auto headerRow = area.removeFromTop(30);
+        if (standaloneWindow)
+        {
+            // Push-pin toggle at the far left, in line with the file name.
+            floatOnTopButton.setBounds(headerRow.removeFromLeft(26).reduced(1));
+            headerRow.removeFromLeft(6);
+        }
+        header.setBounds(headerRow);
+    }
     area.removeFromTop(6);
 
     knobRow.setBounds(area.removeFromBottom(74));   // knob strip, under the transport bar
@@ -132,6 +200,8 @@ void R3WRKAudioProcessorEditor::resized()
 
     waveformDisplay.setBounds(area);
     spectrogramDisplay.setBounds(area);
+
+    maybeApplyPersistedFloatOnTop();
 }
 
 bool R3WRKAudioProcessorEditor::keyPressed(const juce::KeyPress& key)

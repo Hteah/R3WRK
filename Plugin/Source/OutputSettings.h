@@ -27,6 +27,10 @@ public:
     AudioSaveOptions saveOptions();
     void setSaveOptions(const AudioSaveOptions&);
 
+    // Standalone "float on top" toggle, remembered across launches (default off).
+    bool floatOnTop();
+    void setFloatOnTop(bool);
+
 private:
     juce::PropertiesFile& props();
     std::unique_ptr<juce::PropertiesFile> propsFile;

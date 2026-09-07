@@ -2,10 +2,11 @@
 
 namespace
 {
-    const juce::String kFolderKey     = "outputFolder";
-    const juce::String kSaveFormatKey = "saveFormat";
-    const juce::String kSaveRateKey   = "saveSampleRate";
-    const juce::String kSaveDepthKey  = "saveBitDepth";
+    const juce::String kFolderKey      = "outputFolder";
+    const juce::String kSaveFormatKey  = "saveFormat";
+    const juce::String kSaveRateKey    = "saveSampleRate";
+    const juce::String kSaveDepthKey   = "saveBitDepth";
+    const juce::String kFloatOnTopKey  = "floatOnTop";
 
     juce::File defaultFolder()
     {
@@ -74,5 +75,16 @@ void OutputSettings::setSaveOptions(const AudioSaveOptions& o)
     props().setValue(kSaveFormatKey, o.formatName());
     props().setValue(kSaveRateKey,   o.sampleRate);
     props().setValue(kSaveDepthKey,  o.bitDepth);
+    props().saveIfNeeded();
+}
+
+bool OutputSettings::floatOnTop()
+{
+    return props().getBoolValue(kFloatOnTopKey, false);
+}
+
+void OutputSettings::setFloatOnTop(bool on)
+{
+    props().setValue(kFloatOnTopKey, on);
     props().saveIfNeeded();
 }

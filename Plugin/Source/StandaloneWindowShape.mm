@@ -90,4 +90,22 @@ void r3wrkTitleBarDoubleClick (void* componentPtr)
     else if (! [action isEqualToString: @"None"])
         [nsWindow zoom: nil];   // to the screen's visible frame; a second call restores
 }
+
+void r3wrkSetWindowFloatOnTop (void* componentPtr, bool onTop)
+{
+    auto* comp = static_cast<juce::Component*> (componentPtr);
+    if (comp == nullptr)
+        return;
+
+    auto* peer = comp->getPeer();
+    if (peer == nullptr)
+        return;
+
+    NSView* view = (NSView*) peer->getNativeHandle();
+    NSWindow* nsWindow = view.window;
+    if (nsWindow == nil)
+        return;
+
+    nsWindow.level = onTop ? NSFloatingWindowLevel : NSNormalWindowLevel;
+}
 #endif

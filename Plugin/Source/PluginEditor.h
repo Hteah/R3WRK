@@ -8,6 +8,8 @@
 #include "SpectrogramDisplay.h"
 #include "TimeRuler.h"
 #include "Theme.h"
+#include "OutputSettings.h"
+#include "R3WRKLookAndFeel.h"
 
 class R3WRKAudioProcessorEditor : public juce::AudioProcessorEditor,
                                   private juce::ChangeListener,
@@ -26,6 +28,7 @@ public:
     void mouseDown(const juce::MouseEvent&) override;
     void mouseDrag(const juce::MouseEvent&) override;
     void mouseDoubleClick(const juce::MouseEvent&) override;
+    void parentHierarchyChanged() override;   // apply the persisted float-on-top once the peer exists
 
     // Drag a sample in from Finder (or a DAW's browser) and drop it anywhere on the window to
     // load it, same as Tools ▾ -> "Open…" -- covers the whole editor rather than just the
@@ -38,7 +41,10 @@ public:
     void filesDropped(const juce::StringArray& files, int x, int y) override;
 
 private:
-    void changeListenerCallback(juce::ChangeBroadcaster*) override { repaint(); }
+    void changeListenerCallback(juce::ChangeBroadcaster*) override;
+    void applyFloatButtonTheme();
+    void applyFloatOnTop(bool on);   // toggles the native window level + persists
+    void maybeApplyPersistedFloatOnTop();   // once, as soon as the window peer exists
 
     bool showingDropHighlight = false;
 
@@ -56,6 +62,13 @@ private:
 
     R3WRKAudioProcessor& processorRef;
     juce::SharedResourcePointer<ThemeManager> theme;
+    juce::SharedResourcePointer<OutputSettings> outputSettings;
+
+    // Standalone only: a push-pin toggle at the far left of the header row (in line with the
+    // file name) that keeps the window above other apps. Native NSWindow level, persisted.
+    R3WRKLookAndFeel floatButtonLnF;
+    juce::TextButton floatOnTopButton { R3WRKLookAndFeel::iconPinTop };
+    bool floatStateApplied = false;
 
     HeaderBar header;
     WaveformDisplay waveformDisplay;
