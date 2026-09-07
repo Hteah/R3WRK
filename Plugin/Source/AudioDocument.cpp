@@ -77,6 +77,7 @@ void AudioDocument::newEmptyDocument(int numChannels, double sr)
     // instance.)
     playbackSpeed = 1.0; playbackPitch = 0.0; playbackStretch = 1.0;
     previewActive = false; previewGainLinear = 1.0f; previewStretchRatio = 1.0;
+    channelFocus = ChannelFocus::stereo;
     sliceMarkers.clear();
     undoManager.clearUndoHistory();
     markAsOriginal();
@@ -126,6 +127,7 @@ bool AudioDocument::loadFromFile(const juce::File& file, double resampleToRate)
     loopEnabled = false;
     playbackSpeed = 1.0; playbackPitch = 0.0; playbackStretch = 1.0;   // see newEmptyDocument()
     previewActive = false; previewGainLinear = 1.0f; previewStretchRatio = 1.0;
+    channelFocus = ChannelFocus::stereo;
     sliceMarkers.clear();
     undoManager.clearUndoHistory();
     markAsOriginal();

@@ -4,6 +4,15 @@
 
 namespace
 {
+    // Runs fn(ch) for each channel currently in editing focus (see AudioDocument::channelFocus).
+    template <typename Fn>
+    void forEachFocusedChannel(const AudioDocument& doc, int numChannels, Fn&& fn)
+    {
+        for (int ch = 0; ch < numChannels; ++ch)
+            if (doc.channelInFocus(ch))
+                fn(ch);
+    }
+
     // Maps contiguous raw-sample slice regions into a buffer of `renderedLen` samples by
     // scaling every boundary proportionally. After renderWithPlaybackKnobs() has dilated or
     // compressed time (Speed/Stretch), the cuts still land on the same audio; endpoints stay
@@ -166,15 +175,15 @@ void normalize(AudioDocument& doc, float targetPeakDb)
     doc.beginChange();
     auto working = doc.getBuffer();
     float peak = 0.0f;
-    for (int ch = 0; ch < working.getNumChannels(); ++ch)
-        peak = juce::jmax(peak, working.getMagnitude(ch, (int) range.getStart(), (int) range.getLength()));
+    forEachFocusedChannel(doc, working.getNumChannels(), [&](int ch)
+        { peak = juce::jmax(peak, working.getMagnitude(ch, (int) range.getStart(), (int) range.getLength())); });
 
     if (peak > 0.0001f)
     {
         float targetLinear = juce::Decibels::decibelsToGain(targetPeakDb);
         float gain = targetLinear / peak;
-        for (int ch = 0; ch < working.getNumChannels(); ++ch)
-            working.applyGain(ch, (int) range.getStart(), (int) range.getLength(), gain);
+        forEachFocusedChannel(doc, working.getNumChannels(), [&](int ch)
+            { working.applyGain(ch, (int) range.getStart(), (int) range.getLength(), gain); });
     }
     doc.commitChange(std::move(working), "Normalize");
 }
@@ -187,8 +196,8 @@ void applyGainDb(AudioDocument& doc, float gainDb)
     doc.beginChange();
     auto working = doc.getBuffer();
     float gain = juce::Decibels::decibelsToGain(gainDb);
-    for (int ch = 0; ch < working.getNumChannels(); ++ch)
-        working.applyGain(ch, (int) range.getStart(), (int) range.getLength(), gain);
+    forEachFocusedChannel(doc, working.getNumChannels(), [&](int ch)
+        { working.applyGain(ch, (int) range.getStart(), (int) range.getLength(), gain); });
     doc.commitChange(std::move(working), "Gain");
 }
 
@@ -199,8 +208,8 @@ void fadeIn(AudioDocument& doc)
         return;
     doc.beginChange();
     auto working = doc.getBuffer();
-    for (int ch = 0; ch < working.getNumChannels(); ++ch)
-        working.applyGainRamp(ch, (int) range.getStart(), (int) range.getLength(), 0.0f, 1.0f);
+    forEachFocusedChannel(doc, working.getNumChannels(), [&](int ch)
+        { working.applyGainRamp(ch, (int) range.getStart(), (int) range.getLength(), 0.0f, 1.0f); });
     doc.commitChange(std::move(working), "Fade In");
 }
 
@@ -211,8 +220,8 @@ void fadeOut(AudioDocument& doc)
         return;
     doc.beginChange();
     auto working = doc.getBuffer();
-    for (int ch = 0; ch < working.getNumChannels(); ++ch)
-        working.applyGainRamp(ch, (int) range.getStart(), (int) range.getLength(), 1.0f, 0.0f);
+    forEachFocusedChannel(doc, working.getNumChannels(), [&](int ch)
+        { working.applyGainRamp(ch, (int) range.getStart(), (int) range.getLength(), 1.0f, 0.0f); });
     doc.commitChange(std::move(working), "Fade Out");
 }
 
@@ -225,11 +234,11 @@ void reverse(AudioDocument& doc)
     auto working = doc.getBuffer();
     int start = (int) range.getStart();
     int len = (int) range.getLength();
-    for (int ch = 0; ch < working.getNumChannels(); ++ch)
+    forEachFocusedChannel(doc, working.getNumChannels(), [&](int ch)
     {
         auto* d = working.getWritePointer(ch);
         std::reverse(d + start, d + start + len);
-    }
+    });
     doc.commitChange(std::move(working), "Reverse");
 }
 
@@ -240,8 +249,8 @@ void silence(AudioDocument& doc)
         return;
     doc.beginChange();
     auto working = doc.getBuffer();
-    for (int ch = 0; ch < working.getNumChannels(); ++ch)
-        working.clear(ch, (int) range.getStart(), (int) range.getLength());
+    forEachFocusedChannel(doc, working.getNumChannels(), [&](int ch)
+        { working.clear(ch, (int) range.getStart(), (int) range.getLength()); });
     doc.commitChange(std::move(working), "Silence");
 }
 
@@ -325,6 +334,38 @@ bool exportOctatrackChain(const AudioDocument& doc, const juce::File& wavFile, d
         return false;
 
     return OctatrackOtFile::writeToFile(wavFile.withFileExtension("ot"), len, regions, bpm);
+}
+
+juce::String matchChannels(AudioDocument& doc, bool useRms)
+{
+    if (doc.getNumChannels() < 2)
+        return {};
+
+    const auto range = doc.getEffectiveRange();
+    if (range.getLength() <= 0)
+        return {};
+
+    const int s = (int) range.getStart();
+    const int n = (int) range.getLength();
+    const auto& buf = doc.getBuffer();
+    const float lvL = useRms ? buf.getRMSLevel(0, s, n) : buf.getMagnitude(0, s, n);
+    const float lvR = useRms ? buf.getRMSLevel(1, s, n) : buf.getMagnitude(1, s, n);
+    if (lvL < 1.0e-6f || lvR < 1.0e-6f)
+        return {};   // one side is essentially silent -- nothing sane to match it to
+
+    const int   quietCh = lvL < lvR ? 0 : 1;
+    const float gain    = lvL < lvR ? (lvR / lvL) : (lvL / lvR);
+    if (gain <= 1.0009f)   // < ~0.008 dB apart
+        return "Channels already matched";
+
+    doc.beginChange();
+    auto working = doc.getBuffer();
+    working.applyGain(quietCh, s, n, gain);
+    doc.commitChange(std::move(working), "Match Channels");
+
+    return juce::String::formatted("Matched: +%.1f dB to %s",
+                                   juce::Decibels::gainToDecibels(gain),
+                                   quietCh == 0 ? "Left" : "Right");
 }
 
 } // namespace EditActions

@@ -582,6 +582,43 @@ int main()
         check(flacOpts.extension() == ".flac", "FLAC options -> .flac");
     }
 
+    // --- channel focus + Match Channels -----------------------------------
+    {
+        std::cout << "-- channel focus scopes processing; Match Channels balances --" << std::endl;
+        const int n = (int) sr;
+        juce::AudioBuffer<float> stereo(2, n);
+        for (int i = 0; i < n; ++i)
+        {
+            const float s = std::sin(2.0 * juce::MathConstants<double>::pi * 300.0 * i / sr);
+            stereo.setSample(0, i, 0.20f * s);   // Left quieter
+            stereo.setSample(1, i, 0.80f * s);   // Right louder
+        }
+        AudioDocument doc;
+        setDocumentContent(doc, std::move(stereo), sr);
+
+        const float rBefore = doc.getBuffer().getMagnitude(1, 0, n);
+
+        // Focus Left, then Normalize -> only Left moves.
+        doc.channelFocus = AudioDocument::ChannelFocus::left;
+        EditActions::normalize(doc);
+        checkNear(doc.getBuffer().getMagnitude(1, 0, n), rBefore, 1.0e-4, "Normalize with focus=Left left Right untouched");
+        checkNear(doc.getBuffer().getMagnitude(0, 0, n), juce::Decibels::decibelsToGain(-0.3f), 0.02f,
+                  "Normalize with focus=Left brought Left to ~-0.3 dB");
+        doc.undoManager.undo();   // back to 0.20 / 0.80
+
+        // Match Channels (peak): Left comes up to meet Right.
+        doc.channelFocus = AudioDocument::ChannelFocus::stereo;
+        const auto msg = EditActions::matchChannels(doc, false);
+        check(msg.contains("Left"), "Match Channels reported raising Left");
+        checkNear(doc.getBuffer().getMagnitude(0, 0, n), doc.getBuffer().getMagnitude(1, 0, n), 0.01f,
+                  "after Match Channels the two channel peaks agree");
+
+        // A mono doc has nothing to match.
+        AudioDocument monoDoc;
+        setDocumentContent(monoDoc, makeSineBuffer(1, n, sr, 300.0, 0.5f), sr);
+        check(EditActions::matchChannels(monoDoc, false).isEmpty(), "Match Channels is a no-op on a mono clip");
+    }
+
     std::cout << "===========================================" << std::endl;
     if (failures == 0)
         std::cout << "ALL CHECKS PASSED" << std::endl;

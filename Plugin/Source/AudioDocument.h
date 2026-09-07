@@ -155,6 +155,23 @@ public:
     std::vector<juce::Range<int64_t>> getSliceRegions() const;
 
     //==============================================================================
+    // Channel focus: which channel(s) the gain-shaped region processors work on. Message-
+    // thread-only editing state -- the audio thread never reads it (playback and monitoring
+    // always use every channel). Amplify (+ its live preview), Normalize, Gain, Fade In / Fade
+    // Out, Reverse and Silence honour it; structural edits (cut/copy/paste/trim/delete/
+    // stretch) don't, since a stereo clip can't have channels of different lengths. Reset to
+    // Stereo on load / new / clear / record.
+    enum class ChannelFocus { stereo, left, right };
+    ChannelFocus channelFocus = ChannelFocus::stereo;
+
+    bool channelInFocus (int ch) const
+    {
+        return channelFocus == ChannelFocus::stereo
+            || (channelFocus == ChannelFocus::left  && ch == 0)
+            || (channelFocus == ChannelFocus::right && ch == 1);
+    }
+
+    //==============================================================================
     std::atomic<int64_t> playhead { 0 };
     std::atomic<bool> isPlaying { false };
     std::atomic<bool> isRecording { false };

@@ -713,11 +713,12 @@ void WaveformDisplay::paintSelectionPreview(juce::Graphics& g)
     const double samplesPerPixel = (double) raw.getNumSamples() / (double) previewWidth;
     const int numCh = juce::jmax(1, document.getNumChannels());
     const int laneHeight = getHeight() / numCh;
-    const float gain = document.previewGainLinear;
 
     std::vector<float> mins((size_t) n), maxs((size_t) n);
     for (int ch = 0; ch < juce::jmin(numCh, raw.getNumChannels()); ++ch)
     {
+        // Amplify only lands on the focused channel(s), so preview the others unchanged.
+        const float gain = document.channelInFocus(ch) ? document.previewGainLinear : 1.0f;
         const float* d = raw.getReadPointer(ch);
         for (int i = 0; i < n; ++i)
         {
@@ -800,22 +801,37 @@ void WaveformDisplay::paint(juce::Graphics& g)
         }
     }
 
-    g.setColour(pal.waveform);
+    // Channel focus: the lane(s) not being worked on draw dimmed, so it's obvious the next
+    // Amplify / Fade / etc. only lands on one side (see AudioDocument::channelFocus).
+    const auto laneColour = [&](int ch)
+    {
+        return document.channelInFocus(ch) ? pal.waveform : pal.waveform.withMultipliedAlpha(0.28f);
+    };
+
     if (waveformIsSampleLine)
     {
         const juce::PathStrokeType stroke(1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded);
-        for (auto& p : channelPaths)
-            g.strokePath(p, stroke);
+        for (int ch = 0; ch < (int) channelPaths.size(); ++ch)
+        {
+            g.setColour(laneColour(ch));
+            g.strokePath(channelPaths[(size_t) ch], stroke);
+        }
 
         if (showSampleDots)
-            for (auto& lane : sampleDots)
-                for (auto& pt : lane)
+            for (int ch = 0; ch < (int) sampleDots.size(); ++ch)
+            {
+                g.setColour(laneColour(ch));
+                for (auto& pt : sampleDots[(size_t) ch])
                     g.fillEllipse(pt.x - 2.0f, pt.y - 2.0f, 4.0f, 4.0f);
+            }
     }
     else
     {
-        for (auto& p : channelPaths)
-            g.fillPath(p);
+        for (int ch = 0; ch < (int) channelPaths.size(); ++ch)
+        {
+            g.setColour(laneColour(ch));
+            g.fillPath(channelPaths[(size_t) ch]);
+        }
     }
 
     g.setColour(pal.gridLine);

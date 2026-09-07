@@ -598,6 +598,7 @@ void EditorToolbar::toggleTransport()
     else if (document.isPlaying.load())   processor.stopPlayback();
     else                                { processor.startRecording();
                                           currentFile = juce::File();
+                                          document.channelFocus = AudioDocument::ChannelFocus::stereo;
                                           if (onSourceNameChanged) onSourceNameChanged({}); }
     updateTransportButtonText();
 }
@@ -619,6 +620,7 @@ void EditorToolbar::toggleDesktopRecording()
         if (document.isPlaying.load())
             processor.stopPlayback();
         currentFile = juce::File();
+        document.channelFocus = AudioDocument::ChannelFocus::stereo;
         if (onSourceNameChanged) onSourceNameChanged({});
         processor.startDesktopRecording();        // async -- document.isRecording flips on the started cb
     }
@@ -687,14 +689,18 @@ void EditorToolbar::showToolsMenu()
     enum { idOpen = 1, idSaveInPlace, idSaveAs, idSaveOptions, idRevert,
            idCut, idCopy, idPaste,
            idTrim, idDelete, idSilence,
+           idChanBoth, idChanLeft, idChanRight, idMatchPeak, idMatchRms,
            idNormalize, idAmplify, idFadeIn, idFadeOut, idReverse,
            idStretch, idExportSel,
            idSliceToFolder, idExportOt, idClearSlices,
            idOutputFolder, idTheme, idAutoRecordThreshold,
            idUndo, idRedo };
 
+    using CF = AudioDocument::ChannelFocus;
+
     const bool empty      = document.isEmpty();
     const bool sel        = document.hasSelection();
+    const bool stereoDoc  = document.getNumChannels() >= 2;
     const bool hasSlices  = ! document.getSliceMarkers().empty();
     const bool clip    = clipboard.hasContent();
     const bool canUndo = document.undoManager.canUndo();
@@ -723,6 +729,29 @@ void EditorToolbar::showToolsMenu()
     m.addItem(keyed("Trim to Selection", idTrim, sel, cmd + "T"));
     m.addItem(idDelete,  "Delete Selection",  sel);
     m.addItem(idSilence, "Silence Selection", ! empty);
+    m.addSeparator();
+    {
+        // Channels: pick which side of a stereo clip the gain-shaped processors below work
+        // on, and a one-shot level match for when one side just came in quieter.
+        const bool chanOK = stereoDoc && ! empty;
+        auto focusItem = [&](const juce::String& t, int id, CF f)
+        {
+            juce::PopupMenu::Item i(t);
+            i.itemID = id; i.isEnabled = chanOK; i.isTicked = document.channelFocus == f;
+            return i;
+        };
+        juce::PopupMenu chanMenu;
+        chanMenu.addItem(focusItem("Both (Stereo)", idChanBoth,  CF::stereo));
+        chanMenu.addItem(focusItem("Left only",     idChanLeft,  CF::left));
+        chanMenu.addItem(focusItem("Right only",    idChanRight, CF::right));
+
+        juce::PopupMenu matchMenu;
+        matchMenu.addItem(idMatchPeak, "Match to Louder (Peak)", chanOK);
+        matchMenu.addItem(idMatchRms,  "Match to Louder (RMS)",  chanOK);
+
+        m.addSubMenu("Work on Channel", chanMenu, chanOK);
+        m.addSubMenu(juce::String::fromUTF8("Match Channels\xE2\x80\xA6"), matchMenu, chanOK);
+    }
     m.addSeparator();
     m.addItem(idNormalize, "Normalize",  ! empty);
     m.addItem(idAmplify,   juce::String::fromUTF8("Amplify\xE2\x80\xA6"), ! empty);
@@ -760,6 +789,15 @@ void EditorToolbar::showToolsMenu()
             case idTrim:      EditActions::trimToSelection(document); break;
             case idDelete:    EditActions::deleteSelection(document); break;
             case idSilence:   EditActions::silence(document);        break;
+
+            case idChanBoth:  document.channelFocus = CF::stereo; document.notifyChanged(); break;
+            case idChanLeft:  document.channelFocus = CF::left;   document.notifyChanged(); break;
+            case idChanRight: document.channelFocus = CF::right;  document.notifyChanged(); break;
+            case idMatchPeak: { const auto msg = EditActions::matchChannels(document, false);
+                                if (onStatusMessage && msg.isNotEmpty()) onStatusMessage(msg); break; }
+            case idMatchRms:  { const auto msg = EditActions::matchChannels(document, true);
+                                if (onStatusMessage && msg.isNotEmpty()) onStatusMessage(msg); break; }
+
             case idNormalize: EditActions::normalize(document);      break;
             case idAmplify:   showAmplifyCallout(toolsButton.getScreenBounds()); break;
             case idFadeIn:    EditActions::fadeIn(document);  break;

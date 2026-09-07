@@ -1030,6 +1030,40 @@ Scrub-specific shallow-corner-radius exception entirely — the reel-hub icon re
 circle than the cassette-body icon did. Stayed last in the row (that part of the prior feedback
 holds). Smoke test passes; all four targets build clean.
 
+## Channel focus + Match Channels
+
+User: "I sometimes make recordings and one side of the signal is not as strong as the other …
+a way to work on just one side." All in **Tools ▾**, no new toolbar buttons ("we have enough
+buttons"). New section between "Silence" and "Normalize", enabled only for a stereo clip:
+
+- **`Work on Channel ▸`** submenu — `Both (Stereo)` / `Left only` / `Right only`, the current
+  one ticked. Sets `AudioDocument::channelFocus` (a plain message-thread `enum class
+  ChannelFocus { stereo, left, right }` — the audio thread never reads it; playback and
+  monitoring always use every channel). `channelInFocus(ch)` is the predicate.
+- The **gain-shaped** `EditActions` — `normalize`, `applyGainDb`, `fadeIn`, `fadeOut`,
+  `reverse`, `silence` — now loop via the anon `forEachFocusedChannel(doc, numCh, fn)` helper
+  instead of a bare channel loop, so with the focus on one side they only touch that channel.
+  **Structural** edits (cut/copy/paste/trim/delete/stretch) ignore it — a stereo clip can't
+  have channels of different lengths. The live Amplify preview
+  (`WaveformDisplay::paintSelectionPreview`) applies `previewGainLinear` only to focused
+  channels too, so the preview matches Apply.
+- Visual cues: the un-focused lane draws at 0.28 alpha (`laneColour` lambda in
+  `WaveformDisplay::paint`, both the fill and sample-line branches), and
+  `HeaderBar::buildReadout()` appends "· editing L" / "· editing R".
+- `channelFocus` resets to `stereo` on load / `newEmptyDocument` (covers Clear) / record start
+  (mic + desktop, in `EditorToolbar`).
+
+- **`Match Channels… ▸`** submenu — `Match to Louder (Peak)` / `Match to Louder (RMS)`.
+  `EditActions::matchChannels(doc, useRms)` measures each channel over `getEffectiveRange()`
+  (peak = `getMagnitude`, RMS = `getRMSLevel`), applies `louder/quieter` gain to the quieter
+  channel as one undo step, and returns a status string ("Matched: +3.1 dB to Left") that the
+  Tools handler flashes via `onStatusMessage`. Bails (empty string, no undo step) on mono, a
+  silent side, or channels already within ~0.008 dB. Ignores `channelFocus`.
+
+Smoke test: focus=Left + Normalize leaves Right untouched and brings Left to ~−0.3 dB;
+Match Channels (peak) on a 0.20/0.80 stereo clip lifts Left to meet Right and reports it;
+mono is a no-op.
+
 ## Reverse button
 
 User: "Can you make a button for reverse? Round button with arrow going to the left."

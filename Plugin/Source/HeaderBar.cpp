@@ -72,6 +72,12 @@ juce::String HeaderBar::buildReadout() const
         const double sel = (double) (document.getSelectionEnd() - document.getSelectionStart()) / sr;
         s << "  " << sep << "sel " << juce::String(sel, 3) << " s";
     }
+
+    if (document.channelFocus == AudioDocument::ChannelFocus::left)
+        s << "  " << sep << "editing L";
+    else if (document.channelFocus == AudioDocument::ChannelFocus::right)
+        s << "  " << sep << "editing R";
+
     return s;
 }
 

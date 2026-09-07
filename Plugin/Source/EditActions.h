@@ -24,12 +24,20 @@ namespace EditActions
     void trimToSelection(AudioDocument& doc);
     void insertSilence(AudioDocument& doc, int64_t atSample, int64_t numSamples);
 
+    // These six honour AudioDocument::channelFocus -- with the focus set to Left or Right they
+    // only touch that channel of a stereo clip (see the enum's comment).
     void normalize(AudioDocument& doc, float targetPeakDb = -0.3f);
     void applyGainDb(AudioDocument& doc, float gainDb);
     void fadeIn(AudioDocument& doc);
     void fadeOut(AudioDocument& doc);
     void reverse(AudioDocument& doc);
     void silence(AudioDocument& doc);
+
+    // Brings the quieter channel of a stereo clip up to match the louder one over the
+    // effective range, measuring by peak (useRms == false) or RMS. Ignores the channel focus.
+    // Returns a short description for the status line ("Matched: +3.1 dB to Left"), or an empty
+    // string when it did nothing (mono, silence, already matched).
+    juce::String matchChannels(AudioDocument& doc, bool useRms);
 
     // Replace the current effective range with newRegion (used by time-stretch/pitch-shift).
     void replaceRangeWith(AudioDocument& doc, juce::Range<int64_t> range, const juce::AudioBuffer<float>& newRegion,
