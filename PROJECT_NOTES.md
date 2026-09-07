@@ -615,7 +615,15 @@ don't collide.
   folder right away, no dialog; the header name becomes the file and the dirty
   dot clears.
 - **Tools ▾ → "Export Selection to Folder"** → the selection is written to the
-  folder immediately (was a save dialog).
+  output folder immediately, named **`<source> [start-end].wav`** (`currentFile`'s
+  stem, or "Selection"; selection edges in seconds; extension from the current
+  Save format), collision-guarded. It goes through the **same writer as Save As**
+  (`AudioDocument::writeAudioFile`, factored out of `saveToFile`) so it honours
+  the Save Options' format / sample rate / bit depth, and the Speed/Pitch/Stretch
+  knobs are baked in (`renderWithPlaybackKnobs` on the cropped region). On success
+  it `revealToUser()`s the file in Finder. Ported to parity with Sieve's
+  "Export Selection…" (`7993172`), minus Sieve's separate remembered export
+  folder — R3WRK reuses the output folder.
 - **Tools ▾ → "Output Folder…"** → a directory chooser to change it.
 - **Tools ▾ → "Save" (⌘S)** → overwrites the file the document is currently backed
   by (`EditorToolbar::currentFile` — last Open / last Save As / last recording

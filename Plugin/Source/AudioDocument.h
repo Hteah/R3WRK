@@ -89,6 +89,12 @@ public:
     bool saveToFile(const juce::File& file) const;
     bool saveToFile(const juce::File& file, const AudioSaveOptions& opts) const;
 
+    // Writes `src` (at `srcRate`, knob-baked by the caller if desired) to `file` in the
+    // container / sample rate / bit depth from `opts`. Shared by saveToFile() and
+    // EditActions::exportSelection() so Save and Export write identically.
+    static bool writeAudioFile(juce::AudioBuffer<float> src, double srcRate,
+                               const juce::File& file, const AudioSaveOptions& opts);
+
     // MP3 export shells out to a LAME binary (JUCE has no built-in MP3 encoder). These say
     // whether one was found on this machine, so the UI can enable/disable the MP3 option.
     static juce::File findLameBinary();

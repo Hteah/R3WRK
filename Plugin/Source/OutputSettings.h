@@ -20,8 +20,9 @@ public:
     juce::File folder();
     void setFolder(const juce::File&);
 
-    // "<folder>/R3WRK 2026-09-04 14.22.03[ selection].wav", guaranteed not to already exist.
-    juce::File makeWavFile(bool isSelection);
+    // "<folder>/R3WRK 2026-09-04 14.22.03.wav", guaranteed not to already exist. Used for the
+    // record auto-save; selection export builds its own "<source> [start-end]" name.
+    juce::File makeWavFile();
 
     // The persisted Save format / sample rate / bit depth (defaults: WAV, keep rate, 24-bit).
     AudioSaveOptions saveOptions();

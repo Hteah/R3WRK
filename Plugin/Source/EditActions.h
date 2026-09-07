@@ -50,9 +50,10 @@ namespace EditActions
                            const juce::String& actionName);
 
     // Writes the current effective range (the selection, or the whole clip if none) to `file`
-    // as a 24-bit WAV, with the Speed/Pitch/Stretch knobs baked into the audio (see
-    // AudioDocument::renderWithPlaybackKnobs).
-    bool exportSelection(const AudioDocument& doc, const juce::File& file);
+    // in the container / rate / bit depth from `opts` (defaults: WAV / keep rate / 24-bit),
+    // with the Speed/Pitch/Stretch knobs baked into the audio (see
+    // AudioDocument::renderWithPlaybackKnobs) -- identical to how Save As writes.
+    bool exportSelection(const AudioDocument& doc, const juce::File& file, AudioSaveOptions opts = {});
 
     //==============================================================================
     // Slice export (see AudioDocument's slice-marker section). Both bake the Speed/Pitch/

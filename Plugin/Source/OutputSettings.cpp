@@ -53,11 +53,9 @@ void OutputSettings::setFolder(const juce::File& dir)
     props().saveIfNeeded();
 }
 
-juce::File OutputSettings::makeWavFile(bool isSelection)
+juce::File OutputSettings::makeWavFile()
 {
-    juce::String name = juce::Time::getCurrentTime().formatted("R3WRK %Y-%m-%d %H.%M.%S");
-    if (isSelection)
-        name << " selection";
+    const juce::String name = juce::Time::getCurrentTime().formatted("R3WRK %Y-%m-%d %H.%M.%S");
     return folder().getChildFile(name + ".wav").getNonexistentSibling();
 }
 

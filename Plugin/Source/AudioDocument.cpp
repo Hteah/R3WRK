@@ -209,11 +209,20 @@ juce::File AudioDocument::findLameBinary()
 
 bool AudioDocument::saveToFile(const juce::File& file, const AudioSaveOptions& opts) const
 {
-    using Fmt = AudioSaveOptions::Format;
-
     // Bake the Speed/Pitch/Stretch knobs into the written audio (a no-op copy when they're
     // centred), so the file is what you hear rather than the dry clip + separate knob state.
-    juce::AudioBuffer<float> rendered = renderWithPlaybackKnobs(buffer);
+    return writeAudioFile(renderWithPlaybackKnobs(buffer), sampleRate, file, opts);
+}
+
+// Writes `src` (already at `srcRate`, already knob-baked by the caller if wanted) to `file` in
+// the container/rate/bit-depth from `opts`: resamples to opts.sampleRate (0 = keep), snapping
+// to the nearest rate the format allows; clamps bit depth to what the format supports; 32-bit
+// float for WAV. Shared by saveToFile() and EditActions::exportSelection().
+bool AudioDocument::writeAudioFile(juce::AudioBuffer<float> rendered, double srcRate,
+                                   const juce::File& file, const AudioSaveOptions& opts)
+{
+    using Fmt = AudioSaveOptions::Format;
+
     if (rendered.getNumSamples() <= 0)
         return false;
 
@@ -236,8 +245,8 @@ bool AudioDocument::saveToFile(const juce::File& file, const AudioSaveOptions& o
     }
 
     // Target sample rate: the requested one if the format allows it, else the nearest allowed,
-    // else the document's own rate.
-    double targetRate = opts.sampleRate > 0 ? (double) opts.sampleRate : sampleRate;
+    // else the source rate.
+    double targetRate = opts.sampleRate > 0 ? (double) opts.sampleRate : srcRate;
     {
         auto rates = fmt->getPossibleSampleRates();
         if (rates.size() > 0 && ! rates.contains((int) std::lround(targetRate)))
@@ -249,7 +258,7 @@ bool AudioDocument::saveToFile(const juce::File& file, const AudioSaveOptions& o
             targetRate = best;
         }
     }
-    rendered = resampled(rendered, sampleRate, targetRate);
+    rendered = resampled(rendered, srcRate, targetRate);
 
     // Bit depth: 32 means float (WAV only). Clamp to what the format supports.
     int depth = opts.bitDepth;

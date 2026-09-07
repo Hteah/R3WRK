@@ -244,6 +244,32 @@ int main()
         }
         check(doc.getNumSamples() == (int64_t) sr, "exportSelection did not modify the document");
         out.deleteFile();
+
+        // With Save Options: honours the format + bit depth, same path as Save As.
+        AudioSaveOptions o; o.format = AudioSaveOptions::Format::flac; o.bitDepth = 16;
+        auto flac = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("r3wrk_export_sel.flac");
+        flac.deleteFile();
+        check(EditActions::exportSelection(doc, flac, o), "exportSelection writes FLAC when asked");
+        {
+            std::unique_ptr<juce::AudioFormatReader> rf(fm.createReaderFor(flac));
+            check(rf != nullptr && (int64_t) rf->lengthInSamples == 15000, "the FLAC export is the selection length");
+        }
+        flac.deleteFile();
+
+        // The Speed/Pitch/Stretch knobs are baked in: 2x Stretch -> ~2x as many samples.
+        doc.playbackStretch.store(2.0);
+        auto st = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("r3wrk_export_sel_2x.wav");
+        st.deleteFile();
+        check(EditActions::exportSelection(doc, st), "exportSelection with Stretch engaged writes a file");
+        {
+            std::unique_ptr<juce::AudioFormatReader> rs(fm.createReaderFor(st));
+            check(rs != nullptr, "the stretched export re-opens");
+            if (rs != nullptr)
+                checkNear((double) rs->lengthInSamples, 30000.0, 1500.0,
+                          "the stretched export is ~2x the selection length (knobs baked in)");
+        }
+        st.deleteFile();
+        doc.playbackStretch.store(1.0);
     }
 
     // --- slice markers + slice/Octatrack export ----------------------------

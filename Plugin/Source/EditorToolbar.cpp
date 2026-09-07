@@ -664,7 +664,7 @@ void EditorToolbar::autoSaveRecording()
 
     // Recordings always auto-save as a plain 24-bit WAV (lossless, fast, never fails) so a
     // take is never lost; ⌘S / Save As afterwards can rewrite it in the chosen Save format.
-    const auto file = outputSettings->makeWavFile(false);
+    const auto file = outputSettings->makeWavFile();
     if (document.saveToFile(file))
     {
         currentFile = file;
@@ -1053,14 +1053,28 @@ void EditorToolbar::exportSelectionToFolder()
     if (! document.hasSelection())
         return;
 
-    const auto file = outputSettings->makeWavFile(true);
-    if (EditActions::exportSelection(document, file))
+    const auto opts = outputSettings->saveOptions();
+    const double sr  = document.getSampleRate() > 0 ? document.getSampleRate() : 44100.0;
+    const double s0  = (double) document.getSelectionStart() / sr;
+    const double s1  = (double) document.getSelectionEnd()   / sr;
+
+    // "<source> [start-end].wav" -- source name (or "Selection"), selection edges in seconds,
+    // extension from the current Save format. Collision-guarded.
+    const juce::String stem = currentFile != juce::File() ? currentFile.getFileNameWithoutExtension()
+                                                          : juce::String("Selection");
+    const juce::String name = stem + juce::String::formatted(" [%.2f-%.2f]", s0, s1) + opts.extension();
+    const auto file = outputSettings->folder().getChildFile(name).getNonexistentSibling();
+
+    if (EditActions::exportSelection(document, file, opts))
     {
+        file.revealToUser();   // open Finder with the exported file selected
         if (onStatusMessage) onStatusMessage("Exported " + file.getFileName());
     }
     else if (onStatusMessage)
     {
-        onStatusMessage("Couldn't export to " + file.getParentDirectory().getFileName());
+        onStatusMessage(opts.format == AudioSaveOptions::Format::mp3 && ! AudioDocument::mp3ExportAvailable()
+                            ? juce::String("MP3 needs the 'lame' tool -- brew install lame")
+                            : "Couldn't export to " + file.getParentDirectory().getFileName());
     }
 }
 

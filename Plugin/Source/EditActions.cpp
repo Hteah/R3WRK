@@ -265,16 +265,18 @@ void replaceRangeWith(AudioDocument& doc, juce::Range<int64_t> range, const juce
     doc.commitChange(std::move(spliced), actionName);
 }
 
-bool exportSelection(const AudioDocument& doc, const juce::File& file)
+bool exportSelection(const AudioDocument& doc, const juce::File& file, AudioSaveOptions opts)
 {
     auto range = doc.getEffectiveRange();
     if (range.getLength() <= 0)
         return false;
 
     // Bake the Speed/Pitch/Stretch knobs into the exported region (no-op copy when centred),
-    // same as Save As -- the file is the sound, not the knob positions.
+    // then write it through the very same path Save As uses -- so the export honours the
+    // chosen format / sample rate / bit depth.
     auto region = extractRange(doc.getBuffer(), range.getStart(), range.getEnd());
-    return writeWav(file, doc.renderWithPlaybackKnobs(region), doc.getSampleRate());
+    return AudioDocument::writeAudioFile(doc.renderWithPlaybackKnobs(region), doc.getSampleRate(),
+                                        file, opts);
 }
 
 int sliceToFolder(const AudioDocument& doc, const juce::File& folder, const juce::String& baseName)
