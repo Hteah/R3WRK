@@ -51,22 +51,33 @@ bool WaveformDisplay::refitViewIfContentChanged()
 // Sieve's editor. A manual pan/zoom still works -- the next frame just re-centres.
 void WaveformDisplay::followPlayheadIfNeeded()
 {
-    if (! document.followPlayheadEnabled)
-        return;
-    if (! document.isPlaying.load() || document.isScrubbing.load() || document.isRecording.load())
-        return;
+    const bool active = document.followPlayheadEnabled
+                     && document.isPlaying.load()
+                     && ! document.isScrubbing.load()
+                     && ! document.isRecording.load();
 
     const int64_t span = viewEnd - viewStart;
-    if (span <= 0 || span >= maxViewSpan())        // zoomed all the way out -- nothing to follow
+    if (! active || span <= 0 || span >= maxViewSpan())   // not following / zoomed all the way out
+    {
+        followViewAnchorSample = -1;   // paint()/TimeRuler go back to the live playhead
         return;
+    }
+
+    // Read the playhead ONCE and both scroll the view *and* record it as the value to draw the
+    // playhead line from (playheadDrawSample()). The audio thread advances document.playhead
+    // continuously, so if paint() re-read it a few ms later the line would land off-centre by
+    // (samples advanced / samples-per-pixel) -- hundreds of px when zoomed in on a long file --
+    // then snap back next tick. That mismatch was the "tapehead shake".
+    const int64_t playheadNow = document.playhead.load();
+    followViewAnchorSample = playheadNow;
 
     // The playhead is a raw sample index; viewStart/viewEnd are raw sample bounds. sampleToX()
     // divides samples-per-pixel by getTimeScale(), so the raw span actually across the width is
     // span/timeScale -- hence the half-offset is span/(2*timeScale), which is span/2 at identity.
     const double timeScale = juce::jmax(0.0001, document.getTimeScale());
-    const int64_t half   = (int64_t) ((double) span / (2.0 * timeScale));
+    const int64_t half   = (int64_t) std::llround((double) span / (2.0 * timeScale));
     const int64_t maxStart = juce::jmax((int64_t) 0, maxViewSpan() - span);
-    const int64_t target = juce::jlimit((int64_t) 0, maxStart, document.playhead.load() - half);
+    const int64_t target = juce::jlimit((int64_t) 0, maxStart, playheadNow - half);
 
     if (target == viewStart)
         return;
@@ -74,6 +85,11 @@ void WaveformDisplay::followPlayheadIfNeeded()
     viewStart = target;
     viewEnd   = target + span;
     rebuildWaveformPath();
+}
+
+int64_t WaveformDisplay::playheadDrawSample() const
+{
+    return followViewAnchorSample >= 0 ? followViewAnchorSample : document.playhead.load();
 }
 
 void WaveformDisplay::timerCallback()
@@ -873,7 +889,7 @@ void WaveformDisplay::paint(juce::Graphics& g)
     }
 
     g.setColour(pal.playhead);
-    g.drawVerticalLine((int) sampleToX(document.playhead.load()), 0.0f, (float) getHeight());
+    g.drawVerticalLine((int) sampleToX(playheadDrawSample()), 0.0f, (float) getHeight());
 }
 
 WaveformDisplay::EdgeHit WaveformDisplay::hitEdge(float pressX, float startX, float endX, float tolerance)

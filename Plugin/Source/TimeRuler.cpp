@@ -105,7 +105,7 @@ void TimeRuler::paint(juce::Graphics& g)
     // seconds-based math above) because the playhead is a raw sample position, and with
     // Speed/Stretch off-centre the raw-sample-to-pixel density differs from the
     // output-time-to-pixel density the tick labels use -- see WaveformDisplay::xToSample().
-    const float x = waveform.sampleToX(document.playhead.load());
+    const float x = waveform.sampleToX(waveform.playheadDrawSample());   // steady while follow-playhead scrolls
     if (x >= -4.0f && x <= w + 4.0f)
     {
         juce::Path tri;

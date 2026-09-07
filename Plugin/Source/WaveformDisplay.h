@@ -74,6 +74,11 @@ public:
     int64_t getViewStart() const { return viewStart; }
     int64_t getViewEnd() const { return viewEnd; }
 
+    // The playhead sample position to *draw* -- while follow-playhead is actively scrolling the
+    // view this is the exact value that scroll was computed from (so the line stays rock-steady
+    // at centre), otherwise the live document.playhead. TimeRuler draws from this too.
+    int64_t playheadDrawSample() const;
+
     // Sample <-> pixel mapping, accounting for the live Speed/Pitch/Stretch knobs (see
     // AudioDocument::getTimeScale()) -- so the waveform visually stretches/compresses to
     // show how long the clip will actually play, sampler-style. Public so TimeRuler can
@@ -122,6 +127,7 @@ private:
     AudioDocument& document;
     juce::SharedResourcePointer<ThemeManager> theme;
     int64_t viewStart = 0, viewEnd = 0;
+    int64_t followViewAnchorSample = -1;   // playhead value the follow scroll last used; -1 = not following
     std::vector<juce::Path> channelPaths;
     // Zoomed in past ~1 sample/pixel, channelPaths hold a polyline through the actual sample
     // values (paint() strokes it) instead of a min/max envelope polygon (paint() fills it) --
