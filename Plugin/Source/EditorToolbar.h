@@ -58,6 +58,33 @@ public:
     // the open-succeeded bookkeeping (header name, zoom-to-fit, saved/dirty state).
     void loadAudioFile(const juce::File& file);
 
+    // ----- Tools actions, shared by the in-window "Tools ▾" popup (showToolsMenu) and the
+    // Standalone macOS menu bar (StandaloneMenuBar). Both build their menus from these IDs
+    // and dispatch selections through performToolsItem(). -----
+    enum ToolsMenuItem
+    {
+        tmiOpen = 1, tmiSaveInPlace, tmiSaveAs, tmiSaveOptions, tmiRevert,
+        tmiCut, tmiCopy, tmiPaste,
+        tmiTrim, tmiDelete, tmiSilence,
+        tmiChanBoth, tmiChanLeft, tmiChanRight, tmiMatchPeak, tmiMatchRms,
+        tmiToMono, tmiToStereo,
+        tmiNormalize, tmiAmplify, tmiFadeIn, tmiFadeOut, tmiReverse,
+        tmiStretch, tmiExportSel,
+        tmiSliceToFolder, tmiExportOt, tmiClearSlices,
+        tmiOutputFolder, tmiTheme, tmiAutoRecordThreshold,
+        tmiUndo, tmiRedo
+    };
+
+    enum class ToolsMenuGroup { file, edit, tools };
+
+    // Append one menu-bar group's items (with live enable / tick state) to `menu`. Used only
+    // by the Standalone menu bar; the in-window Tools ▾ button lays its own single list out
+    // in showToolsMenu(). Both end up calling performToolsItem().
+    void buildMenuBarMenu(juce::PopupMenu& menu, ToolsMenuGroup group);
+
+    // Run one Tools action by its ToolsMenuItem id, from either menu surface.
+    void performToolsItem(int itemId);
+
 private:
     void timerCallback() override;
     void applyTheme();

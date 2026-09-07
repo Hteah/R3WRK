@@ -732,17 +732,6 @@ void EditorToolbar::revertToOriginal()
 //==============================================================================
 void EditorToolbar::showToolsMenu()
 {
-    enum { idOpen = 1, idSaveInPlace, idSaveAs, idSaveOptions, idRevert,
-           idCut, idCopy, idPaste,
-           idTrim, idDelete, idSilence,
-           idChanBoth, idChanLeft, idChanRight, idMatchPeak, idMatchRms,
-           idToMono, idToStereo,
-           idNormalize, idAmplify, idFadeIn, idFadeOut, idReverse,
-           idStretch, idExportSel,
-           idSliceToFolder, idExportOt, idClearSlices,
-           idOutputFolder, idTheme, idAutoRecordThreshold,
-           idUndo, idRedo };
-
     using CF = AudioDocument::ChannelFocus;
 
     const bool empty      = document.isEmpty();
@@ -763,19 +752,19 @@ void EditorToolbar::showToolsMenu()
     };
 
     juce::PopupMenu m;
-    m.addItem(idOpen,   juce::String::fromUTF8("Open\xE2\x80\xA6"));
-    m.addItem(keyed("Save", idSaveInPlace, ! empty, cmd + "S"));
-    m.addItem(idSaveAs, juce::String::fromUTF8("Save As\xE2\x80\xA6"), ! empty);
-    m.addItem(idSaveOptions, juce::String::fromUTF8("Save Options\xE2\x80\xA6  (")
+    m.addItem(tmiOpen,   juce::String::fromUTF8("Open\xE2\x80\xA6"));
+    m.addItem(keyed("Save", tmiSaveInPlace, ! empty, cmd + "S"));
+    m.addItem(tmiSaveAs, juce::String::fromUTF8("Save As\xE2\x80\xA6"), ! empty);
+    m.addItem(tmiSaveOptions, juce::String::fromUTF8("Save Options\xE2\x80\xA6  (")
                                  + outputSettings->saveOptions().shortSummary() + ")");
     m.addSeparator();
-    m.addItem(keyed("Cut",   idCut,   sel,  cmd + "X"));
-    m.addItem(keyed("Copy",  idCopy,  sel,  cmd + "C"));
-    m.addItem(keyed("Paste", idPaste, clip, cmd + "V"));
+    m.addItem(keyed("Cut",   tmiCut,   sel,  cmd + "X"));
+    m.addItem(keyed("Copy",  tmiCopy,  sel,  cmd + "C"));
+    m.addItem(keyed("Paste", tmiPaste, clip, cmd + "V"));
     m.addSeparator();
-    m.addItem(keyed("Trim to Selection", idTrim, sel, cmd + "T"));
-    m.addItem(idDelete,  "Delete Selection",  sel);
-    m.addItem(idSilence, "Silence Selection", ! empty);
+    m.addItem(keyed("Trim to Selection", tmiTrim, sel, cmd + "T"));
+    m.addItem(tmiDelete,  "Delete Selection",  sel);
+    m.addItem(tmiSilence, "Silence Selection", ! empty);
     m.addSeparator();
     {
         // Channels: pick which side of a stereo clip the gain-shaped processors below work
@@ -788,88 +777,182 @@ void EditorToolbar::showToolsMenu()
             return i;
         };
         juce::PopupMenu chanMenu;
-        chanMenu.addItem(focusItem("Both (Stereo)", idChanBoth,  CF::stereo));
-        chanMenu.addItem(focusItem("Left only",     idChanLeft,  CF::left));
-        chanMenu.addItem(focusItem("Right only",    idChanRight, CF::right));
+        chanMenu.addItem(focusItem("Both (Stereo)", tmiChanBoth,  CF::stereo));
+        chanMenu.addItem(focusItem("Left only",     tmiChanLeft,  CF::left));
+        chanMenu.addItem(focusItem("Right only",    tmiChanRight, CF::right));
 
         juce::PopupMenu matchMenu;
-        matchMenu.addItem(idMatchPeak, "Match to Louder (Peak)", chanOK);
-        matchMenu.addItem(idMatchRms,  "Match to Louder (RMS)",  chanOK);
+        matchMenu.addItem(tmiMatchPeak, "Match to Louder (Peak)", chanOK);
+        matchMenu.addItem(tmiMatchRms,  "Match to Louder (RMS)",  chanOK);
 
         m.addSubMenu("Work on Channel", chanMenu, chanOK);
         m.addSubMenu(juce::String::fromUTF8("Match Channels\xE2\x80\xA6"), matchMenu, chanOK);
     }
     m.addSeparator();
-    m.addItem(idToMono,   "Convert to Mono",   ! empty && stereoDoc);
-    m.addItem(idToStereo, "Convert to Stereo", ! empty && ! stereoDoc);
+    m.addItem(tmiToMono,   "Convert to Mono",   ! empty && stereoDoc);
+    m.addItem(tmiToStereo, "Convert to Stereo", ! empty && ! stereoDoc);
     m.addSeparator();
-    m.addItem(idNormalize, "Normalize",  ! empty);
-    m.addItem(idAmplify,   juce::String::fromUTF8("Amplify\xE2\x80\xA6"), ! empty);
-    m.addItem(idFadeIn,    "Fade In",    ! empty);
-    m.addItem(idFadeOut,   "Fade Out",   ! empty);
-    m.addItem(idReverse,   "Reverse",    ! empty);
+    m.addItem(tmiNormalize, "Normalize",  ! empty);
+    m.addItem(tmiAmplify,   juce::String::fromUTF8("Amplify\xE2\x80\xA6"), ! empty);
+    m.addItem(tmiFadeIn,    "Fade In",    ! empty);
+    m.addItem(tmiFadeOut,   "Fade Out",   ! empty);
+    m.addItem(tmiReverse,   "Reverse",    ! empty);
     m.addSeparator();
-    m.addItem(idStretch,   juce::String::fromUTF8("Stretch / Pitch\xE2\x80\xA6"), ! empty);
-    m.addItem(idExportSel, "Export Selection to Folder", sel);
+    m.addItem(tmiStretch,   juce::String::fromUTF8("Stretch / Pitch\xE2\x80\xA6"), ! empty);
+    m.addItem(tmiExportSel, "Export Selection to Folder", sel);
     m.addSeparator();
-    m.addItem(idSliceToFolder, juce::String::fromUTF8("Export Slices\xE2\x80\xA6"), ! empty && hasSlices);
-    m.addItem(idExportOt,      juce::String::fromUTF8("Export Octatrack Chain (.wav + .ot)\xE2\x80\xA6"), ! empty);
-    m.addItem(idClearSlices,   "Clear Slice Markers", hasSlices);
+    m.addItem(tmiSliceToFolder, juce::String::fromUTF8("Export Slices\xE2\x80\xA6"), ! empty && hasSlices);
+    m.addItem(tmiExportOt,      juce::String::fromUTF8("Export Octatrack Chain (.wav + .ot)\xE2\x80\xA6"), ! empty);
+    m.addItem(tmiClearSlices,   "Clear Slice Markers", hasSlices);
     m.addSeparator();
-    m.addItem(idOutputFolder, juce::String::fromUTF8("Output Folder\xE2\x80\xA6"));
-    m.addItem(idTheme,        juce::String::fromUTF8("Theme\xE2\x80\xA6"));
-    m.addItem(idAutoRecordThreshold, juce::String::fromUTF8("Auto-Record Threshold\xE2\x80\xA6"));
+    m.addItem(tmiOutputFolder, juce::String::fromUTF8("Output Folder\xE2\x80\xA6"));
+    m.addItem(tmiTheme,        juce::String::fromUTF8("Theme\xE2\x80\xA6"));
+    m.addItem(tmiAutoRecordThreshold, juce::String::fromUTF8("Auto-Record Threshold\xE2\x80\xA6"));
     m.addSeparator();
-    m.addItem(keyed("Undo", idUndo, canUndo, cmd + "Z"));
-    m.addItem(keyed("Redo", idRedo, canRedo, shift + cmd + "Z"));
-    m.addItem(idRevert, "Revert to Original", ! empty);
+    m.addItem(keyed("Undo", tmiUndo, canUndo, cmd + "Z"));
+    m.addItem(keyed("Redo", tmiRedo, canRedo, shift + cmd + "Z"));
+    m.addItem(tmiRevert, "Revert to Original", ! empty);
 
-    m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(toolsButton), [this](int r)
+    m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(toolsButton),
+                    [this](int r) { if (r != 0) performToolsItem(r); });
+}
+
+//==============================================================================
+// Standalone macOS menu bar (StandaloneMenuBar) -- the same actions as Tools ▾, split into
+// File / Edit / Tools. Built fresh each time a top menu opens, so the enable / tick state is
+// always current.
+void EditorToolbar::buildMenuBarMenu(juce::PopupMenu& m, ToolsMenuGroup group)
+{
+    using CF = AudioDocument::ChannelFocus;
+
+    const bool empty     = document.isEmpty();
+    const bool sel       = document.hasSelection();
+    const bool stereoDoc = document.getNumChannels() >= 2;
+    const bool hasSlices = ! document.getSliceMarkers().empty();
+    const bool clip      = clipboard.hasContent();
+    const bool canUndo   = document.undoManager.canUndo();
+    const bool canRedo   = document.undoManager.canRedo();
+    const bool chanOK    = stereoDoc && ! empty;
+
+    switch (group)
     {
-        switch (r)
+        case ToolsMenuGroup::file:
+            m.addItem(tmiOpen, juce::String::fromUTF8("Open\xE2\x80\xA6"));
+            m.addItem(tmiSaveInPlace, "Save", ! empty);
+            m.addItem(tmiSaveAs, juce::String::fromUTF8("Save As\xE2\x80\xA6"), ! empty);
+            m.addItem(tmiSaveOptions, juce::String::fromUTF8("Save Options\xE2\x80\xA6  (")
+                                          + outputSettings->saveOptions().shortSummary() + ")");
+            m.addSeparator();
+            m.addItem(tmiExportSel, "Export Selection to Folder", sel);
+            m.addItem(tmiSliceToFolder, juce::String::fromUTF8("Export Slices\xE2\x80\xA6"),
+                      ! empty && hasSlices);
+            m.addItem(tmiExportOt, juce::String::fromUTF8("Export Octatrack Chain (.wav + .ot)\xE2\x80\xA6"),
+                      ! empty);
+            m.addSeparator();
+            m.addItem(tmiOutputFolder, juce::String::fromUTF8("Output Folder\xE2\x80\xA6"));
+            m.addItem(tmiRevert, "Revert to Original", ! empty);
+            break;
+
+        case ToolsMenuGroup::edit:
+            m.addItem(tmiUndo, "Undo", canUndo);
+            m.addItem(tmiRedo, "Redo", canRedo);
+            m.addSeparator();
+            m.addItem(tmiCut,   "Cut",   sel);
+            m.addItem(tmiCopy,  "Copy",  sel);
+            m.addItem(tmiPaste, "Paste", clip);
+            m.addSeparator();
+            m.addItem(tmiTrim,    "Trim to Selection", sel);
+            m.addItem(tmiDelete,  "Delete Selection",  sel);
+            m.addItem(tmiSilence, "Silence Selection", ! empty);
+            break;
+
+        case ToolsMenuGroup::tools:
         {
-            case idOpen:         openFile();   break;
-            case idSaveInPlace:  saveInPlace(); break;
-            case idSaveAs:       saveAs();      break;
-            case idSaveOptions:  showSaveOptionsCallout(); break;
-            case idRevert:    revertToOriginal(); break;
-            case idCut:       doCut();      break;
-            case idCopy:      doCopy();     break;
-            case idPaste:     doPaste();    break;
-            case idTrim:      EditActions::trimToSelection(document); break;
-            case idDelete:    EditActions::deleteSelection(document); break;
-            case idSilence:   EditActions::silence(document);        break;
+            auto focusItem = [&](const juce::String& t, int id, CF f)
+            {
+                juce::PopupMenu::Item i(t);
+                i.itemID = id; i.isEnabled = chanOK; i.isTicked = document.channelFocus == f;
+                return i;
+            };
+            juce::PopupMenu chanMenu;
+            chanMenu.addItem(focusItem("Both (Stereo)", tmiChanBoth,  CF::stereo));
+            chanMenu.addItem(focusItem("Left only",     tmiChanLeft,  CF::left));
+            chanMenu.addItem(focusItem("Right only",    tmiChanRight, CF::right));
 
-            case idChanBoth:  document.channelFocus = CF::stereo; document.notifyChanged(); break;
-            case idChanLeft:  document.channelFocus = CF::left;   document.notifyChanged(); break;
-            case idChanRight: document.channelFocus = CF::right;  document.notifyChanged(); break;
-            case idMatchPeak: { const auto msg = EditActions::matchChannels(document, false);
-                                if (onStatusMessage && msg.isNotEmpty()) onStatusMessage(msg); break; }
-            case idMatchRms:  { const auto msg = EditActions::matchChannels(document, true);
-                                if (onStatusMessage && msg.isNotEmpty()) onStatusMessage(msg); break; }
-            case idToMono:    EditActions::convertToMono(document);
-                              if (onStatusMessage) onStatusMessage("Converted to mono"); break;
-            case idToStereo:  EditActions::convertToStereo(document);
-                              if (onStatusMessage) onStatusMessage("Converted to stereo"); break;
+            juce::PopupMenu matchMenu;
+            matchMenu.addItem(tmiMatchPeak, "Match to Louder (Peak)", chanOK);
+            matchMenu.addItem(tmiMatchRms,  "Match to Louder (RMS)",  chanOK);
 
-            case idNormalize: EditActions::normalize(document);      break;
-            case idAmplify:   showAmplifyCallout(toolsButton.getScreenBounds()); break;
-            case idFadeIn:    EditActions::fadeIn(document);  break;
-            case idFadeOut:   EditActions::fadeOut(document); break;
-            case idReverse:   EditActions::reverse(document); break;
-            case idStretch:      showStretchCallout(toolsButton.getScreenBounds()); break;
-            case idExportSel:    exportSelectionToFolder(); break;
-            case idSliceToFolder: sliceToFolder();          break;
-            case idExportOt:      exportOctatrackChain();    break;
-            case idClearSlices:   document.clearSliceMarkers(); break;
-            case idOutputFolder: chooseOutputFolder();      break;
-            case idTheme:        showThemeCallout();        break;
-            case idAutoRecordThreshold: showAutoRecordThresholdCallout(); break;
-            case idUndo:      doUndo(); break;
-            case idRedo:      doRedo(); break;
-            default: break;
+            m.addSubMenu("Work on Channel", chanMenu, chanOK);
+            m.addSubMenu(juce::String::fromUTF8("Match Channels\xE2\x80\xA6"), matchMenu, chanOK);
+            m.addSeparator();
+            m.addItem(tmiToMono,   "Convert to Mono",   ! empty && stereoDoc);
+            m.addItem(tmiToStereo, "Convert to Stereo", ! empty && ! stereoDoc);
+            m.addSeparator();
+            m.addItem(tmiNormalize, "Normalize", ! empty);
+            m.addItem(tmiAmplify,   juce::String::fromUTF8("Amplify\xE2\x80\xA6"), ! empty);
+            m.addItem(tmiFadeIn,    "Fade In",  ! empty);
+            m.addItem(tmiFadeOut,   "Fade Out", ! empty);
+            m.addItem(tmiReverse,   "Reverse",  ! empty);
+            m.addSeparator();
+            m.addItem(tmiStretch, juce::String::fromUTF8("Stretch / Pitch\xE2\x80\xA6"), ! empty);
+            m.addItem(tmiClearSlices, "Clear Slice Markers", hasSlices);
+            m.addSeparator();
+            m.addItem(tmiTheme, juce::String::fromUTF8("Theme\xE2\x80\xA6"));
+            m.addItem(tmiAutoRecordThreshold, juce::String::fromUTF8("Auto-Record Threshold\xE2\x80\xA6"));
+            break;
         }
-    });
+    }
+}
+
+//==============================================================================
+void EditorToolbar::performToolsItem(int r)
+{
+    using CF = AudioDocument::ChannelFocus;
+
+    switch (r)
+    {
+        case tmiOpen:         openFile();   break;
+        case tmiSaveInPlace:  saveInPlace(); break;
+        case tmiSaveAs:       saveAs();      break;
+        case tmiSaveOptions:  showSaveOptionsCallout(); break;
+        case tmiRevert:    revertToOriginal(); break;
+        case tmiCut:       doCut();      break;
+        case tmiCopy:      doCopy();     break;
+        case tmiPaste:     doPaste();    break;
+        case tmiTrim:      EditActions::trimToSelection(document); break;
+        case tmiDelete:    EditActions::deleteSelection(document); break;
+        case tmiSilence:   EditActions::silence(document);        break;
+
+        case tmiChanBoth:  document.channelFocus = CF::stereo; document.notifyChanged(); break;
+        case tmiChanLeft:  document.channelFocus = CF::left;   document.notifyChanged(); break;
+        case tmiChanRight: document.channelFocus = CF::right;  document.notifyChanged(); break;
+        case tmiMatchPeak: { const auto msg = EditActions::matchChannels(document, false);
+                             if (onStatusMessage && msg.isNotEmpty()) onStatusMessage(msg); break; }
+        case tmiMatchRms:  { const auto msg = EditActions::matchChannels(document, true);
+                             if (onStatusMessage && msg.isNotEmpty()) onStatusMessage(msg); break; }
+        case tmiToMono:    EditActions::convertToMono(document);
+                           if (onStatusMessage) onStatusMessage("Converted to mono"); break;
+        case tmiToStereo:  EditActions::convertToStereo(document);
+                           if (onStatusMessage) onStatusMessage("Converted to stereo"); break;
+
+        case tmiNormalize: EditActions::normalize(document);      break;
+        case tmiAmplify:   showAmplifyCallout(toolsButton.getScreenBounds()); break;
+        case tmiFadeIn:    EditActions::fadeIn(document);  break;
+        case tmiFadeOut:   EditActions::fadeOut(document); break;
+        case tmiReverse:   EditActions::reverse(document); break;
+        case tmiStretch:      showStretchCallout(toolsButton.getScreenBounds()); break;
+        case tmiExportSel:    exportSelectionToFolder(); break;
+        case tmiSliceToFolder: sliceToFolder();          break;
+        case tmiExportOt:      exportOctatrackChain();    break;
+        case tmiClearSlices:   document.clearSliceMarkers(); break;
+        case tmiOutputFolder: chooseOutputFolder();      break;
+        case tmiTheme:        showThemeCallout();        break;
+        case tmiAutoRecordThreshold: showAutoRecordThresholdCallout(); break;
+        case tmiUndo:      doUndo(); break;
+        case tmiRedo:      doRedo(); break;
+        default: break;
+    }
 }
 
 void EditorToolbar::showAmplifyCallout(juce::Rectangle<int> screenTargetArea)

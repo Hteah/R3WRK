@@ -3,6 +3,7 @@
 #include "PluginProcessor.h"
 #include "HeaderBar.h"
 #include "EditorToolbar.h"
+#include "StandaloneMenuBar.h"
 #include "KnobRow.h"
 #include "WaveformDisplay.h"
 #include "SpectrogramDisplay.h"
@@ -77,6 +78,11 @@ private:
     TimeRuler timeRuler;
     EditorToolbar toolbar;
     KnobRow knobRow;
+
+    // Standalone only: the macOS application menu bar (File / Edit / Tools). nullptr in a
+    // plugin (the host owns the menu bar). Installed via setMacMainMenu() in the ctor,
+    // cleared in the dtor.
+    std::unique_ptr<StandaloneMenuBar> macMenuBar;
 
     // Plugins shouldn't open native windows of their own, so this is given `this` as its
     // parentComponent (per the class's own docs) rather than defaulting to the desktop --

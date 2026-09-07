@@ -63,6 +63,16 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
 
     theme->addChangeListener(this);
 
+   #if JUCE_MAC
+    // Standalone gets a real macOS menu bar (File / Edit / Tools) mirroring the Tools ▾
+    // button. Plugins skip it -- the host owns the menu bar.
+    if (standaloneWindow)
+    {
+        macMenuBar = std::make_unique<StandaloneMenuBar>(toolbar);
+        juce::MenuBarModel::setMacMainMenu(macMenuBar.get());
+    }
+   #endif
+
     const int topInset = standaloneWindow ? kMacTrafficLightInset : 0;
     setWantsKeyboardFocus(true);
     setResizable(true, true);
@@ -72,6 +82,10 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
 
 R3WRKAudioProcessorEditor::~R3WRKAudioProcessorEditor()
 {
+   #if JUCE_MAC
+    if (macMenuBar != nullptr)
+        juce::MenuBarModel::setMacMainMenu(nullptr);   // detach before the model is destroyed
+   #endif
     floatOnTopButton.setLookAndFeel(nullptr);
     theme->removeChangeListener(this);
 }
