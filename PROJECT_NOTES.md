@@ -1631,6 +1631,18 @@ below `0.2` (~5+ px/sample) it also drops a dot on each sample. `waveformIsSampl
 `showSampleDots` / `sampleDots` (per-channel points) are set there and read by `paint()`, all
 reset at the top of the rebuild. Normal-zoom envelope render is untouched.
 
+## Follow-playhead shake fix (`902fd34`)
+
+User: zoomed in on a long file with Follow on, the playhead line shook back and forth.
+`followPlayheadIfNeeded()` scrolls the view from `document.playhead` at 30 Hz timer time;
+`paint()` and `TimeRuler` then re-read `document.playhead` a few ms later (audio thread has
+advanced it) and drew the line at `sampleToX(newer playhead)` -- off centre by
+`(samples advanced) / samplesPerPixel`, which is hundreds of px zoomed in -- then it snapped
+back on the next tick. Now `followPlayheadIfNeeded()` reads the playhead once into
+`followViewAnchorSample` and scrolls from it; `paint()` + `TimeRuler` draw via
+`WaveformDisplay::playheadDrawSample()` (that anchor while follow is actively scrolling, the
+live playhead otherwise). Half-offset now `std::llround`ed rather than truncated.
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).
