@@ -911,16 +911,17 @@ void EditorToolbar::resized()
         fb.items.add(juce::FlexItem(c).withWidth((float) w).withMinWidth(22.0f)
                          .withMargin(juce::FlexItem::Margin(0, (float) gap, 0, 0)));
     };
-    // Order set by the user: transport (Play-from-start, Play) -> record (Record, Auto-Record)
-    // -> Loop -> waveform tools (Scrub, Reverse, Slice, Follow) -> Tools menu -> Clear, with the
-    // time readout pinned right. All round icon buttons.
+    // Order set by the user: transport (Play-from-start, Play, Loop) -> record (Record,
+    // Auto-Record, and Record-Desktop in the standalone) -> waveform tools (Scrub, Reverse,
+    // Slice, Follow) -> Tools menu -> Clear, with the time readout pinned right. All round
+    // icon buttons.
     add(playFromStartButton, 28);
     add(playButton, 28);
+    add(loopButton, 28);
     add(recordButton, 28);
     add(autoRecordButton, 28);
     if (standaloneApp)
         add(desktopRecButton, 28);
-    add(loopButton, 28);
     add(scrubButton, 28);
     add(reverseButton, 28);
     add(sliceButton, 28);
