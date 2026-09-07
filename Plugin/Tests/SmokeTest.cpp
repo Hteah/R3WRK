@@ -514,6 +514,47 @@ int main()
         dir.deleteRecursively();
     }
 
+    // --- saveToFile(opts): container format + sample rate + bit depth ------
+    {
+        std::cout << "-- save options: format / sample rate / bit depth --" << std::endl;
+        AudioDocument doc;
+        const int oneSec = (int) sr;
+        setDocumentContent(doc, makeSineBuffer(2, oneSec, sr, 440.0, 0.5f), sr);
+
+        auto tmp = juce::File::getSpecialLocation(juce::File::tempDirectory);
+        auto roundtrip = [&](const juce::File& f, AudioSaveOptions o, double expectRate, double expectLen,
+                             const juce::String& what)
+        {
+            f.deleteFile();
+            const bool wrote = doc.saveToFile(f, o);
+            check(wrote, what + ": wrote the file");
+            AudioDocument rl;
+            const bool read = wrote && rl.loadFromFile(f);
+            check(read, what + ": read it back");
+            if (read)
+            {
+                checkNear(rl.getSampleRate(), expectRate, 1.0, what + ": sample rate");
+                checkNear((double) rl.getNumSamples(), expectLen, sr * 0.05, what + ": length");
+            }
+            f.deleteFile();
+        };
+
+        AudioSaveOptions o;
+        o.format = AudioSaveOptions::Format::aiff; o.sampleRate = 0; o.bitDepth = 24;
+        roundtrip(tmp.getChildFile("r3wrk_t.aiff"), o, sr, sr, "AIFF 24-bit keep-rate");
+
+        o.format = AudioSaveOptions::Format::flac; o.bitDepth = 32;   // FLAC can't do 32f -> clamps to 24
+        roundtrip(tmp.getChildFile("r3wrk_t.flac"), o, sr, sr, "FLAC (32 clamps to 24)");
+
+        o.format = AudioSaveOptions::Format::wav; o.bitDepth = 32; o.sampleRate = 48000;
+        roundtrip(tmp.getChildFile("r3wrk_t.wav"), o, 48000.0, sr * (48000.0 / sr), "WAV 32-float @ 48 kHz");
+
+        AudioSaveOptions defOpts;
+        check(defOpts.extension() == ".wav", "default options -> .wav");
+        AudioSaveOptions flacOpts; flacOpts.format = AudioSaveOptions::Format::flac;
+        check(flacOpts.extension() == ".flac", "FLAC options -> .flac");
+    }
+
     std::cout << "===========================================" << std::endl;
     if (failures == 0)
         std::cout << "ALL CHECKS PASSED" << std::endl;

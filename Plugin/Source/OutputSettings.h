@@ -1,10 +1,14 @@
 #pragma once
 #include <JuceHeader.h>
+#include "AudioDocument.h"   // AudioSaveOptions
 
 /**
     The output folder that recordings and selection exports are auto-saved into,
     persisted (shared by every plugin instance + the standalone) next to the
     theme settings. Defaults to ~/Music/R3WRK until the user picks another.
+
+    Also stores the "Save Options" (format / sample rate / bit depth) the Save and
+    Save As commands write with.
 */
 class OutputSettings
 {
@@ -18,6 +22,10 @@ public:
 
     // "<folder>/R3WRK 2026-09-04 14.22.03[ selection].wav", guaranteed not to already exist.
     juce::File makeWavFile(bool isSelection);
+
+    // The persisted Save format / sample rate / bit depth (defaults: WAV, keep rate, 24-bit).
+    AudioSaveOptions saveOptions();
+    void setSaveOptions(const AudioSaveOptions&);
 
 private:
     juce::PropertiesFile& props();

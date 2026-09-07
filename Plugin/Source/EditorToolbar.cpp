@@ -212,6 +212,123 @@ namespace
         juce::Label title, hint;
         juce::Slider threshold;
     };
+
+    //==============================================================================
+    // Picks the container format / sample rate / bit depth that Save and Save As write with.
+    // No Apply -- every change writes straight through to OutputSettings (persisted), same as
+    // the threshold panel above. `opts` is the source of truth; sync() pushes it to the combos
+    // (dontSendNotification, so it can't re-enter), readCombos() pulls + clamps for the format.
+    struct SaveOptionsPanel : juce::Component
+    {
+        explicit SaveOptionsPanel(OutputSettings& os) : settings(os)
+        {
+            opts = settings.saveOptions();
+            if (opts.format == AudioSaveOptions::Format::mp3 && ! AudioDocument::mp3ExportAvailable())
+                opts.format = AudioSaveOptions::Format::wav;
+
+            title.setText("Save Options", juce::dontSendNotification);
+            title.setFont(juce::FontOptions(14.0f, juce::Font::bold));
+            addAndMakeVisible(title);
+
+            auto addRow = [this](juce::Label& lab, juce::ComboBox& c, const juce::String& text)
+            {
+                lab.setText(text, juce::dontSendNotification);
+                lab.setFont(juce::FontOptions(12.0f));
+                addAndMakeVisible(lab);
+                c.setJustificationType(juce::Justification::centredLeft);
+                addAndMakeVisible(c);
+            };
+            addRow(formatLabel, formatCombo, "Format");
+            addRow(rateLabel,   rateCombo,   "Sample rate");
+            addRow(depthLabel,  depthCombo,  "Bit depth");
+
+            formatCombo.addItem("WAV",  1);
+            formatCombo.addItem("AIFF", 2);
+            formatCombo.addItem("FLAC", 3);
+            formatCombo.addItem("MP3",  4);
+            formatCombo.setItemEnabled(4, AudioDocument::mp3ExportAvailable());
+
+            rateCombo.addItem("Keep original", 1);
+            rateCombo.addItem("44100 Hz",      2);
+            rateCombo.addItem("48000 Hz",      3);
+            rateCombo.addItem("96000 Hz",      4);
+
+            depthCombo.addItem("16-bit",       1);
+            depthCombo.addItem("24-bit",       2);
+            depthCombo.addItem("32-bit float", 3);
+
+            hint.setFont(juce::FontOptions(11.0f));
+            hint.setColour(juce::Label::textColourId, juce::Colours::grey);
+            addAndMakeVisible(hint);
+
+            formatCombo.onChange = [this] { readCombos(); };
+            rateCombo.onChange   = [this] { readCombos(); };
+            depthCombo.onChange  = [this] { readCombos(); };
+
+            sync();
+            setSize(300, 176);
+        }
+
+        static int rateIdToHz (int id)   { return id == 2 ? 44100 : id == 3 ? 48000 : id == 4 ? 96000 : 0; }
+        static int hzToRateId (int hz)   { return hz == 44100 ? 2 : hz == 48000 ? 3 : hz == 96000 ? 4 : 1; }
+        static int depthIdToBits (int id){ return id == 1 ? 16 : id == 3 ? 32 : 24; }
+        static int bitsToDepthId (int b) { return b == 16 ? 1 : b == 32 ? 3 : 2; }
+
+        void sync()
+        {
+            using Fmt = AudioSaveOptions::Format;
+            formatCombo.setSelectedId((int) opts.format + 1, juce::dontSendNotification);
+            rateCombo  .setSelectedId(hzToRateId(opts.sampleRate), juce::dontSendNotification);
+            depthCombo .setSelectedId(bitsToDepthId(opts.bitDepth), juce::dontSendNotification);
+
+            const bool mp3 = opts.format == Fmt::mp3;
+            depthCombo.setEnabled(! mp3);
+            depthCombo.setItemEnabled(3, opts.format == Fmt::wav);   // 32-bit float: WAV only
+            rateCombo .setItemEnabled(4, ! mp3);                     // 96 kHz: not for MP3
+
+            hint.setText(mp3 ? "MP3 exports at VBR ~190 kbps (needs the 'lame' tool)."
+                             : "Used by Save (\xE2\x8C\x98S) and Save As.",
+                         juce::dontSendNotification);
+        }
+
+        void readCombos()
+        {
+            using Fmt = AudioSaveOptions::Format;
+            opts.format     = (Fmt) juce::jlimit(0, 3, formatCombo.getSelectedId() - 1);
+            opts.sampleRate = rateIdToHz(rateCombo.getSelectedId());
+            opts.bitDepth   = depthIdToBits(depthCombo.getSelectedId());
+
+            if (opts.format != Fmt::wav && opts.bitDepth == 32)       opts.bitDepth   = 24;
+            if (opts.format == Fmt::mp3 && opts.sampleRate == 96000)  opts.sampleRate = 48000;
+
+            settings.setSaveOptions(opts);
+            sync();
+        }
+
+        void resized() override
+        {
+            auto r = getLocalBounds().reduced(10);
+            title.setBounds(r.removeFromTop(18));
+            r.removeFromTop(6);
+            auto row = [&](juce::Label& lab, juce::ComboBox& c)
+            {
+                auto line = r.removeFromTop(24);
+                lab.setBounds(line.removeFromLeft(84));
+                c.setBounds(line);
+                r.removeFromTop(6);
+            };
+            row(formatLabel, formatCombo);
+            row(rateLabel,   rateCombo);
+            row(depthLabel,  depthCombo);
+            r.removeFromTop(2);
+            hint.setBounds(r);
+        }
+
+        OutputSettings& settings;
+        AudioSaveOptions opts;
+        juce::Label title, formatLabel, rateLabel, depthLabel, hint;
+        juce::ComboBox formatCombo, rateCombo, depthCombo;
+    };
 }
 
 //==============================================================================
@@ -352,6 +469,7 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
         const double sr = document.getSampleRate() > 0 ? document.getSampleRate() : 44100.0;
         document.newEmptyDocument(numCh, sr);
 
+        currentFile = juce::File();
         if (onSourceNameChanged) onSourceNameChanged({});
         if (onStatusMessage) onStatusMessage("Cleared");
     };
@@ -479,6 +597,7 @@ void EditorToolbar::toggleTransport()
     if (document.isRecording.load())      { processor.stopRecording(); autoSaveRecording(); }
     else if (document.isPlaying.load())   processor.stopPlayback();
     else                                { processor.startRecording();
+                                          currentFile = juce::File();
                                           if (onSourceNameChanged) onSourceNameChanged({}); }
     updateTransportButtonText();
 }
@@ -499,6 +618,7 @@ void EditorToolbar::toggleDesktopRecording()
         }
         if (document.isPlaying.load())
             processor.stopPlayback();
+        currentFile = juce::File();
         if (onSourceNameChanged) onSourceNameChanged({});
         processor.startDesktopRecording();        // async -- document.isRecording flips on the started cb
     }
@@ -540,9 +660,12 @@ void EditorToolbar::autoSaveRecording()
     if (document.isEmpty())
         return;
 
+    // Recordings always auto-save as a plain 24-bit WAV (lossless, fast, never fails) so a
+    // take is never lost; ⌘S / Save As afterwards can rewrite it in the chosen Save format.
     const auto file = outputSettings->makeWavFile(false);
     if (document.saveToFile(file))
     {
+        currentFile = file;
         if (onSourceNameChanged) onSourceNameChanged(file.getFileName());
         if (onSaved)             onSaved();
         if (onStatusMessage)     onStatusMessage("Saved " + file.getFileName());
@@ -561,7 +684,7 @@ void EditorToolbar::revertToOriginal()
 //==============================================================================
 void EditorToolbar::showToolsMenu()
 {
-    enum { idOpen = 1, idSave, idRevert,
+    enum { idOpen = 1, idSaveInPlace, idSaveAs, idSaveOptions, idRevert,
            idCut, idCopy, idPaste,
            idTrim, idDelete, idSilence,
            idNormalize, idAmplify, idFadeIn, idFadeOut, idReverse,
@@ -588,7 +711,10 @@ void EditorToolbar::showToolsMenu()
 
     juce::PopupMenu m;
     m.addItem(idOpen,   juce::String::fromUTF8("Open\xE2\x80\xA6"));
-    m.addItem(idSave,   juce::String::fromUTF8("Save As\xE2\x80\xA6"), ! empty);
+    m.addItem(keyed("Save", idSaveInPlace, ! empty, cmd + "S"));
+    m.addItem(idSaveAs, juce::String::fromUTF8("Save As\xE2\x80\xA6"), ! empty);
+    m.addItem(idSaveOptions, juce::String::fromUTF8("Save Options\xE2\x80\xA6  (")
+                                 + outputSettings->saveOptions().shortSummary() + ")");
     m.addSeparator();
     m.addItem(keyed("Cut",   idCut,   sel,  cmd + "X"));
     m.addItem(keyed("Copy",  idCopy,  sel,  cmd + "C"));
@@ -623,8 +749,10 @@ void EditorToolbar::showToolsMenu()
     {
         switch (r)
         {
-            case idOpen:      openFile();   break;
-            case idSave:      saveFile();   break;
+            case idOpen:         openFile();   break;
+            case idSaveInPlace:  saveInPlace(); break;
+            case idSaveAs:       saveAs();      break;
+            case idSaveOptions:  showSaveOptionsCallout(); break;
             case idRevert:    revertToOriginal(); break;
             case idCut:       doCut();      break;
             case idCopy:      doCopy();     break;
@@ -803,27 +931,75 @@ void EditorToolbar::loadAudioFile(const juce::File& file)
 {
     if (document.loadFromFile(file, processor.getSampleRate()))
     {
+        currentFile = file;
         if (onSourceNameChanged) onSourceNameChanged(file.getFileName());
         if (onSaved) onSaved();
     }
 }
 
-void EditorToolbar::saveFile()
+// Shared tail for Save / Save As: write with the persisted Save Options, coercing the
+// extension to match the chosen format so a .wav file never ends up holding FLAC, and update
+// the header name + dirty state + status line.
+void EditorToolbar::writeDocumentTo(const juce::File& file)
 {
-    fileChooser = std::make_unique<juce::FileChooser>("Save audio as WAV",
-                                                     outputSettings->folder(), "*.wav");
+    const auto opts = outputSettings->saveOptions();
+    const auto out  = file.withFileExtension(opts.extension());
+
+    if (document.saveToFile(out, opts))
+    {
+        currentFile = out;
+        if (onSourceNameChanged) onSourceNameChanged(out.getFileName());
+        if (onSaved) onSaved();
+        if (onStatusMessage) onStatusMessage("Saved " + out.getFileName());
+    }
+    else if (onStatusMessage)
+    {
+        onStatusMessage(opts.format == AudioSaveOptions::Format::mp3 && ! AudioDocument::mp3ExportAvailable()
+                            ? juce::String("MP3 needs the 'lame' tool -- brew install lame")
+                            : "Couldn't save " + out.getFileName());
+    }
+}
+
+void EditorToolbar::saveInPlace()
+{
+    if (document.isEmpty())
+        return;
+    if (currentFile == juce::File() || ! currentFile.getParentDirectory().isDirectory())
+        saveAs();
+    else
+        writeDocumentTo(currentFile);
+}
+
+void EditorToolbar::saveAs()
+{
+    if (document.isEmpty())
+        return;
+
+    const auto opts = outputSettings->saveOptions();
+    const auto ext  = opts.extension();
+
+    const juce::File startDir = currentFile.getParentDirectory().isDirectory()
+                                  ? currentFile.getParentDirectory() : outputSettings->folder();
+    const juce::String stem = currentFile != juce::File()
+                                ? currentFile.getFileNameWithoutExtension()
+                                : juce::Time::getCurrentTime().formatted("R3WRK %Y-%m-%d %H.%M.%S");
+
+    fileChooser = std::make_unique<juce::FileChooser>("Save audio as " + opts.formatName(),
+                                                      startDir.getChildFile(stem + ext), "*" + ext);
     auto flags = juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
                | juce::FileBrowserComponent::warnAboutOverwriting;
     fileChooser->launchAsync(flags, [this](const juce::FileChooser& fc)
     {
         auto file = fc.getResult();
-        if (file != juce::File() && document.saveToFile(file))
-        {
-            if (onSourceNameChanged) onSourceNameChanged(file.getFileName());
-            if (onSaved) onSaved();
-            if (onStatusMessage) onStatusMessage("Saved " + file.getFileName());
-        }
+        if (file != juce::File())
+            writeDocumentTo(file);
     });
+}
+
+void EditorToolbar::showSaveOptionsCallout()
+{
+    juce::CallOutBox::launchAsynchronously(std::make_unique<SaveOptionsPanel>(*outputSettings),
+                                           toolsButton.getScreenBounds(), nullptr);
 }
 
 void EditorToolbar::exportSelectionToFolder()

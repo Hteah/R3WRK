@@ -617,8 +617,12 @@ don't collide.
 - **Tools ▾ → "Export Selection to Folder"** → the selection is written to the
   folder immediately (was a save dialog).
 - **Tools ▾ → "Output Folder…"** → a directory chooser to change it.
-- **"Save As…"** is still a dialog (for one-offs / specific names); it now opens
-  in the output folder.
+- **Tools ▾ → "Save" (⌘S)** → overwrites the file the document is currently backed
+  by (`EditorToolbar::currentFile` — last Open / last Save As / last recording
+  auto-save). No `currentFile` yet → falls through to Save As. See "Save / Save As
+  / Save Options" below.
+- **"Save As…"** is a native dialog; extension + initial name come from the
+  current Save Options / `currentFile`.
 - **Drag out:** press inside the selection body (not near an edge) and drag —
   `WaveformDisplay::beginSelectionDragExport()` writes the selection to
   `<temp>/R3WRK/R3WRK selection <timestamp>.wav` and starts a native file drag
@@ -629,6 +633,47 @@ don't collide.
 Feedback is a `HeaderBar::flashMessage()` — a ~3 s accent-coloured line in the
 readout area ("Saved …", "Exported …", "Output folder: …"), driven from
 `EditorToolbar` through its `onStatusMessage` callback.
+
+### Save / Save As / Save Options (format · rate · bit depth)
+
+User: "add save, as in replace file with new edited one … the option when saving
+to choose the file type, sample rate and bit depth."
+
+- **`AudioSaveOptions`** (top-level struct in `AudioDocument.h`): `format`
+  (wav/aiff/flac/mp3), `sampleRate` (0 = keep the document's rate), `bitDepth`
+  (16/24/32 — 32 = float, WAV only). Helpers: `extension()`, `formatName()`,
+  `shortSummary()` ("WAV · 48 kHz · 24-bit").
+- **`AudioDocument::saveToFile(file, opts)`** — bakes the knobs
+  (`renderWithPlaybackKnobs`, unchanged), then: picks the `juce::AudioFormat`
+  subclass; resamples (shared `resampleBuffer()` Lagrange helper) to
+  `opts.sampleRate`, snapping to the nearest rate the format allows if it's fussy
+  (MP3 → 44.1/48 only); clamps bit depth to `getPossibleBitDepths()` (FLAC/AIFF
+  → 24, MP3 → 16); for WAV 32 sets `SampleFormat::floatingPoint`; MP3 gets
+  `withQualityOptionIndex(2)` (VBR ~190 kbps). The bare `saveToFile(file)` = WAV
+  / keep-rate / 24-bit, delegates here. `CMakeLists.txt` sets
+  `JUCE_USE_LAME_AUDIO_FORMAT=1` on both targets.
+- **MP3** shells out to a system `lame` (JUCE has no built-in MP3 encoder).
+  `AudioDocument::findLameBinary()` probes `/opt/homebrew/bin`, `/usr/local/bin`,
+  `/usr/bin`, `/opt/local/bin`; `mp3ExportAvailable()` gates the UI. No binary →
+  the MP3 combo item is disabled and a save attempt reports "MP3 needs the 'lame'
+  tool — brew install lame".
+- **`OutputSettings`** persists the options (`saveFormat` / `saveSampleRate` /
+  `saveBitDepth` keys in `output.settings`); `saveOptions()` / `setSaveOptions()`.
+- **`EditorToolbar`**: `currentFile` tracks the backing file (set by Open, Save
+  As, recording auto-save; cleared by Clear / record start). `saveInPlace()` (⌘S,
+  wired in `PluginEditor::keyPressed`) overwrites it, or calls `saveAs()` if
+  none. `saveAs()` is the native dialog with the format's extension. Both funnel
+  through `writeDocumentTo()`, which forces the file extension to match the
+  chosen format (a `.wav` never holds FLAC), writes with the persisted options,
+  and updates header name + dirty state + status. `SaveOptionsPanel`
+  (`CallOutBox`, anon struct — 3 `ComboBox`es, no Apply, writes straight to
+  `OutputSettings` like the threshold panel) opens from **Tools ▾ → "Save
+  Options… (WAV · keep rate · 24-bit)"**, the label showing the live summary.
+  32-float item enabled for WAV only; 96 kHz disabled for MP3; clamps on change.
+- Recording **auto-save stays a plain 24-bit WAV** (fast, lossless, never fails);
+  it sets `currentFile` so a later ⌘S / Save As re-emits in the chosen format.
+- Slice / Octatrack exports keep their own 24-bit WAV writer (separate "chain"
+  concept) — unaffected.
 
 ### Save bakes the Speed/Pitch/Stretch knobs into the file
 

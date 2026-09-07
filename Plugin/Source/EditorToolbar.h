@@ -39,6 +39,7 @@ public:
     void doUndo();
     void doRedo();
     void doTrim();   // ⌘T -- Trim to Selection; a no-op with nothing selected, same as the menu items
+    void saveInPlace();   // ⌘S -- overwrite the current file (falls back to Save As if there isn't one)
     void toggleTransport();   // Record button: record if idle, else stop
     void toggleDesktopRecording();   // Standalone-only "Record Desktop" button: system-audio capture on/off
     void togglePlay();        // Space: play if idle, else stop
@@ -61,7 +62,9 @@ private:
     void applyTheme();
     void updateTransportButtonText();
     void openFile();
-    void saveFile();
+    void saveAs();             // native "Save As" dialog, extension from the current Save format
+    void showSaveOptionsCallout();   // Tools: pick file type / sample rate / bit depth (persisted)
+    void writeDocumentTo(const juce::File& file);   // shared: saveToFile + header/status bookkeeping
     void revertToOriginal();   // Tools menu's "Revert to Original" -- see AudioDocument::revertToOriginal()
     void showToolsMenu();
     void showAmplifyCallout(juce::Rectangle<int> screenTargetArea);
@@ -84,6 +87,11 @@ private:
     // "Record Desktop" only exists in the Standalone app -- a VST3/AU plugin is handed audio
     // by its host and has no business grabbing the Mac's system output. Set once in the ctor.
     const bool standaloneApp;
+
+    // The file the document is currently backed by (last opened / last Save As / last
+    // recording auto-save). "Save" (⌘S) overwrites it; empty => "Save" behaves as "Save As".
+    // Cleared whenever the document is blanked or a fresh recording starts.
+    juce::File currentFile;
 
     // Play/Loop/Record are drawn as icons (see R3WRKLookAndFeel::drawButtonText) on square
     // (so pill-radius-as-circle) buttons -- a play triangle, a loop/repeat glyph, and (for

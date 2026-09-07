@@ -12,6 +12,63 @@
     juce::UndoManager transaction itself), never merged with the edit before
     or after it.
 */
+
+// Chosen in the "Save Options" panel, persisted by OutputSettings, and passed to
+// AudioDocument::saveToFile(). `sampleRate == 0` means "keep the document's own rate";
+// `bitDepth == 32` means 32-bit float (WAV only -- clamped to 24 for AIFF/FLAC, ignored for
+// MP3, which is always 16-bit CBR/VBR through the encoder).
+struct AudioSaveOptions
+{
+    enum class Format { wav, aiff, flac, mp3 };
+
+    Format format     = Format::wav;
+    int    sampleRate = 0;
+    int    bitDepth   = 24;
+
+    juce::String extension() const
+    {
+        switch (format)
+        {
+            case Format::aiff: return ".aiff";
+            case Format::flac: return ".flac";
+            case Format::mp3:  return ".mp3";
+            case Format::wav:
+            default:           return ".wav";
+        }
+    }
+
+    juce::String formatName() const
+    {
+        switch (format)
+        {
+            case Format::aiff: return "AIFF";
+            case Format::flac: return "FLAC";
+            case Format::mp3:  return "MP3";
+            case Format::wav:
+            default:           return "WAV";
+        }
+    }
+
+    // "WAV · 48 kHz · 24-bit" for the Tools-menu item text.
+    juce::String shortSummary() const
+    {
+        juce::String rate = sampleRate <= 0 ? juce::String ("keep rate")
+                                            : juce::String (sampleRate / 1000.0, sampleRate % 1000 == 0 ? 0 : 1) + " kHz";
+        juce::String depth = format == Format::mp3 ? juce::String ("VBR")
+                           : bitDepth == 32        ? juce::String ("32-bit float")
+                                                   : juce::String (bitDepth) + "-bit";
+        return formatName() + juce::String::fromUTF8 (" \xc2\xb7 ") + rate + juce::String::fromUTF8 (" \xc2\xb7 ") + depth;
+    }
+
+    static Format formatFromName (const juce::String& n)
+    {
+        if (n.equalsIgnoreCase ("AIFF")) return Format::aiff;
+        if (n.equalsIgnoreCase ("FLAC")) return Format::flac;
+        if (n.equalsIgnoreCase ("MP3"))  return Format::mp3;
+        return Format::wav;
+    }
+};
+
 class AudioDocument
 {
 public:
@@ -24,11 +81,18 @@ public:
     // resampled on load so it plays back at the correct pitch/speed in the host.
     bool loadFromFile(const juce::File& file, double resampleToRate = 0.0);
 
-    // Writes the stored audio to `file` as a 24-bit WAV. If the Speed/Pitch/Stretch knobs are
-    // off-centre, the audio is first rendered through them (renderWithPlaybackKnobs) so the
-    // file matches what you hear -- the knob settings are baked into the sound, not stored
-    // separately. The in-memory document and the knobs are left untouched.
+    // Writes the stored audio to `file`. The Speed/Pitch/Stretch knobs are always baked into
+    // the written audio (renderWithPlaybackKnobs -- a no-op copy when they're centred), so the
+    // file matches what you hear; the in-memory document and the knobs are left untouched.
+    // The `opts` overload also picks the container format, resamples to opts.sampleRate (0 =
+    // keep), and writes at opts.bitDepth; the bare overload is WAV / keep-rate / 24-bit.
     bool saveToFile(const juce::File& file) const;
+    bool saveToFile(const juce::File& file, const AudioSaveOptions& opts) const;
+
+    // MP3 export shells out to a LAME binary (JUCE has no built-in MP3 encoder). These say
+    // whether one was found on this machine, so the UI can enable/disable the MP3 option.
+    static juce::File findLameBinary();
+    static bool mp3ExportAvailable() { return findLameBinary().existsAsFile(); }
 
     const juce::AudioBuffer<float>& getBuffer() const { return buffer; }
 

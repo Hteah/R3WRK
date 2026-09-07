@@ -2,7 +2,10 @@
 
 namespace
 {
-    const juce::String kFolderKey = "outputFolder";
+    const juce::String kFolderKey     = "outputFolder";
+    const juce::String kSaveFormatKey = "saveFormat";
+    const juce::String kSaveRateKey   = "saveSampleRate";
+    const juce::String kSaveDepthKey  = "saveBitDepth";
 
     juce::File defaultFolder()
     {
@@ -55,4 +58,21 @@ juce::File OutputSettings::makeWavFile(bool isSelection)
     if (isSelection)
         name << " selection";
     return folder().getChildFile(name + ".wav").getNonexistentSibling();
+}
+
+AudioSaveOptions OutputSettings::saveOptions()
+{
+    AudioSaveOptions o;
+    o.format     = AudioSaveOptions::formatFromName(props().getValue(kSaveFormatKey, "WAV"));
+    o.sampleRate = props().getIntValue(kSaveRateKey, 0);
+    o.bitDepth   = props().getIntValue(kSaveDepthKey, 24);
+    return o;
+}
+
+void OutputSettings::setSaveOptions(const AudioSaveOptions& o)
+{
+    props().setValue(kSaveFormatKey, o.formatName());
+    props().setValue(kSaveRateKey,   o.sampleRate);
+    props().setValue(kSaveDepthKey,  o.bitDepth);
+    props().saveIfNeeded();
 }

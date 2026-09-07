@@ -147,6 +147,7 @@ bool R3WRKAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
     if (key == KP('c', cmd, 0))               { toolbar.doCopy();     return true; }
     if (key == KP('v', cmd, 0))               { toolbar.doPaste();    return true; }
     if (key == KP('t', cmd, 0))               { toolbar.doTrim();     return true; }
+    if (key == KP('s', cmd, 0))               { toolbar.saveInPlace(); return true; }
 
     // Zoom the waveform without the mouse: the standard Mac convention, ⌘+/⌘- (Safari,
     // Preview, Xcode, ...). Two earlier attempts used Control instead (per the user's first

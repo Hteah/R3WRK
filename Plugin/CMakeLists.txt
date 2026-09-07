@@ -96,7 +96,8 @@ target_compile_definitions(R3WRK
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
         JUCE_VST3_CAN_REPLACE_VST2=0
-        JUCE_DISPLAY_SPLASH_SCREEN=0)
+        JUCE_DISPLAY_SPLASH_SCREEN=0
+        JUCE_USE_LAME_AUDIO_FORMAT=1)   # MP3 export via a system `lame` binary (see AudioDocument::findLameBinary)
 
 target_link_libraries(R3WRK
     PRIVATE
@@ -131,7 +132,8 @@ target_sources(R3WRKSmokeTest
 target_compile_definitions(R3WRKSmokeTest
     PUBLIC
         JUCE_WEB_BROWSER=0
-        JUCE_USE_CURL=0)
+        JUCE_USE_CURL=0
+        JUCE_USE_LAME_AUDIO_FORMAT=1)   # AudioDocument.cpp references LAMEEncoderAudioFormat
 
 target_link_libraries(R3WRKSmokeTest
     PRIVATE

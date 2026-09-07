@@ -169,22 +169,110 @@ juce::AudioBuffer<float> AudioDocument::renderWithPlaybackKnobs(const juce::Audi
     return out;
 }
 
+namespace
+{
+    // Straight Lagrange resample of every channel by srcRate/dstRate -- same interpolator the
+    // load path uses. Returns `src` untouched when the rates already match.
+    juce::AudioBuffer<float> resampleBuffer(const juce::AudioBuffer<float>& src, double srcRate, double dstRate)
+    {
+        if (srcRate <= 0.0 || dstRate <= 0.0 || std::abs(srcRate - dstRate) < 0.5 || src.getNumSamples() <= 0)
+            return src;
+
+        const double ratio = srcRate / dstRate;
+        const int newLen = (int) std::ceil((double) src.getNumSamples() / ratio) + 1;
+        juce::AudioBuffer<float> out(src.getNumChannels(), newLen);
+        for (int ch = 0; ch < src.getNumChannels(); ++ch)
+        {
+            juce::LagrangeInterpolator interp;
+            interp.reset();
+            interp.process(ratio, src.getReadPointer(ch), out.getWritePointer(ch), newLen);
+        }
+        return out;
+    }
+}
+
 bool AudioDocument::saveToFile(const juce::File& file) const
 {
+    return saveToFile(file, AudioSaveOptions{});
+}
+
+juce::File AudioDocument::findLameBinary()
+{
+    for (auto* p : { "/opt/homebrew/bin/lame", "/usr/local/bin/lame", "/usr/bin/lame", "/opt/local/bin/lame" })
+    {
+        juce::File f { juce::String (p) };
+        if (f.existsAsFile())
+            return f;
+    }
+    return {};
+}
+
+bool AudioDocument::saveToFile(const juce::File& file, const AudioSaveOptions& opts) const
+{
+    using Fmt = AudioSaveOptions::Format;
+
+    // Bake the Speed/Pitch/Stretch knobs into the written audio (a no-op copy when they're
+    // centred), so the file is what you hear rather than the dry clip + separate knob state.
+    juce::AudioBuffer<float> rendered = renderWithPlaybackKnobs(buffer);
+    if (rendered.getNumSamples() <= 0)
+        return false;
+
+    // Build the format object + its legal bit-depth / sample-rate lists.
+    std::unique_ptr<juce::AudioFormat> fmt;
+    switch (opts.format)
+    {
+        case Fmt::aiff: fmt = std::make_unique<juce::AiffAudioFormat>(); break;
+        case Fmt::flac: fmt = std::make_unique<juce::FlacAudioFormat>(); break;
+        case Fmt::mp3:
+        {
+            const auto lame = findLameBinary();
+            if (! lame.existsAsFile())
+                return false;   // caller surfaces "MP3 needs the 'lame' tool"
+            fmt = std::make_unique<juce::LAMEEncoderAudioFormat>(lame);
+            break;
+        }
+        case Fmt::wav:
+        default:        fmt = std::make_unique<juce::WavAudioFormat>(); break;
+    }
+
+    // Target sample rate: the requested one if the format allows it, else the nearest allowed,
+    // else the document's own rate.
+    double targetRate = opts.sampleRate > 0 ? (double) opts.sampleRate : sampleRate;
+    {
+        auto rates = fmt->getPossibleSampleRates();
+        if (rates.size() > 0 && ! rates.contains((int) std::lround(targetRate)))
+        {
+            int best = rates[0];
+            for (int r : rates)
+                if (std::abs(r - targetRate) < std::abs(best - targetRate))
+                    best = r;
+            targetRate = best;
+        }
+    }
+    rendered = resampleBuffer(rendered, sampleRate, targetRate);
+
+    // Bit depth: 32 means float (WAV only). Clamp to what the format supports.
+    int depth = opts.bitDepth;
+    auto depths = fmt->getPossibleBitDepths();
+    const bool wantFloat = (depth == 32 && opts.format == Fmt::wav);
+    if (depths.size() > 0 && ! depths.contains(depth))
+        depth = depths.contains(24) ? 24 : depths[depths.size() - 1];
+
     file.deleteFile();
     std::unique_ptr<juce::OutputStream> stream(file.createOutputStream());
     if (stream == nullptr)
         return false;
 
-    // Bake the Speed/Pitch/Stretch knobs into the written audio (a no-op copy when they're
-    // centred), so the file is what you hear rather than the dry clip + separate knob state.
-    const juce::AudioBuffer<float> rendered = renderWithPlaybackKnobs(buffer);
+    auto writerOpts = juce::AudioFormatWriterOptions{}
+                          .withSampleRate(targetRate)
+                          .withNumChannels(rendered.getNumChannels())
+                          .withBitsPerSample(depth);
+    if (wantFloat)
+        writerOpts = writerOpts.withSampleFormat(juce::AudioFormatWriterOptions::SampleFormat::floatingPoint);
+    if (opts.format == Fmt::mp3)
+        writerOpts = writerOpts.withQualityOptionIndex(2);   // "VBR quality 2" -- ~190 kbps
 
-    juce::WavAudioFormat wavFormat;
-    auto writer = wavFormat.createWriterFor(stream, juce::AudioFormatWriterOptions{}
-                                                        .withSampleRate(sampleRate)
-                                                        .withNumChannels(rendered.getNumChannels())
-                                                        .withBitsPerSample(24));
+    auto writer = fmt->createWriterFor(stream, writerOpts);
     if (writer == nullptr)
         return false;   // stream is left intact on failure; unique_ptr cleans it up
 
