@@ -114,10 +114,8 @@ private:
     void playSliceAt(int64_t sample);          // Slice tool: play the region containing `sample`
     void rebuildPeakCache();           // scan the buffer once per content change (holds the lock briefly)
     void rebuildWaveformPath();        // build the display path from the cache (no lock) per view change
-    void zoomToward(double spanFactor, float pointerX);   // wheel zoom (Sieve model)
+    void zoomToward(double spanFactor, float pointerX);   // wheel + keyboard zoom (Sieve model)
     void panByPixels(float dxPixels);
-    float currentMouseX() const;   // mouse position in this component's coords, clamped on-screen
-    float keyboardZoomAnchorX() const;   // the selection's midpoint if there is one, else currentMouseX()
     int64_t maxViewSpan() const;   // largest sensible viewEnd-viewStart, for the current
                                    // sample count and timeScale -- see .cpp
     int64_t effectiveSpanFor(int64_t rawTotal, double timeScale) const;   // maxViewSpan(), but
@@ -160,17 +158,6 @@ private:
     juce::AudioBuffer<float> rawCache;
     int64_t rawCacheStart = 0;
     int rawCacheVersion = -1;
-
-    // A scroll/trackpad gesture sends a rapid burst of small wheel events; re-reading the
-    // pointer's exact x on every single one means incidental mouse jitter during the gesture
-    // (nobody's hand is perfectly still) nudges the zoom anchor a little each time, drifting
-    // away from wherever you actually meant to zoom in on by the time a many-notch gesture is
-    // done. Locking the anchor x to wherever the gesture *started* and reusing it for the
-    // whole burst -- see mouseWheelMove() -- fixes that; a pause longer than
-    // wheelGestureGapMs starts a fresh gesture (and a fresh anchor) on the next notch.
-    static constexpr uint32_t wheelGestureGapMs = 400;
-    uint32_t lastWheelEventMs = 0;
-    float wheelGestureAnchorX = 0.0f;
 
     enum class DragKind { none, newSelection, resizeStart, resizeEnd, dragOut };
     DragKind dragKind = DragKind::none;

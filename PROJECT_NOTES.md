@@ -281,109 +281,81 @@ session's other fixes — timeScale != 1 is the trigger, so this bug already
 existed wherever Speed/Pitch/Stretch were live, just went unnoticed until
 this round of testing exercised it directly.
 
-**Keyboard zoom stays anchored on the selection.** `zoomToward()`'s existing
-Sieve-ported framing behaviour (frame the whole selection, centred, while the
-view is wider than it) only fires for the *first* zoom-in step — once you're
-zoomed in tighter than the selection, it hands off to plain pointer-anchored
-zoom, which is exactly right for the mouse wheel (the pointer is genuinely
-pointing at something) but wrong for ⌘+/⌘-, where the "pointer" was just
-whatever the mouse happened to be sitting over — often nowhere near the
-selection, since the whole point of a keyboard shortcut is not needing the
-mouse there. Every zoom-in past the first press would then anchor on that
-arbitrary spot instead, drifting the view away from the selection with each
-further press — the exact "zooming around trying to find the selection
-again" experience the Sieve behaviour exists to avoid. Fixed by giving
-`zoomIn()`/`zoomOut()` their own anchor (`keyboardZoomAnchorX()`): the
-selection's midpoint, converted to a screen X via `sampleToX()`, whenever
-there is one, falling back to the real mouse position only when there's no
-selection to anchor on. Since this "anchor" is just the `pointerX` fed into
-the same `zoomToward()` the wheel uses, it gets the framing behaviour *and*
-the pointer-anchored zoom that follows it for free, both now centred on the
-selection instead of an incidental mouse position, at every zoom level.
+## Selection zoom — the Sieve-ported model
 
-**Deliberate zoom-out direction around a selection.** User: zooming in on a
-selection "zooms in from the left, then when I get close... zooms really
-fast to the selection. Then when I zoom out, it zooms back out to the left,
-no matter if my mouse pointer is on the left or right" — wanted to be able
-to reveal either side of a selection just by choosing where to point before
-scrolling out. Root cause: the bracket-grab lock-on (pin whichever selection
-edge is within 12px of the pointer, at a fraction *derived from that same
-on-screen position*, clamped to at least 0.15) used to fire for **both** zoom
-directions. Zooming in near an edge, that's the intended precision-dive
-behaviour ("so the wheel pulls you into it"); but once it had you hugging the
-left bracket and you reversed to zoom back out without moving the mouse
-(which hadn't needed to move — it was already sitting right at that edge),
-the *same* "near the left bracket" case kept re-triggering and re-pinning
-that edge near the left of the screen again, regardless of intent — the
-"drifts left no matter where the pointer is" the user described, since once
-the case matches, the pointer's exact position barely changes the outcome.
+After many rounds of tuning R3WRK's own zoom heuristics (see the history note
+at the end), the user compared it side by side with Sieve's editor —
+"it's so fluid" — and asked for R3WRK to work the same way. `zoomToward()` is
+now a faithful port of Sieve's `EditorWaveformView.zoom()`, with R3WRK's
+`getTimeScale()` (Speed/Pitch/Stretch visual stretch) math layered back on
+top for the pixel↔sample conversions and the span bounds.
 
-Fixed by gating bracket-grab (and the "frame the whole selection" step after
-it) to zoom-**in** only (`spanFactor < 1.0`), and giving zoom-out its own,
-deliberate branch instead: with a selection present and not zooming in, pin
-whichever *edge* is nearer the pointer's screen **half** (not its exact
-position, so it can't degenerate into the same edge-hugging problem) at a
-fixed 0.7/0.3 fraction of the width — pointer on the left keeps the selection
-start pinned there and opens up what's *before* it as you keep scrolling out;
-right does the same for the selection end and what's *after* it. Deterministic
-and repeatable on every wheel notch, not just a one-time jump.
+`spanFactor` multiplies the visible span (`< 1` = zoom in, `> 1` = zoom out).
+`applyView(anchorSample, anchorFrac)` commits a view of `newLen` scaled
+samples with `anchorSample` (a *raw* sample) pinned under `anchorFrac` of the
+pixel width; the raw-samples-per-pixel density divides by `timeScale`, same
+as `xToSample()`/`sampleToX()`, so anchoring holds while the waveform is
+visually stretched. `visibleRawNow = curLen / timeScale` is the raw sample
+count actually spanning the width right now.
 
-**Two follow-ups from trying the above**: "It's kind of working... Could you
-make it so when I put my mouse pointer in the middle of the selection, it
-zooms into that mouse pointer. It still wants to come from one side or the
-other. Also, please slow down the speed of zooming."
+**Zooming in with a selection:**
+- *Phase 1* — `visibleRawNow > selLen` (view still wider than the selection):
+  ignore the pointer entirely. `applyView(selMid, 0.5)` and
+  `newLen = jmin(newLen, framedRaw*timeScale)` where
+  `framedRaw = jmax(minSpan, selLen*6/5)`, so each notch tightens the view
+  toward 1.2× the selection width, centred. From far out the first notch
+  snaps straight to that framing — which is the "it locks onto my selection
+  and pulls me in" feel the user wanted, and which earlier R3WRK builds had
+  deliberately *removed* as a bug (it isn't one when the anchor genuinely
+  centres on the selection instead of fighting a bracket-grab).
+- *Phase 2* — `visibleRawNow <= selLen` (view now inside the selection): zoom
+  toward the pointer (`xToSample(pointerX)` at fraction `frac`), except when
+  `frac` is within a 0.22-width `edge` zone of a side whose bracket
+  (`selStart`/`selEnd`) has scrolled off that edge — then anchor on the
+  bracket so it comes back into view.
 
-1. The zoom-*in* "frame the whole selection" step (above) always centred on
-   the selection's exact midpoint, regardless of where the pointer actually
-   was within it — so every zoom-in step (there are several before the view
-   gets narrower than the selection) snapped to the same fixed point no
-   matter where you aimed, reading as "it still wants to come from one side
-   or the other". Now anchored on the pointer's actual position
-   (`xToSample(pointerX)`) whenever it's inside the selection's bounds, only
-   falling back to the exact midpoint when the pointer is outside it (zooming
-   in on the selection from elsewhere, where there's no more specific spot to
-   prefer).
-2. Wheel-zoom sensitivity (`mouseWheelMove()`) was
-   `jlimit(0.5, 2.0, exp(-dy*1.4))` — a single wheel event could as much as
-   halve or double the view, which on a trackpad's usual burst of events per
-   swipe added up to "jumps quickly to a very small bit" long before the
-   gesture felt finished. Tightened to `jlimit(0.8, 1.25, exp(-dy*0.6))` —
-   both the per-event ceiling and the `dy` sensitivity are gentler (0.8/1.25
-   is an exact inverse pair, same idea as `keyboardZoomStep`). Keyboard zoom
-   (⌘+/⌘-) already had its own separate, gentler step and wasn't touched.
+**Zooming out with a selection:** mirror of Phase 1. While
+`visibleRawNow < selLen * stickySelectionSpans` (= 3), keep the selection
+centred (`applyView(selMid, 0.5)`) so a small zoom-out *re-frames* the
+selection. Only once the view is 3× wider than the selection — clearly
+looking at broader context — does it release to plain pointer-anchored
+zoom-out. This is the fix for the user's last complaint: plain
+pointer-anchored zoom-out drifted the selection off toward the side opposite
+the cursor and, being unbounded (unlike Phase 1), compounded over a
+trackpad's burst of wheel events into an "extreme, lopsided" zoom-out that
+needed a full zoom-out to recover from.
 
-**Still not right — the actual bug was the "frame the selection" jump.**
-User: "I can't figure this out. If I put my mouse pointer in the middle of
-the selection from a zoomed out position and zoom in a tiny bit, jumps into
-full zoom of the selection." The zoom-in framing step (previous entry) keyed
-off `curLen > selLen` — true for nearly the *entire* zoomed-out range above
-a small selection in a longer file, not just the last step before naturally
-reaching that size — so `framedLen = jmin(newLen, selLen*1.2)` picked
-`selLen*1.2` immediately on the very first zoom-in tick, however far zoomed
-out the view started. **Removed the special "frame the selection" branch on
-zoom-in entirely** rather than re-tuning its trigger again: it now falls
-through to the same plain pointer-anchored zoom used everywhere else, which
-(per the fix directly above) already tracks the pointer correctly whether
-it's inside the selection or not — gradual and predictable, matching how
-zoom behaves everywhere else in the app, with no special case left to get
-the threshold wrong a third time. Bracket-grab (zooming in right at an edge)
-is untouched; zoom-out's deliberate side-of-selection anchoring is untouched.
+**No selection, or zooming out past the 3× sticky range:** plain
+pointer-anchored zoom — the sample under the pointer stays put.
 
-**Locking the zoom anchor for the whole gesture.** Follow-up ask: "I
-understand that if I zoom in that the mouse pointer is going to change
-location, but isn't there a way where it can remember that I wanted to zoom
-into the place I wanted to zoom in in the beginning?" A trackpad/wheel
-gesture sends a rapid burst of small events, and `zoomToward()` was reading
-the pointer's live x on every single one — incidental mouse jitter during
-the gesture (no one's hand is perfectly still) nudged the anchor a little
-each notch, so a many-notch zoom could drift from where the gesture actually
-started by the time it finished. `WaveformDisplay` now locks
-`wheelGestureAnchorX` to wherever the pointer was when a gesture *starts*
-(no wheel event for more than `wheelGestureGapMs` = 400 ms) and reuses that
-same x for every notch until the next pause, rather than re-reading `e.x`
-each time — `zoomToward()` itself is unchanged, it just always receives a
-steady anchor for the duration of one gesture instead of a jittery one.
-Panning (horizontal swipe) has no anchor concept and isn't affected.
+**Wheel** (`mouseWheelMove()`): vertical wheel → `zoomToward()`; horizontal
+swipe / Shift-wheel → `panByPixels()`. Per-notch factor
+`jlimit(0.8, 1.25, exp(-dy*0.6))` — an exact inverse pair, gentle enough that
+a trackpad's event burst per swipe doesn't lurch the view (the user asked for
+gentle repeatedly). The anchor fed to `zoomToward()` is the **live** `e.x`
+every notch, like Sieve — Phase 1 framing is what keeps a zoom-in steady on
+the selection, so there is no per-gesture anchor lock (an earlier
+`wheelGestureAnchorX` / `wheelGestureGapMs` mechanism, needed only because
+framing had been removed, is gone).
+
+**Keyboard** ⌘+/⌘− (`zoomIn()`/`zoomOut()`, wired in `PluginEditor::keyPressed`):
+gentle fixed `keyboardZoomStep` = 0.9 (and its exact reciprocal), anchored at
+`getWidth()*0.5` — the view centre, Sieve's keyboard model. With a selection,
+Phase 1 ignores that anchor and centres on the selection anyway, so ⌘+ walks
+you into the selection hands-free.
+
+### History (superseded)
+
+Everything above replaces a long series of per-symptom tweaks —
+`9addaa0` bracket-grab, `ae3db59`/`f5787a8` add-then-remove the "frame the
+selection" step, `3e4ea68` asymmetric 0.7/0.3 zoom-out side-pin,
+`66e18f4`/`c12db62` sensitivity, `f763cb8` keyboard-anchor-on-midpoint,
+`f5787a8` `wheelGestureAnchorX` gesture lock. The lesson: R3WRK kept trying
+to *remove* the snap-to-selection framing because it felt wrong, when the
+real problem was that the framing wasn't cleanly centred and had competing
+bracket-grab / gesture-anchor logic around it. Porting Sieve's two-phase
+model wholesale, and making zoom-out its symmetric mirror, is what finally
+landed ("now it works great").
 
 ## Selection context menu + live Amplify/Stretch preview
 

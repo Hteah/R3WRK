@@ -195,26 +195,15 @@ void WaveformDisplay::zoomToFit()
     repaint();
 }
 
-// Keyboard zoom (⌘+/⌘-, see PluginEditor::keyPressed) -- routes through the exact same
-// zoomToward() the mouse wheel uses, so a keypress behaves like one wheel notch: hovering
-// near a selection edge pins and zooms into that edge specifically, left or right. Where it
-// differs from the wheel: there's no real pointer to speak of (you're using the keyboard
-// specifically to keep your hand off the mouse), so the "pointer" fed to zoomToward() is the
-// selection's own midpoint whenever there is one, not wherever the mouse incidentally sits.
-// zoomToward()'s existing framing step already centres on that midpoint the *first* time
-// (while the view is wider than the selection), but once you're zoomed in tighter than it,
-// its normal pointer-anchored zoom takes over -- with the real mouse position that'd usually
-// be fine (you're pointing at something meaningful), but for a keyboard press it would just
-// pin whatever arbitrary spot the mouse happens to be, drifting the view away from the
-// selection with every further press. Anchoring on the midpoint throughout keeps every
-// keyboard zoom level centred on the selection, matching Sieve's editor. No selection ->
-// falls back to the actual mouse position, same as before. The factor is gentler than a
-// wheel notch can be (that one scales with how hard/fast the user scrolls, up to +/-2x) --
-// fixed, modest steps here so repeated presses zoom in comfortably small increments. Kept as
-// an exact inverse pair (0.9 and 1/0.9) so zooming in then out lands back on the same span.
+// Keyboard zoom (⌘+/⌘-, see PluginEditor::keyPressed). Anchored at the centre of the view,
+// matching Sieve's editor: with a selection active, zoomToward()'s Phase 1 ignores the anchor
+// and frames the selection centred anyway, so ⌘+ walks you into the selection hands-free;
+// with no selection it just zooms about the middle. The step is a gentle inverse pair (0.9,
+// 1/0.9) -- much smaller than a hard/fast wheel notch -- so repeated presses zoom in
+// comfortably small increments and in-then-out lands back on the same span.
 static constexpr double keyboardZoomStep = 0.9;
-void WaveformDisplay::zoomIn()  { zoomToward(keyboardZoomStep,       keyboardZoomAnchorX()); }
-void WaveformDisplay::zoomOut() { zoomToward(1.0 / keyboardZoomStep, keyboardZoomAnchorX()); }
+void WaveformDisplay::zoomIn()  { zoomToward(keyboardZoomStep,       (float) getWidth() * 0.5f); }
+void WaveformDisplay::zoomOut() { zoomToward(1.0 / keyboardZoomStep, (float) getWidth() * 0.5f); }
 
 void WaveformDisplay::keyboardScroll(int dir, bool bigStep)
 {
@@ -267,46 +256,48 @@ void WaveformDisplay::keyboardScroll(int dir, bool bigStep)
     }
 }
 
-float WaveformDisplay::currentMouseX() const
-{
-    return juce::jlimit(0.0f, (float) juce::jmax(1, getWidth()), (float) getMouseXYRelative().x);
-}
-
-float WaveformDisplay::keyboardZoomAnchorX() const
-{
-    if (document.hasSelection())
-        return sampleToX((document.getSelectionStart() + document.getSelectionEnd()) / 2);
-    return currentMouseX();
-}
-
-// Sieve-style editor zoom: `spanFactor` multiplies the visible span (<1 = zoom in).
-//   - zooming in, pointer near a selection bracket -> pin that bracket and zoom into it (no
-//     span limit), so the edge you're pointing at becomes the focus;
-//   - zooming in elsewhere, selection still narrower than the view -> frame the whole
-//     selection so the wheel pulls you into it;
-//   - zooming out with a selection -> reveal whichever side of it the pointer is on, so you
-//     can deliberately walk back out to either side just by choosing where to point;
-//   - otherwise -> keep the sample under the pointer fixed.
+// Sieve-style editor zoom -- ported from Sieve's EditorWaveformView.zoom() so it feels the
+// same. `spanFactor` multiplies the visible span (<1 = zoom in, >1 = zoom out).
+//
+// Zooming IN with a selection has two phases:
+//   Phase 1 -- the view is still wider than the selection: ignore the pointer, frame the
+//     selection centred, and let each notch tighten the view toward it (never past 1.2x the
+//     selection's width). This is the "it locks onto my selection and pulls me in" feel.
+//   Phase 2 -- the view is now inside the selection: zoom toward the pointer, keeping the
+//     sample under it fixed; but if the pointer is hugging one side and that selection
+//     bracket has scrolled off that edge, anchor on the bracket so it comes back into view.
+// Zooming OUT, and zooming with no selection: plain pointer-anchored zoom -- the sample
+// under the pointer stays put. (Sieve does nothing special for zoom-out; earlier R3WRK
+// builds pinned a selection edge here, which is what made "zoom out always drifts to one
+// side" -- removed.)
 void WaveformDisplay::zoomToward(double spanFactor, float pointerX)
 {
     const int64_t total = document.getNumSamples();
     if (total <= 0)
         return;
 
-    spanFactor = juce::jlimit(0.5, 2.0, spanFactor);
-    const int64_t curLen = juce::jmax((int64_t) 1, viewEnd - viewStart);
-    const int64_t newLen = (int64_t) juce::jlimit(16.0, (double) maxViewSpan(), (double) curLen * spanFactor);
-    const double timeScale = juce::jmax(0.0001, document.getTimeScale());
+    spanFactor = juce::jlimit(0.2, 5.0, spanFactor);
 
-    // anchorFrac is a fraction of the pixel width; convert it to a raw-sample offset via
-    // the same timeScale-aware density xToSample()/sampleToX() use, so the anchor sample
-    // stays pinned under the pointer even when the waveform is visually stretched.
+    const int64_t maxSpan   = maxViewSpan();
+    const int64_t curLen    = juce::jmax((int64_t) 1, viewEnd - viewStart);
+    const double  timeScale = juce::jmax(0.0001, document.getTimeScale());
+    const double  width     = (double) juce::jmax(1, getWidth());
+    constexpr int64_t minSpan = 16;
+
+    int64_t newLen = juce::jlimit(minSpan, maxSpan,
+                                  (int64_t) std::llround((double) curLen * spanFactor));
+
+    // Commit a view of `newLen` scaled samples with `anchorSample` (a raw sample) pinned
+    // under `anchorFrac` of the pixel width. The raw-samples-per-pixel density divides by
+    // timeScale, same as xToSample()/sampleToX(), so the anchor holds even when the
+    // Speed/Pitch/Stretch knobs have the waveform visually stretched.
     auto applyView = [&](int64_t anchorSample, double anchorFrac)
     {
-        int64_t newStart = anchorSample - (int64_t) (anchorFrac * (double) newLen / timeScale);
-        newStart = juce::jlimit((int64_t) 0, juce::jmax((int64_t) 0, maxViewSpan() - newLen), newStart);
+        int64_t newStart = anchorSample
+                         - (int64_t) std::llround(anchorFrac * (double) newLen / timeScale);
+        newStart = juce::jlimit((int64_t) 0, juce::jmax((int64_t) 0, maxSpan - newLen), newStart);
         viewStart = newStart;
-        viewEnd = newStart + newLen;
+        viewEnd   = newStart + newLen;
         rebuildWaveformPath();
         repaint();
     };
@@ -314,63 +305,62 @@ void WaveformDisplay::zoomToward(double spanFactor, float pointerX)
     if (document.hasSelection())
     {
         const int64_t selStart = document.getSelectionStart();
-        const int64_t selEnd = document.getSelectionEnd();
+        const int64_t selEnd   = document.getSelectionEnd();
+        const int64_t selLen   = juce::jmax((int64_t) 1, selEnd - selStart);
+        const int64_t selMid   = (selStart + selEnd) / 2;
 
-        // Zooming in near a bracket: lock onto that edge and zoom into it, keeping it
-        // comfortably in view (nudged off the very edges of the component). No
-        // selection-span clamp here, so the wheel can take you right down onto the sample.
-        // Gated to zoom-*in* only -- this used to also fire on zoom-out, which is where
-        // "zooming out always drifts back to the left edge no matter where the pointer is"
-        // came from: bracket-grab pins whichever edge is within bracketGrabPx of the
-        // pointer at a fraction *derived from that same on-screen position*, clamped to at
-        // least 0.15 -- so once a zoom-in had you hugging the left bracket, continuing to
-        // scroll (zooming out now, mouse not having moved) kept re-triggering the same
-        // "near the left bracket" case and re-pinning it near the left of the screen again,
-        // regardless of intent. Zoom-out has its own, deliberate handling below instead.
-        if (spanFactor < 1.0)
+        // Raw samples visible across the width right now (curLen is a scaled span).
+        const int64_t visibleRawNow = (int64_t) ((double) curLen / timeScale);
+
+        if (spanFactor < 1.0)   // ---- zooming IN ----
         {
-            const float sx = sampleToX(selStart);
-            const float ex = sampleToX(selEnd);
-            const float dStart = std::abs(pointerX - sx);
-            const float dEnd   = std::abs(pointerX - ex);
-            constexpr float bracketGrabPx = 12.0f;
-
-            if (juce::jmin(dStart, dEnd) <= bracketGrabPx)
+            if (visibleRawNow > selLen)
             {
-                const int64_t edge = (dStart <= dEnd) ? selStart : selEnd;
-                const double frac = juce::jlimit(0.15, 0.85,
-                                                 (double) pointerX / (double) juce::jmax(1, getWidth()));
-                applyView(edge, frac);
+                // Phase 1: frame the selection, centred, tightening toward 1.2x its width.
+                const int64_t framedRaw = juce::jmax(minSpan, selLen * 6 / 5);
+                newLen = juce::jlimit(minSpan, maxSpan,
+                                      juce::jmin(newLen,
+                                                 (int64_t) std::llround((double) framedRaw * timeScale)));
+                applyView(selMid, 0.5);
                 return;
             }
-            // Not near an edge: no special selection handling here any more -- falls
-            // through to the plain pointer-anchored zoom at the bottom of the function,
-            // same as zooming anywhere else. There used to be a "frame the whole selection"
-            // step here (jump straight to a view sized to fit it, the moment the current
-            // view was wider than the selection), but that condition was true for nearly
-            // the *entire* zoomed-out range for a small selection in a longer file, not just
-            // the last step before naturally reaching that size -- so the very first zoom-in
-            // tick from anywhere zoomed out would jump straight to "just the selection"
-            // instead of zooming in gradually. The plain pointer-anchored zoom already tracks
-            // the pointer correctly whether it's inside the selection or not (see xToSample()
-            // below), which is all "zoom toward the selection" ever really needed.
+
+            // Phase 2: zoom toward the pointer inside the selection, pulling an off-screen
+            // bracket back into view when the pointer hugs that side.
+            const double     frac  = juce::jlimit(0.0, 1.0, (double) pointerX / width);
+            constexpr double edge  = 0.22;
+            const int64_t    leftRaw  = xToSample(0.0f);
+            const int64_t    rightRaw = xToSample((float) width);
+
+            int64_t anchorSample;
+            if (frac <= edge && selStart < leftRaw)
+                anchorSample = selStart;
+            else if (frac >= 1.0 - edge && selEnd > rightRaw)
+                anchorSample = selEnd;
+            else
+                anchorSample = xToSample(pointerX);
+
+            applyView(anchorSample, frac);
+            return;
         }
-        else if (selEnd > selStart)
+
+        // ---- zooming OUT ----
+        // Mirror of Phase 1: while the view is still framed roughly on the selection, back
+        // away keeping it centred, so a zoom-out re-frames the selection instead of drifting
+        // off toward whichever side the pointer happened to sit on (which, compounded over a
+        // trackpad's burst of wheel events, was throwing the view into a huge lopsided
+        // zoom-out). Only once the view is several times wider than the selection -- you're
+        // clearly looking at broader context now -- does it release to free pointer-anchored
+        // zoom-out.
+        constexpr int64_t stickySelectionSpans = 3;
+        if (visibleRawNow < selLen * stickySelectionSpans)
         {
-            // Zooming out: reveal whichever side of the selection the pointer is on, rather
-            // than leaving it to chance which side ends up in view -- pin the near selection
-            // edge at a fixed, comfortable fraction of the width (not derived from the
-            // pointer's exact position, so it can't degenerate into hugging one edge the way
-            // the old shared bracket-grab logic did) so repeated zoom-out steps keep opening
-            // up that same side: pointer on the left half opens up what's before the
-            // selection, right half opens up what's after.
-            const bool pointerOnLeft = pointerX < (float) juce::jmax(1, getWidth()) * 0.5f;
-            applyView(pointerOnLeft ? selStart : selEnd, pointerOnLeft ? 0.7 : 0.3);
+            applyView(selMid, 0.5);
             return;
         }
     }
 
-    const double frac = juce::jlimit(0.0, 1.0, (double) pointerX / (double) juce::jmax(1, getWidth()));
+    const double frac = juce::jlimit(0.0, 1.0, (double) pointerX / width);
     applyView(xToSample(pointerX), frac);
 }
 
@@ -1292,20 +1282,13 @@ void WaveformDisplay::mouseWheelMove(const juce::MouseEvent& e, const juce::Mous
         return;
     }
 
-    // Lock the zoom anchor to wherever this gesture started, not the live pointer x on every
-    // notch -- see the member comment on wheelGestureAnchorX for why.
-    const uint32_t now = juce::Time::getMillisecondCounter();
-    if (now - lastWheelEventMs > wheelGestureGapMs)
-        wheelGestureAnchorX = (float) e.x;
-    lastWheelEventMs = now;
-
-    // dy>0 (wheel up) => zoom in. Was jlimit(0.5, 2.0, exp(-dy*1.4)) -- a single wheel event
-    // could as much as halve or double the view, which on a trackpad's usual burst of
-    // events per swipe added up to "jumps quickly to a very small bit" long before the
-    // gesture felt finished. Both the per-event ceiling and the dy sensitivity are gentler
-    // now (0.8/1.25 is an exact inverse pair, same idea as the keyboard zoom step).
+    // dy>0 (wheel up) => zoom in. Gentle per-notch factor (0.8/1.25, an exact inverse pair,
+    // same idea as the keyboard zoom step) so a trackpad's burst of events per swipe doesn't
+    // lurch the view. The anchor is the live pointer x, read fresh on every notch -- Sieve's
+    // editor does the same; zoomToward()'s Phase 1 selection-framing is what keeps a
+    // zoom-in steady on the selection, so there's no gesture anchor to freeze here.
     const double factor = juce::jlimit(0.8, 1.25, std::exp(-dy * 0.6));
-    zoomToward(factor, wheelGestureAnchorX);
+    zoomToward(factor, (float) e.x);
 }
 
 void WaveformDisplay::changeListenerCallback(juce::ChangeBroadcaster*)
