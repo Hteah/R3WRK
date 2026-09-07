@@ -496,8 +496,26 @@ int main()
                   "notch at 1 kHz cuts a 1 kHz tone");
         }
 
-        // renderWithPlaybackKnobs applies the filter: LP at 500 Hz on a 200+8000 Hz mix
-        // drops the level (the 8 kHz half is removed); Off is a passthrough.
+        // Octatrack-style Base/Width MultiModeFilter: Base 0 + Width 1 is a true passthrough;
+        // Base 0 + narrow Width is a low-pass (kills the 8 kHz tone); Base up + Width 1 is a
+        // high-pass (kills the 200 Hz tone).
+        auto runMMF = [&](juce::AudioBuffer<float> buf, double base01, double width01, double res01)
+        {
+            r3wrk::MultiModeFilter mmf; mmf.setParams(base01, width01, res01, sr);
+            mmf.processBlock(buf.getWritePointer(0), buf.getNumSamples());
+            return buf;
+        };
+        check(! r3wrk::filterEngaged(0.0, 1.0), "Base 0 + Width 1 reads as not engaged");
+        checkNear(rms(runMMF(makeSineBuffer(1, n, sr, 1000.0, 0.5f), 0.0, 1.0, 0.0), 0),
+                  rms(makeSineBuffer(1, n, sr, 1000.0, 0.5f), 0), 0.01,
+                  "Base 0 + Width 1 passes a 1 kHz tone untouched");
+        check(rms(runMMF(tone8k,  0.0, r3wrk::filterHzToPos(500.0),  0.2), 0) < rms(tone8k, 0)  * 0.2,
+              "Base 0 + Width ~500 Hz (low-pass) crushes an 8 kHz tone");
+        check(rms(runMMF(tone200, r3wrk::filterHzToPos(3000.0), 1.0, 0.2), 0) < rms(tone200, 0) * 0.2,
+              "Base ~3 kHz + Width 1 (high-pass) crushes a 200 Hz tone");
+
+        // renderWithPlaybackKnobs applies the filter: a low-pass at ~500 Hz on a 200+8000 Hz
+        // mix drops the level (the 8 kHz half is removed); wide open is a passthrough.
         juce::AudioBuffer<float> mix(1, n);
         for (int i = 0; i < n; ++i)
             mix.setSample(0, i, tone200.getSample(0, i) + tone8k.getSample(0, i));
@@ -505,17 +523,17 @@ int main()
         AudioDocument fdoc;
         setDocumentContent(fdoc, juce::AudioBuffer<float>(mix), sr);
 
-        check(! fdoc.playbackKnobsEngaged(), "filter off -> knobs disengaged");
+        check(! fdoc.playbackKnobsEngaged(), "filter open -> knobs disengaged");
         auto dry = fdoc.renderWithPlaybackKnobs(fdoc.getBuffer());
-        checkNear((double) dry.getNumSamples(), (double) n, 1.0, "filter off -> render is a passthrough (length)");
+        checkNear((double) dry.getNumSamples(), (double) n, 1.0, "filter open -> render is a passthrough (length)");
 
-        fdoc.filterMode.store(r3wrk::filterLP);
-        fdoc.filterCutoffHz.store(500.0);
+        fdoc.filterBase.store(0.0);
+        fdoc.filterWidth.store(r3wrk::filterHzToPos(500.0));
         check(fdoc.playbackKnobsEngaged(), "filter on -> playbackKnobsEngaged() true even with stretch centred");
         auto filt = fdoc.renderWithPlaybackKnobs(fdoc.getBuffer());
         check((int64_t) filt.getNumSamples() == n, "filter render keeps the length");
         check(rms(filt, 0) < rms(fdoc.getBuffer(), 0) * 0.85,
-              "LP at 500 Hz measurably lowers the 200+8000 Hz mix");
+              "low-pass at ~500 Hz measurably lowers the 200+8000 Hz mix");
 
         // Gain knob: 0 dB is a passthrough; -6 dB bakes in as ~half the level.
         AudioDocument gdoc;

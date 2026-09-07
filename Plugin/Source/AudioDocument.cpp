@@ -77,7 +77,7 @@ void AudioDocument::newEmptyDocument(int numChannels, double sr)
     // carried over -- visually and audibly -- into the next file loaded into the same
     // instance.)
     playbackSpeed = 1.0; playbackPitch = 0.0; playbackStretch = 1.0;
-    filterMode = 0; filterCutoffHz = 1000.0; filterResonance = 0.0; playbackGainDb = 0.0;
+    filterBase = 0.0; filterWidth = 1.0; filterResonance = 0.0; playbackGainDb = 0.0;
     previewActive = false; previewGainLinear = 1.0f; previewStretchRatio = 1.0;
     channelFocus = ChannelFocus::stereo;
     sliceMarkers.clear();
@@ -128,7 +128,7 @@ bool AudioDocument::loadFromFile(const juce::File& file, double resampleToRate)
     loopEnd = getNumSamples();
     loopEnabled = false;
     playbackSpeed = 1.0; playbackPitch = 0.0; playbackStretch = 1.0;   // see newEmptyDocument()
-    filterMode = 0; filterCutoffHz = 1000.0; filterResonance = 0.0; playbackGainDb = 0.0;
+    filterBase = 0.0; filterWidth = 1.0; filterResonance = 0.0; playbackGainDb = 0.0;
     previewActive = false; previewGainLinear = 1.0f; previewStretchRatio = 1.0;
     channelFocus = ChannelFocus::stereo;
     sliceMarkers.clear();
@@ -152,7 +152,8 @@ bool AudioDocument::timePitchKnobsEngaged() const
 bool AudioDocument::playbackKnobsEngaged() const
 {
     return timePitchKnobsEngaged()
-        || filterMode.load(std::memory_order_relaxed) != 0
+        || r3wrk::filterEngaged(filterBase.load(std::memory_order_relaxed),
+                                filterWidth.load(std::memory_order_relaxed))
         || std::abs(playbackGainDb.load(std::memory_order_relaxed)) > 1.0e-3;
 }
 
@@ -183,17 +184,18 @@ juce::AudioBuffer<float> AudioDocument::renderWithPlaybackKnobs(const juce::Audi
         // else: engine failure -- keep the un-stretched audio rather than nothing
     }
 
-    // 2. Filter -- the same biquad the real-time path uses, run over the stretched buffer.
-    const int fmode = filterMode.load(std::memory_order_relaxed);
-    if (fmode != 0 && out.getNumSamples() > 0)
+    // 2. Filter -- the same Octatrack-style Base/Width filter the real-time path uses, run
+    //    over the stretched buffer.
+    const double fBase  = filterBase.load(std::memory_order_relaxed);
+    const double fWidth = filterWidth.load(std::memory_order_relaxed);
+    if (r3wrk::filterEngaged(fBase, fWidth) && out.getNumSamples() > 0)
     {
-        const double fc = juce::jlimit(kFilterMinHz, kFilterMaxHz, filterCutoffHz.load(std::memory_order_relaxed));
-        const double q  = r3wrk::filterResonanceToQ(filterResonance.load(std::memory_order_relaxed));
+        const double fRes = filterResonance.load(std::memory_order_relaxed);
         for (int ch = 0; ch < out.getNumChannels(); ++ch)
         {
-            r3wrk::Biquad bq;
-            bq.setCoeffs(fmode, fc, q, sampleRate);
-            bq.processBlock(out.getWritePointer(ch), out.getNumSamples());
+            r3wrk::MultiModeFilter mmf;
+            mmf.setParams(fBase, fWidth, fRes, sampleRate);
+            mmf.processBlock(out.getWritePointer(ch), out.getNumSamples());
         }
     }
 

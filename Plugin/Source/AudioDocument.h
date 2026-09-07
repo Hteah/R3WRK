@@ -247,14 +247,19 @@ public:
     std::atomic<double> playbackPitch   { 0.0 };
     std::atomic<double> playbackStretch { 1.0 };
 
-    // Multi-mode filter on the playback stream (after the stretcher). Also non-destructive and
-    // baked into Save/Export by renderWithPlaybackKnobs. See BiquadFilter.h.
-    //   filterMode      : 0 off, 1 low-pass, 2 high-pass, 3 band-pass, 4 notch (KnobRow's
-    //                     stepped "Filter" knob).
-    //   filterCutoffHz  : corner frequency, 20..20000 Hz ("Cutoff" knob, log-skewed).
-    //   filterResonance : 0..1, mapped to Q by r3wrk::filterResonanceToQ ("Res" knob).
-    std::atomic<int>    filterMode      { 0 };
-    std::atomic<double> filterCutoffHz  { 1000.0 };
+    // Octatrack-style Base/Width multimode filter on the playback stream (after the stretcher).
+    // Non-destructive; baked into Save/Export by renderWithPlaybackKnobs. See BiquadFilter.h
+    // (r3wrk::MultiModeFilter): a 2-pole high-pass at Base, a 2-pole low-pass at Base+Width,
+    // Q on both -- you dial the two edges of the passband instead of picking a mode.
+    //   filterBase      : 0..1, low edge (high-pass cutoff), log-mapped 20 Hz..20 kHz.
+    //                     0 = no high-pass. ("Base" knob.)
+    //   filterWidth     : 0..1, passband width above Base -> high edge (low-pass cutoff).
+    //                     1 = no low-pass. ("Width" knob.)
+    //   filterResonance : 0..1, mapped to Q at both edges by r3wrk::filterResonanceToQ.
+    //                     ("Q" knob.)
+    // Base 0 + Width 1 = wide open (no effect); that's the default / double-click state.
+    std::atomic<double> filterBase      { 0.0 };
+    std::atomic<double> filterWidth     { 1.0 };
     std::atomic<double> filterResonance { 0.0 };
 
     // Output "Gain" knob (Standalone only -- KnobRow adds the knob just in that build; the
@@ -289,8 +294,8 @@ public:
     // not the knob positions:
     //   time/pitch/stretch  -- the OFFLINE stretch engine, same mapping the real-time path
     //                          uses: timeRatio = stretch/speed, semitones = 12*log2(speed)+pitch
-    //   filter              -- the same r3wrk::Biquad the real-time path uses, run over the
-    //                          (already stretched) buffer
+    //   filter              -- the same r3wrk::MultiModeFilter the real-time path uses, run
+    //                          over the (already stretched) buffer
     // Returns a plain copy of `src` when every knob is at identity, or if the stretch engine
     // fails. Used by Save As / auto-save / Export Selection / slice export.
     juce::AudioBuffer<float> renderWithPlaybackKnobs(const juce::AudioBuffer<float>& src) const;

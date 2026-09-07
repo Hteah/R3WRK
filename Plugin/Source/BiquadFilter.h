@@ -3,24 +3,56 @@
 #include <cmath>
 
 /**
-    A tiny hand-rolled RBJ biquad (transposed direct-form II) for the knob-row multi-mode
-    filter. Deliberately NOT juce::dsp -- AudioDocument.cpp bakes the same filter into
-    Save/Export and is compiled into the headless smoke-test target, which doesn't link
-    juce_dsp. So the exact same coefficient math is shared by the real-time playback path
-    (PluginProcessor) and the offline bake (AudioDocument::renderWithPlaybackKnobs).
+    A tiny hand-rolled RBJ biquad (transposed direct-form II), plus r3wrk::MultiModeFilter --
+    the Octatrack-style Base/Width multimode filter built from two of them. Deliberately NOT
+    juce::dsp: AudioDocument.cpp bakes the same filter into Save/Export and is compiled into
+    the headless smoke-test target, which doesn't link juce_dsp. So the exact same math is
+    shared by the real-time playback path (PluginProcessor) and the offline bake
+    (AudioDocument::renderWithPlaybackKnobs).
 
-    Modes match AudioDocument::filterMode: 0 = off, 1 = low-pass, 2 = high-pass,
-    3 = band-pass (constant-skirt, ~0 dB peak), 4 = notch. 12 dB/oct.
+    Biquad modes: 0 = off, 1 = low-pass, 2 = high-pass, 3 = band-pass (constant-skirt,
+    ~0 dB peak), 4 = notch. 12 dB/oct.
 */
 namespace r3wrk
 {
     enum FilterMode { filterOff = 0, filterLP = 1, filterHP = 2, filterBP = 3, filterNotch = 4 };
 
-    // The Res knob (0..1) -> filter Q. Exponential so resonance gets dramatic near the top:
-    // 0 -> 0.5 (gentle), 0.5 -> ~2.4, 1.0 -> 12.
+    // The Q knob (0..1) -> filter Q, per edge. Exponential so resonance gets dramatic near
+    // the top: 0 -> 0.5 (gentle), 0.5 -> ~2.4, 1.0 -> 12.
     inline double filterResonanceToQ (double res01)
     {
         return 0.5 * std::pow (24.0, juce::jlimit (0.0, 1.0, res01));
+    }
+
+    // Filter edge position (0..1) <-> frequency (20 Hz .. 20 kHz), logarithmic. Both the
+    // Base knob's readout and the old-state migration use these.
+    inline double filterPosToHz (double pos01)
+    {
+        return 20.0 * std::pow (1000.0, juce::jlimit (0.0, 1.0, pos01));
+    }
+
+    inline double filterHzToPos (double hz)
+    {
+        return juce::jlimit (0.0, 1.0, std::log (juce::jmax (20.0, hz) / 20.0) / std::log (1000.0));
+    }
+
+    // The two edge frequencies for a Base/Width pair: Base is the low edge (high-pass),
+    // Base+Width the high edge (low-pass), clamped so Width past the top just pins the
+    // low-pass wide open.
+    inline void filterEdges (double base01, double width01, double& fLowEdge, double& fHighEdge)
+    {
+        base01  = juce::jlimit (0.0, 1.0, base01);
+        width01 = juce::jlimit (0.0, 1.0, width01);
+        fLowEdge  = filterPosToHz (base01);
+        fHighEdge = filterPosToHz (juce::jmin (1.0, base01 + width01));
+    }
+
+    // "Engaged" == at least one edge is doing something audible. Base ~0 => no high-pass;
+    // Base+Width ~1 => no low-pass. Neither => bypass, and callers skip the filter (and don't
+    // count it as a playback knob that forces the slow RubberBand / offline render path).
+    inline bool filterEngaged (double base01, double width01)
+    {
+        return base01 > 0.004 || (base01 + width01) < 0.996;
     }
 
     struct Biquad
@@ -83,6 +115,67 @@ namespace r3wrk
             z1 = b1 * xn - a1 * y + z2;
             z2 = b2 * xn - a2 * y;
             return (float) y;
+        }
+
+        void processBlock (float* data, int numSamples) noexcept
+        {
+            for (int i = 0; i < numSamples; ++i)
+                data[i] = processSample (data[i]);
+        }
+    };
+
+    /**
+        The Octatrack-style multimode filter: a 2-pole high-pass (the Base / low edge) and a
+        2-pole low-pass (the Base+Width / high edge) in series, resonance (Q) on both. You dial
+        the two edges of the passband directly instead of picking a mode:
+
+            Base 0    + Width 1    -> both edges bypassed, wide open (no effect)
+            Base 0    + Width mid  -> low-pass
+            Base mid  + Width 1    -> high-pass
+            Base mid  + Width small-> resonant band-pass with a definable gap
+
+        Each edge stage bypasses itself when it isn't doing anything, so an "open" filter is a
+        true passthrough. A narrow, resonant band stacks two peaks and can get very loud -- a
+        mild width/Q-dependent output trim keeps that musical rather than explosive (stands in
+        for the Octatrack's DIST/headroom control, not ported here).
+    */
+    struct MultiModeFilter
+    {
+        Biquad hp, lp;
+        bool  hpOn = false, lpOn = false;
+        float outTrim = 1.0f;
+
+        void reset() noexcept { hp.reset(); lp.reset(); }
+
+        void setParams (double base01, double width01, double res01, double fs) noexcept
+        {
+            base01  = juce::jlimit (0.0, 1.0, base01);
+            width01 = juce::jlimit (0.0, 1.0, width01);
+            res01   = juce::jlimit (0.0, 1.0, res01);
+
+            double fLow, fHigh;
+            filterEdges (base01, width01, fLow, fHigh);
+            const double q = filterResonanceToQ (res01);
+
+            hpOn = base01 > 0.004;
+            lpOn = (base01 + width01) < 0.996 && fHigh < juce::jmax (1.0, fs) * 0.49;
+
+            if (hpOn)
+                hp.setCoeffs (filterHP, fLow, q, fs);
+            if (lpOn)
+                lp.setCoeffs (filterLP, juce::jmax (fHigh, fLow * 1.02), q, fs);
+
+            // Only trims when the band is genuinely narrow *and* resonant; unity by width 0.5.
+            outTrim = (hpOn && lpOn)
+                ? (float) (1.0 / (1.0 + 3.0 * res01 * juce::jmax (0.0, 0.5 - width01)))
+                : 1.0f;
+        }
+
+        inline float processSample (float x) noexcept
+        {
+            if (hpOn) x = hp.processSample (x);
+            if (lpOn) x = lp.processSample (x);
+            return x * outTrim;
         }
 
         void processBlock (float* data, int numSamples) noexcept

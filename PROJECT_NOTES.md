@@ -564,8 +564,8 @@ points, else the whole clip) straight from the buffer under a try-lock. The
   can detune without changing the playback rate.
 - **Stretch** — pure time-stretch, pitch preserved. 1.0 = off; up to 50× for
   "extreme stretch" (smeary by design). Skewed so 1× sits mid-travel.
-- **Filter / Cutoff / Res** — a multi-mode filter on the playback output (see
-  "Multi-mode filter" below).
+- **Base / Width / Q** — an Octatrack-style multimode filter on the playback
+  output (see "Base/Width filter" below).
 - **Gain** — *Standalone build only.* Output level in dB, `kMinGainDb`(−60)…
   `kMaxGainDb`(+12), **0 dB = unity / default volume** (double-click returns
   there), −60 reads "−∞ dB" and is a true mute. `AudioDocument::playbackGainDb`
@@ -596,42 +596,58 @@ once. The stored audio is never modified. The red playhead tracks the doc read
 cursor, so it runs slightly ahead of what you hear by the stretcher latency when
 the knobs are engaged (more so at high Stretch).
 
-## Multi-mode filter (Filter / Cutoff / Res knobs)
+## Base/Width filter (Base / Width / Q knobs)
 
-User: "add a multi mode filter to the knobs bar." A non-destructive playback
-filter, live on the knobs and baked into Save/Export the same way Speed/Pitch/
-Stretch are.
+User: "My favourite digital filter is on my Octatrack... use that design." The
+Octatrack multimode filter isn't cutoff + mode — it's a **BASE / WIDTH** filter:
+a high-pass and a low-pass in series whose *two edges* you dial directly. BASE is
+the low edge (HP cutoff); WIDTH is how far above it the high edge (LP cutoff)
+sits. BASE 0 + WIDTH max = wide open; BASE 0 + WIDTH low = low-pass; BASE up +
+WIDTH max = high-pass; BASE mid + WIDTH small = a resonant, variable-gap
+band-pass. (Not ported from the Octatrack SETUP page: the 12/24 dB slope switch
+and the DIST drive — "Base / Width / Q only" per the user.) Non-destructive, live
+on the knobs and baked into Save/Export like Speed/Pitch/Stretch.
 
-- **`Source/BiquadFilter.h`** (new, header-only, **not** `juce::dsp`): a
-  hand-rolled RBJ biquad (transposed DF-II) + `r3wrk::filterResonanceToQ()`
-  (`0.5·24^res` → Q 0.5…12). Header-only and juce_dsp-free on purpose —
-  `AudioDocument.cpp` bakes the same filter and is compiled into the headless
-  smoke-test target, which doesn't link juce_dsp. So the *identical* coefficient
-  math runs in the real-time path and the offline bake.
-- **`AudioDocument`**: `filterMode` (0 off / 1 LP / 2 HP / 3 BP / 4 notch),
-  `filterCutoffHz` (20–20000, `kFilterMinHz/MaxHz`), `filterResonance` (0–1) —
-  `std::atomic`, reset to off/1000/0 on load/new/clear. `playbackKnobsEngaged()`
-  is now `timePitchKnobsEngaged() || filterMode != 0`; `renderWithPlaybackKnobs`
-  was split so the RubberBand pass only runs when the time/pitch/stretch knobs
-  are off-centre, then the biquad runs over the (stretched) buffer per channel
-  when `filterMode != 0`.
-- **`PluginProcessor`**: `r3wrk::Biquad playbackFilter[2]` + a per-block-smoothed
-  `smoothedCutoff` (`SmoothedValue`, 30 ms) so a knob sweep doesn't zipper the
-  coefficients. `applyPlaybackFilter()` runs last in the playback chain (after
-  both the direct and stretched renders), resets the biquads on a fresh play pass
-  or a mode change, updates coefficients once per block. Scrub is left dry.
-- **`KnobRow`**: three knobs after Stretch — **Filter** (stepped 0–4, text
-  Off/LP/HP/BP/Notch), **Cutoff** (log-skewed at 1 kHz, "1.00 kHz" / "440 Hz"),
-  **Res** (0–100%). `resized()` now auto-fits knob width (46–78 px) so all 8 fit
-  at the minimum window size.
-- **State**: `kStateMagic` `'R3W5'`→`'R3W6'` (filter mode/cutoff/res) →`'R3W7'`
-  (adds `playbackGainDb`). `setStateInformation` still reads `'R3W6'` and `'R3W5'`
-  blobs (missing fields default off / 0 dB), so an existing persisted standalone
-  session survives each upgrade.
-- Smoke test: RBJ LP/HP/notch each crush an out-of-band / on-notch tone;
-  `renderWithPlaybackKnobs` with LP@500 measurably lowers a 200+8000 Hz mix and
-  keeps the length; filter-on flips `playbackKnobsEngaged()` with the stretch
-  centred.
+- **`Source/BiquadFilter.h`** (header-only, **not** `juce::dsp` — same reason as
+  before: `AudioDocument.cpp` bakes the filter and is in the juce_dsp-less smoke
+  test, so the *identical* math runs realtime and offline). Keeps the RBJ
+  `r3wrk::Biquad` + `filterResonanceToQ()` (`0.5·24^res` → Q 0.5…12). Adds:
+  `filterPosToHz`/`filterHzToPos` (edge position 0..1 ↔ 20 Hz–20 kHz, log),
+  `filterEdges(base,width)` → the two edge frequencies, `filterEngaged(base,width)`
+  (true unless BASE≈0 *and* BASE+WIDTH≈1), and **`r3wrk::MultiModeFilter`** — a
+  2-pole HP (Base) + 2-pole LP (Base+Width) in series, Q on both, each stage
+  self-bypassing at its extreme so "open" is a true passthrough. A narrow, resonant
+  band stacks two peaks and can get very loud, so `outTrim` pulls the output back
+  toward unity as `width→0` with `Q` up (stands in for the OT's DIST/headroom).
+- **`AudioDocument`**: `filterBase` (0..1, default 0), `filterWidth` (0..1,
+  default 1), `filterResonance` (0..1, default 0) — `std::atomic`, reset to
+  0/1/0 on load/new/clear. `playbackKnobsEngaged()` is now
+  `timePitchKnobsEngaged() || r3wrk::filterEngaged(base,width)`;
+  `renderWithPlaybackKnobs` runs a fresh `MultiModeFilter` per channel over the
+  (stretched) buffer when engaged.
+- **`PluginProcessor`**: `r3wrk::MultiModeFilter playbackFilter[2]` + per-block
+  `smoothedFilterBase` / `smoothedFilterWidth` (`SmoothedValue`, 30 ms, in the
+  0..1 edge space) so a sweep doesn't zipper. `applyPlaybackFilter()` runs last
+  in the playback chain, resets the biquads on a fresh play pass or when the
+  engaged/bypassed line is crossed, and — if the filter is switched on
+  mid-playback — seeds the smoothers to "open" so it eases in without a click.
+  Scrub is left dry.
+- **`KnobRow`**: three knobs after Stretch — **Base** (0..1, skewed for a log-Hz
+  feel, readout "440 Hz" / "1.00 kHz" via `filterPosToHz`, dbl-click 0 = no HP),
+  **Width** (0..1 %, dbl-click 1 = no LP / open), **Q** (0..1 %, dbl-click 0).
+  `resized()` still auto-fits knob width (46–78 px) for all 8.
+- **State**: `kStateMagic` `'R3W7'`→`'R3W8'` (filter is `filterBase` +
+  `filterWidth` + `filterResonance`, three doubles, replacing R3W7's
+  `int filterMode` + `filterCutoffHz` + `filterResonance`). `setStateInformation`
+  still reads `'R3W7'`/`'R3W6'`/`'R3W5'`: an old mode/cutoff filter is **migrated**
+  onto Base/Width (LP → Base 0 / Width at cutoff; HP → Base at cutoff / Width 1;
+  BP → a narrow band at cutoff; Off/Notch → open) and the old single-biquad
+  resonance is **dropped to 0** (it doesn't map onto the new two-edge Q).
+- Smoke test: `MultiModeFilter` — Base 0 + Width 1 is a true passthrough and
+  reads as not engaged; Base 0 + narrow Width (low-pass) crushes an 8 kHz tone;
+  Base up + Width 1 (high-pass) crushes a 200 Hz tone; `renderWithPlaybackKnobs`
+  with a ~500 Hz low-pass measurably lowers a 200+8000 Hz mix and keeps the
+  length; filter-on flips `playbackKnobsEngaged()` with the stretch centred.
 
 ## Saving / output folder
 
