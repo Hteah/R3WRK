@@ -291,14 +291,15 @@ void KnobRow::resized()
 
 void KnobRow::paint(juce::Graphics& g)
 {
-    // A small filled circle, centred in the gap before each of these knob indices, marking the
-    // section boundaries: time/pitch | filter | selection | output gain. Index 8 (Gain) only
-    // exists in the Standalone build.
+    // A small vertical run of three dots, centred in the gap before each of these knob
+    // indices, marking the section boundaries: time/pitch | filter | selection | output gain.
+    // Index 8 (Gain) only exists in the Standalone build.
     static constexpr int boundaryBefore[] = { 3 /*Base*/, 6 /*Start*/, 8 /*Gain*/ };
 
     const float cy = (float) getHeight() * 0.5f;
-    constexpr float r = 5.0f;
-    g.setColour(theme->palette().text.withAlpha(0.35f));
+    constexpr int   count = 3;
+    constexpr float radius = 1.5f, spacing = 5.0f;
+    g.setColour(theme->palette().text.withAlpha(0.4f));
 
     for (int idx : boundaryBefore)
     {
@@ -309,6 +310,8 @@ void KnobRow::paint(juce::Graphics& g)
         if (right.getX() <= left.getRight())
             continue;   // not laid out yet
         const float x = (float) (left.getRight() + right.getX()) * 0.5f;
-        g.fillEllipse(x - r, cy - r, r * 2.0f, r * 2.0f);
+        float y = cy - (count - 1) * spacing * 0.5f;
+        for (int i = 0; i < count; ++i, y += spacing)
+            g.fillEllipse(x - radius, y - radius, radius * 2.0f, radius * 2.0f);
     }
 }

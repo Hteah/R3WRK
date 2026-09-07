@@ -585,27 +585,30 @@ void EditorToolbar::paint(juce::Graphics& g)
     g.setColour(theme->palette().panelBg);
     g.fillRoundedRectangle(getLocalBounds().toFloat(), 10.0f);
 
-    // A small filled circle, centred in the (widened, see resized()) gap between two buttons,
-    // at each group boundary: [standalone] around the secondary recording group -- after
-    // Record/Auto-Record and before Reverse -- and, in every build, between the waveform tools
-    // (Slice) and the Tools menu. Matches the KnobRow section-divider mark.
-    g.setColour(theme->palette().screenText.withAlpha(0.4f));
-    auto dotBetween = [&](const juce::Component& left, const juce::Component& right)
+    // A small vertical run of three dots, centred in the (widened, see resized()) gap between
+    // two buttons, at each group boundary: [standalone] around the secondary recording group
+    // -- after Record/Auto-Record and before Reverse -- and, in every build, between the
+    // waveform tools (Slice) and the Tools menu. Matches the KnobRow section-divider mark.
+    g.setColour(theme->palette().screenText.withAlpha(0.45f));
+    auto dotsBetween = [&](const juce::Component& left, const juce::Component& right)
     {
         if (right.getX() <= left.getRight())
             return;   // not laid out yet
         const float x  = (left.getRight() + right.getX()) * 0.5f;
         const float cy = (float) getHeight() * 0.5f;
-        constexpr float r = 5.0f;
-        g.fillEllipse(x - r, cy - r, r * 2.0f, r * 2.0f);
+        constexpr int   count = 3;
+        constexpr float radius = 1.5f, spacing = 5.0f;
+        float y = cy - (count - 1) * spacing * 0.5f;
+        for (int i = 0; i < count; ++i, y += spacing)
+            g.fillEllipse(x - radius, y - radius, radius * 2.0f, radius * 2.0f);
     };
 
     if (standaloneApp)
     {
-        dotBetween(autoRecordButton, desktopRecButton);
-        dotBetween(captureOutButton, reverseButton);
+        dotsBetween(autoRecordButton, desktopRecButton);
+        dotsBetween(captureOutButton, reverseButton);
     }
-    dotBetween(sliceButton, toolsButton);
+    dotsBetween(sliceButton, toolsButton);
 }
 
 //==============================================================================
