@@ -53,7 +53,7 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
     {
         floatOnTopButton.setClickingTogglesState(true);
         floatOnTopButton.setWantsKeyboardFocus(false);
-        floatOnTopButton.setTooltip("Float on top -- keep this window above other apps");
+        floatOnTopButton.setTooltip("Float on top - keep this window above other apps");
         floatOnTopButton.setLookAndFeel(&floatButtonLnF);
         floatOnTopButton.onClick = [this] { applyFloatOnTop(floatOnTopButton.getToggleState()); };
         addAndMakeVisible(floatOnTopButton);
@@ -182,9 +182,9 @@ void R3WRKAudioProcessorEditor::resized()
         auto headerRow = area.removeFromTop(30);
         if (standaloneWindow)
         {
-            // Push-pin toggle at the far left, in line with the file name.
-            floatOnTopButton.setBounds(headerRow.removeFromLeft(26).reduced(1));
-            headerRow.removeFromLeft(6);
+            // Float-on-top toggle at the far right, in line with the file name.
+            floatOnTopButton.setBounds(headerRow.removeFromRight(26).reduced(1));
+            headerRow.removeFromRight(6);
         }
         header.setBounds(headerRow);
     }

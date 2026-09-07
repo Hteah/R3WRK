@@ -331,25 +331,46 @@ namespace
         g.fillEllipse (cx - r, screen.getCentreY() - r, r * 2.0f, r * 2.0f);
     }
 
-    // Float on top: a push-pin / thumbtack -- a round head near the top and a short tapered
-    // needle pointing down. Filled while the toggle is on (window kept above others).
-    void drawPinTopIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
+    // Float on top: a freehand of macOS's `pip.enter` glyph (the icon RCRDR uses) -- a rounded
+    // "window" outline, a small filled box tucked into its bottom-right corner, and a short
+    // diagonal arrow pointing down-right into that box. Accent-filled button while the toggle
+    // is on.
+    void drawFloatTopIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
     {
-        auto a = bounds.reduced (bounds.getHeight() * 0.28f);
-        const float cx     = a.getCentreX();
-        const float headR  = a.getWidth() * 0.30f;
-        const float headCy = a.getY() + headR + a.getHeight() * 0.04f;
+        // A centred landscape "window" rectangle (the icon box itself is near-square, so this
+        // gives it a proper window aspect regardless of the button shape).
+        const float iw = bounds.getWidth() * 0.72f;
+        const float ih = iw * 0.80f;
+        juce::Rectangle<float> win (bounds.getCentreX() - iw * 0.5f,
+                                    bounds.getCentreY() - ih * 0.5f, iw, ih);
+        const float stroke = juce::jmax (1.5f, ih * 0.13f);
 
         g.setColour (ink);
-        g.fillEllipse (cx - headR, headCy - headR, headR * 2.0f, headR * 2.0f);
+        g.drawRoundedRectangle (win.reduced (stroke * 0.5f), ih * 0.20f, stroke);
 
-        juce::Path needle;
-        const float ny0 = headCy + headR * 0.65f;
-        needle.startNewSubPath (cx - headR * 0.55f, ny0);
-        needle.lineTo (cx + headR * 0.55f, ny0);
-        needle.lineTo (cx, a.getBottom());
-        needle.closeSubPath();
-        g.fillPath (needle);
+        // Filled box tucked into the bottom-right corner.
+        const float bw = iw * 0.46f, bh = ih * 0.46f;
+        juce::Rectangle<float> box (win.getRight()  - bw - stroke * 0.6f,
+                                    win.getBottom() - bh - stroke * 0.6f, bw, bh);
+        g.fillRoundedRectangle (box, ih * 0.13f);
+
+        // Short diagonal arrow pointing down-right into the box's top-left corner.
+        const juce::Point<float> tip  (box.getX() - stroke * 0.2f, box.getY() - stroke * 0.2f);
+        const juce::Point<float> tail (win.getX() + iw * 0.30f,    win.getY() + ih * 0.32f);
+
+        juce::Path shaft;
+        shaft.startNewSubPath (tail);
+        shaft.lineTo (tip);
+        g.strokePath (shaft, juce::PathStrokeType (stroke, juce::PathStrokeType::curved,
+                                                   juce::PathStrokeType::rounded));
+
+        const float ah = ih * 0.30f;
+        juce::Path head;
+        head.startNewSubPath (tip.x - ah, tip.y);
+        head.lineTo (tip.x, tip.y);
+        head.lineTo (tip.x, tip.y - ah);
+        g.strokePath (head, juce::PathStrokeType (stroke, juce::PathStrokeType::curved,
+                                                  juce::PathStrokeType::rounded));
     }
 }
 
@@ -435,7 +456,7 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
         && text != iconPlayFromStart && text != iconTools && text != iconScrub
         && text != iconReverse && text != iconClear && text != iconAutoRecord
         && text != iconSlice && text != iconFollow && text != iconDesktopRec
-        && text != iconPinTop)
+        && text != iconFloatTop)
     {
         juce::LookAndFeel_V4::drawButtonText(g, button, isMouseOverButton, isButtonDown);
         return;
@@ -477,9 +498,9 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
         drawDesktopRecIcon(g, bounds, ink);
         return;
     }
-    if (text == iconPinTop)
+    if (text == iconFloatTop)
     {
-        drawPinTopIcon(g, bounds, ink);
+        drawFloatTopIcon(g, bounds, ink);
         return;
     }
     if (text == iconReverse)

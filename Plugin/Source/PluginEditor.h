@@ -64,10 +64,11 @@ private:
     juce::SharedResourcePointer<ThemeManager> theme;
     juce::SharedResourcePointer<OutputSettings> outputSettings;
 
-    // Standalone only: a push-pin toggle at the far left of the header row (in line with the
-    // file name) that keeps the window above other apps. Native NSWindow level, persisted.
+    // Standalone only: a pip.enter-style toggle at the far right of the header row (in line
+    // with the file name) that keeps the window above other apps. Native NSWindow level,
+    // persisted.
     R3WRKLookAndFeel floatButtonLnF;
-    juce::TextButton floatOnTopButton { R3WRKLookAndFeel::iconPinTop };
+    juce::TextButton floatOnTopButton { R3WRKLookAndFeel::iconFloatTop };
     bool floatStateApplied = false;
 
     HeaderBar header;

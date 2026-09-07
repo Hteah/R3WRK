@@ -1725,16 +1725,18 @@ double-click -- otherwise that loop eats the second click and `mouseDoubleClick`
 `PluginEditor::mouseDoubleClick` calls the helper when the press is in the top
 `kMacTrafficLightInset` band.
 
-**Follow-up -- "Float on top" push-pin (Standalone only).** User: "add the float on top button
-that we used in rcrdr and Sieve ... top left of the window, in line with the file name."
+**Follow-up -- "Float on top" toggle (Standalone only).** User: "add the float on top button
+that we used in rcrdr and Sieve ... in line with the file name" (first said top-left, then
+corrected to the **right** side; wants RCRDR's icon -- the `pip.enter` SF Symbol).
 `r3wrkSetWindowFloatOnTop(component, bool)` in `StandaloneWindowShape.mm` sets
 `nsWindow.level = onTop ? NSFloatingWindowLevel : NSNormalWindowLevel` (same as the other two
-apps). `PluginEditor` owns a toggling `floatOnTopButton` (`R3WRKLookAndFeel::iconPinTop` +
-`drawPinTopIcon` -- a thumbtack: round head + tapered needle), added only when
-`standaloneWindow`; `resized()` carves 26px off the left of the header row for it, so it sits
-in line with the file name (below the traffic lights). Outlined/chrome-ink off, accent fill
-on -- same idiom as the toolbar's Loop pill, but with `pal.text`/`windowBg` since the header
-row is on `windowBg`, not the dark band (`applyFloatButtonTheme()`, re-run on theme change).
+apps). `PluginEditor` owns a toggling `floatOnTopButton` (`R3WRKLookAndFeel::iconFloatTop` +
+`drawFloatTopIcon` -- a freehand of `pip.enter`: a landscape rounded-rect "window", a filled
+box in its bottom-right corner, a short ↘ arrow into that box), added only when
+`standaloneWindow`; `resized()` carves 26px off the **right** of the header row for it, in
+line with the file name (below the traffic lights). Outlined/chrome-ink off, accent fill on
+-- same idiom as the toolbar's Loop pill, but with `pal.text`/`windowBg` since the header row
+is on `windowBg`, not the dark band (`applyFloatButtonTheme()`, re-run on theme change).
 Persisted in `OutputSettings` (`floatOnTop` key); `maybeApplyPersistedFloatOnTop()` applies it
 once the window peer exists (called from both `parentHierarchyChanged()` and the first
 `resized()`, guarded by `floatStateApplied`).
