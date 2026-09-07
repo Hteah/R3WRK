@@ -1,5 +1,7 @@
 #include "AudioDocument.h"
+#include "TimeStretchEngine.h"
 #include <algorithm>
+#include <cmath>
 
 namespace
 {
@@ -132,6 +134,41 @@ bool AudioDocument::loadFromFile(const juce::File& file, double resampleToRate)
     return true;
 }
 
+bool AudioDocument::playbackKnobsEngaged() const
+{
+    const double speed   = playbackSpeed.load(std::memory_order_relaxed);
+    const double pitch   = playbackPitch.load(std::memory_order_relaxed);
+    const double stretch = playbackStretch.load(std::memory_order_relaxed);
+    return std::abs(speed - 1.0) > 1.0e-4
+        || std::abs(pitch)       > 1.0e-4
+        || std::abs(stretch - 1.0) > 1.0e-4;
+}
+
+juce::AudioBuffer<float> AudioDocument::renderWithPlaybackKnobs(const juce::AudioBuffer<float>& src) const
+{
+    juce::AudioBuffer<float> out;
+
+    if (src.getNumSamples() <= 0 || src.getNumChannels() <= 0 || ! playbackKnobsEngaged())
+    {
+        out.makeCopyOf(src);
+        return out;
+    }
+
+    const double speed   = juce::jlimit(kMinSpeed,   kMaxSpeed,   playbackSpeed.load(std::memory_order_relaxed));
+    const double pitch   = juce::jlimit(kMinPitch,   kMaxPitch,   playbackPitch.load(std::memory_order_relaxed));
+    const double stretch = juce::jlimit(kMinStretch, kMaxStretch, playbackStretch.load(std::memory_order_relaxed));
+
+    // Same mapping as PluginProcessor::renderPlaybackStretched -- tape speed compresses time
+    // and lifts pitch, the Pitch knob layers on extra semitones, Stretch dilates time only.
+    const double timeRatio = stretch / juce::jmax(1.0e-4, speed);
+    const double semitones = 12.0 * std::log2(juce::jmax(1.0e-4, speed)) + pitch;
+
+    out = TimeStretchEngine::process(src, sampleRate, timeRatio, semitones);
+    if (out.getNumSamples() <= 0)          // engine failure -> fall back to the dry audio
+        out.makeCopyOf(src);
+    return out;
+}
+
 bool AudioDocument::saveToFile(const juce::File& file) const
 {
     file.deleteFile();
@@ -139,15 +176,19 @@ bool AudioDocument::saveToFile(const juce::File& file) const
     if (stream == nullptr)
         return false;
 
+    // Bake the Speed/Pitch/Stretch knobs into the written audio (a no-op copy when they're
+    // centred), so the file is what you hear rather than the dry clip + separate knob state.
+    const juce::AudioBuffer<float> rendered = renderWithPlaybackKnobs(buffer);
+
     juce::WavAudioFormat wavFormat;
     auto writer = wavFormat.createWriterFor(stream, juce::AudioFormatWriterOptions{}
                                                         .withSampleRate(sampleRate)
-                                                        .withNumChannels(buffer.getNumChannels())
+                                                        .withNumChannels(rendered.getNumChannels())
                                                         .withBitsPerSample(24));
     if (writer == nullptr)
         return false;   // stream is left intact on failure; unique_ptr cleans it up
 
-    writer->writeFromAudioSampleBuffer(buffer, 0, buffer.getNumSamples());
+    writer->writeFromAudioSampleBuffer(rendered, 0, rendered.getNumSamples());
     return true;
 }
 

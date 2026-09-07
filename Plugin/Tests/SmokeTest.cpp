@@ -437,6 +437,46 @@ int main()
         tempFile.deleteFile();
     }
 
+    // --- Save bakes the Speed/Pitch/Stretch knobs into the written audio ----
+    {
+        std::cout << "-- save bakes the playback knobs into the file --" << std::endl;
+        AudioDocument doc;
+        setDocumentContent(doc, makeSineBuffer(2, (int) sr, sr, 440.0, 0.6f), sr);
+        const int64_t dryLen = doc.getNumSamples();
+
+        check(! doc.playbackKnobsEngaged(), "knobs read as disengaged at identity");
+        {
+            auto passthrough = doc.renderWithPlaybackKnobs(doc.getBuffer());
+            check((int64_t) passthrough.getNumSamples() == dryLen,
+                  "renderWithPlaybackKnobs is a no-op copy when the knobs are centred");
+        }
+
+        doc.playbackStretch.store(3.0);   // pure time-stretch, pitch preserved
+        check(doc.playbackKnobsEngaged(), "knobs read as engaged after turning Stretch up");
+
+        auto stretched = doc.renderWithPlaybackKnobs(doc.getBuffer());
+        checkNear((double) stretched.getNumSamples(), (double) dryLen * 3.0, (double) sr * 0.25,
+                  "3x Stretch renders ~3x as many samples");
+
+        auto tempFile = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                            .getChildFile("r3wrk_test_bake.wav");
+        tempFile.deleteFile();
+        check(doc.saveToFile(tempFile), "saveToFile wrote the baked file");
+
+        AudioDocument reloaded;
+        check(reloaded.loadFromFile(tempFile), "reloaded the baked file");
+        checkNear((double) reloaded.getNumSamples(), (double) dryLen * 3.0, (double) sr * 0.25,
+                  "the saved file is ~3x longer -- the Stretch knob is in the audio, not lost");
+
+        bool nonSilent = false;
+        for (int ch = 0; ch < reloaded.getNumChannels() && ! nonSilent; ++ch)
+            if (reloaded.getBuffer().getMagnitude(ch, 0, reloaded.getBuffer().getNumSamples()) > 0.05f)
+                nonSilent = true;
+        check(nonSilent, "the baked file holds real signal");
+
+        tempFile.deleteFile();
+    }
+
     std::cout << "===========================================" << std::endl;
     if (failures == 0)
         std::cout << "ALL CHECKS PASSED" << std::endl;

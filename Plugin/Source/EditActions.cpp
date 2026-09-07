@@ -235,7 +235,10 @@ bool exportSelection(const AudioDocument& doc, const juce::File& file)
     if (range.getLength() <= 0)
         return false;
 
-    return writeWav(file, extractRange(doc.getBuffer(), range.getStart(), range.getEnd()), doc.getSampleRate());
+    // Bake the Speed/Pitch/Stretch knobs into the exported region (no-op copy when centred),
+    // same as Save As -- the file is the sound, not the knob positions.
+    auto region = extractRange(doc.getBuffer(), range.getStart(), range.getEnd());
+    return writeWav(file, doc.renderWithPlaybackKnobs(region), doc.getSampleRate());
 }
 
 int sliceToFolder(const AudioDocument& doc, const juce::File& folder, const juce::String& baseName)

@@ -23,6 +23,11 @@ public:
     // If resampleToRate is > 0 and differs from the file's own rate, the audio is
     // resampled on load so it plays back at the correct pitch/speed in the host.
     bool loadFromFile(const juce::File& file, double resampleToRate = 0.0);
+
+    // Writes the stored audio to `file` as a 24-bit WAV. If the Speed/Pitch/Stretch knobs are
+    // off-centre, the audio is first rendered through them (renderWithPlaybackKnobs) so the
+    // file matches what you hear -- the knob settings are baked into the sound, not stored
+    // separately. The in-memory document and the knobs are left untouched.
     bool saveToFile(const juce::File& file) const;
 
     const juce::AudioBuffer<float>& getBuffer() const { return buffer; }
@@ -163,6 +168,18 @@ public:
         return playbackStretch.load(std::memory_order_relaxed)
              / juce::jmax(0.0001, playbackSpeed.load(std::memory_order_relaxed));
     }
+
+    // True when Speed/Pitch/Stretch are not all at their identity (centre) values.
+    bool playbackKnobsEngaged() const;
+
+    // Renders `src` through the current Speed/Pitch/Stretch knobs with the OFFLINE stretch
+    // engine, using the same tape/pitch/stretch mapping the real-time playback path uses:
+    //   timeRatio  = stretch / speed          (speed compresses time, stretch dilates it)
+    //   semitones  = 12*log2(speed) + pitch   (pitch rides the tape speed, plus the extra shift)
+    // Returns a plain copy of `src` when the knobs are all at identity, or if the engine
+    // fails. Used by the Save As / auto-save / Export Selection paths so a written file
+    // captures the sound, not the knob positions.
+    juce::AudioBuffer<float> renderWithPlaybackKnobs(const juce::AudioBuffer<float>& src) const;
 
     //==============================================================================
     // Live recording feedback, so the UI can show what's coming in before Stop.

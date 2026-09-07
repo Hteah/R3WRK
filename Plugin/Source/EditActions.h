@@ -36,7 +36,8 @@ namespace EditActions
                            const juce::String& actionName);
 
     // Writes the current effective range (the selection, or the whole clip if none) to `file`
-    // as a 24-bit WAV.
+    // as a 24-bit WAV, with the Speed/Pitch/Stretch knobs baked into the audio (see
+    // AudioDocument::renderWithPlaybackKnobs).
     bool exportSelection(const AudioDocument& doc, const juce::File& file);
 
     //==============================================================================

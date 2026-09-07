@@ -630,6 +630,27 @@ Feedback is a `HeaderBar::flashMessage()` — a ~3 s accent-coloured line in the
 readout area ("Saved …", "Exported …", "Output folder: …"), driven from
 `EditorToolbar` through its `onStatusMessage` callback.
 
+### Save bakes the Speed/Pitch/Stretch knobs into the file
+
+User: turned the Stretch knob all the way up, did Save As, and the file came out
+unstretched — "make it so when I save ... those changes are saved in the file.
+The sound, not the knob placements." The knobs were non-destructive by design
+(real-time RubberBand on playback only; stored audio untouched), so every write
+path emitted the dry clip. Now `AudioDocument::renderWithPlaybackKnobs(src)` runs
+`src` through the **offline** `TimeStretchEngine` with the same mapping the
+real-time path uses — `timeRatio = stretch/speed`, `semitones = 12·log2(speed) +
+pitch` — and returns a plain copy when the knobs are all centred (`playbackKnobs
+Engaged()`) or if the engine fails. `AudioDocument::saveToFile()` renders through
+it before writing (so **Save As** and **stop-recording auto-save** bake it in),
+and `EditActions::exportSelection()` renders the extracted region the same way.
+The in-memory document and the knob positions are left untouched — this only
+changes what lands in the file. Synchronous on the message thread, like the
+offline Stretch/Pitch "Apply"; a big ratio on a long clip makes the save take a
+few seconds. **Not** applied to the slice / Octatrack-chain exports — those write
+raw-sample slice regions and would need the markers rescaled by `timeScale`
+first; left dry for now. Smoke test covers the round trip (3× Stretch → saved
+file is ~3× longer and non-silent).
+
 ## Custom look (R3WRKLookAndFeel)
 
 One shared `R3WRKLookAndFeel` (per-owner instance, stateless beyond its own
