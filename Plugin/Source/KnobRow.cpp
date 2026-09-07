@@ -261,13 +261,16 @@ void KnobRow::timerCallback()
 void KnobRow::resized()
 {
     auto r = getLocalBounds().reduced(4, 2);
-    const int gap = 6;
+    const int gap = 4;
     const int n = juce::jmax(1, knobs.size());
 
-    // Auto-fit: prefer 78 px, but shrink so every knob is shown even at the minimum window
-    // width (8 knobs now: Pitch/Speed/Stretch/Base/Width/Q/Start/End).
+    // Auto-fit: prefer a fairly tight column, but shrink further so every knob still shows at
+    // the minimum window width (8-9 knobs: Pitch/Speed/Stretch/Base/Width/Q/Start/End[/Gain]).
+    // The rotary disc is sized off the column height, not its width, so a narrower column just
+    // packs the knobs closer without shrinking them; the cap keeps the time readouts (Start /
+    // End) from clipping.
     const int avail = juce::jmax(0, r.getWidth() - gap * (n - 1));
-    const int knobW = juce::jlimit(46, 78, avail / n);
+    const int knobW = juce::jlimit(46, 64, avail / n);
 
     for (auto* k : knobs)
     {
