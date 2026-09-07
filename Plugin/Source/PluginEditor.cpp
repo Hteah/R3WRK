@@ -65,16 +65,30 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
     // Slice tool: clicking a slice has already set the selection + playhead; kick off playback.
     waveformDisplay.onSlicePlay = [this] { processorRef.startPlayback(); };
 
+    // Follow-playhead toggle -- header row, every build (moved off the transport strip).
+    followButton.setClickingTogglesState(true);
+    followButton.setWantsKeyboardFocus(false);
+    followButton.setTooltip("Follow playhead -- keeps the playhead on screen while playing when zoomed in");
+    followButton.setLookAndFeel(&cornerButtonLnF);
+    followButton.setToggleState(processorRef.document.followPlayheadEnabled, juce::dontSendNotification);
+    followButton.onClick = [this]
+    {
+        processorRef.document.followPlayheadEnabled = followButton.getToggleState();
+        processorRef.document.notifyChanged();   // WaveformDisplay's 30 Hz timer does the following
+    };
+    addAndMakeVisible(followButton);
+
     if (standaloneWindow)
     {
         floatOnTopButton.setClickingTogglesState(true);
         floatOnTopButton.setWantsKeyboardFocus(false);
         floatOnTopButton.setTooltip("Float on top - keep this window above other apps");
-        floatOnTopButton.setLookAndFeel(&floatButtonLnF);
+        floatOnTopButton.setLookAndFeel(&cornerButtonLnF);
         floatOnTopButton.onClick = [this] { applyFloatOnTop(floatOnTopButton.getToggleState()); };
         addAndMakeVisible(floatOnTopButton);
-        applyFloatButtonTheme();
     }
+
+    applyHeaderButtonThemes();
 
     theme->addChangeListener(this);
 
@@ -101,25 +115,29 @@ R3WRKAudioProcessorEditor::~R3WRKAudioProcessorEditor()
     if (macMenuBar != nullptr)
         juce::MenuBarModel::setMacMainMenu(nullptr);   // detach before the model is destroyed
    #endif
+    followButton.setLookAndFeel(nullptr);
     floatOnTopButton.setLookAndFeel(nullptr);
     theme->removeChangeListener(this);
 }
 
 void R3WRKAudioProcessorEditor::changeListenerCallback(juce::ChangeBroadcaster*)
 {
-    applyFloatButtonTheme();
+    applyHeaderButtonThemes();
     repaint();
 }
 
-void R3WRKAudioProcessorEditor::applyFloatButtonTheme()
+void R3WRKAudioProcessorEditor::applyHeaderButtonThemes()
 {
     const auto& pal = theme->palette();
     // The header row sits on windowBg (chrome), not the dark screen band -- so chrome ink,
     // accent fill while the toggle is on. Same outline/fill idiom as the toolbar's Loop pill.
-    floatOnTopButton.setColour(juce::TextButton::buttonColourId,   juce::Colours::transparentBlack);
-    floatOnTopButton.setColour(juce::TextButton::buttonOnColourId, pal.accent);
-    floatOnTopButton.setColour(juce::TextButton::textColourOffId,  pal.text);
-    floatOnTopButton.setColour(juce::TextButton::textColourOnId,   pal.windowBg);
+    for (auto* b : { &followButton, &floatOnTopButton })
+    {
+        b->setColour(juce::TextButton::buttonColourId,   juce::Colours::transparentBlack);
+        b->setColour(juce::TextButton::buttonOnColourId, pal.accent);
+        b->setColour(juce::TextButton::textColourOffId,  pal.text);
+        b->setColour(juce::TextButton::textColourOnId,   pal.windowBg);
+    }
 }
 
 void R3WRKAudioProcessorEditor::applyFloatOnTop(bool on)
@@ -210,13 +228,16 @@ void R3WRKAudioProcessorEditor::resized()
 
     {
         auto headerRow = area.removeFromTop(30);
+        // Corner buttons at the far right, in line with the file name -- small rounded rects
+        // (their own shape, not a pill), like RCRDR / Sieve. Float-on-top is the outermost
+        // (standalone only); Follow-playhead sits just left of it.
         if (standaloneWindow)
         {
-            // Float-on-top toggle at the far right, in line with the file name -- a small
-            // rounded rect (its own shape, not a pill), like RCRDR / Sieve.
             floatOnTopButton.setBounds(headerRow.removeFromRight(42).withSizeKeepingCentre(40, 26));
             headerRow.removeFromRight(6);
         }
+        followButton.setBounds(headerRow.removeFromRight(42).withSizeKeepingCentre(40, 26));
+        headerRow.removeFromRight(6);
         header.setBounds(headerRow);
     }
     area.removeFromTop(6);

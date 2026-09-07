@@ -43,7 +43,7 @@ public:
 
 private:
     void changeListenerCallback(juce::ChangeBroadcaster*) override;
-    void applyFloatButtonTheme();
+    void applyHeaderButtonThemes();   // themes the follow + float-on-top header buttons
     void applyFloatOnTop(bool on);   // toggles the native window level + persists
     void maybeApplyPersistedFloatOnTop();   // once, as soon as the window peer exists
 
@@ -65,10 +65,15 @@ private:
     juce::SharedResourcePointer<ThemeManager> theme;
     juce::SharedResourcePointer<OutputSettings> outputSettings;
 
-    // Standalone only: a pip.enter-style toggle at the far right of the header row (in line
-    // with the file name) that keeps the window above other apps. Drawn as a small rounded
-    // rect (not the pill/circle the other buttons use). Native NSWindow level, persisted.
-    R3WRKIconRectLookAndFeel floatButtonLnF;
+    // Header-row corner buttons, both small rounded rects (their own shape, not the
+    // pill/circle the transport strip uses) sharing one look-and-feel:
+    //   followButton     -- Follow-playhead toggle (drives document.followPlayheadEnabled;
+    //                        WaveformDisplay's 30 Hz timer does the actual view-following).
+    //                        Every build. Moved here from the transport strip.
+    //   floatOnTopButton -- keep the window above other apps. Standalone only. Native
+    //                        NSWindow level, persisted via OutputSettings.
+    R3WRKIconRectLookAndFeel cornerButtonLnF;
+    juce::TextButton followButton    { R3WRKLookAndFeel::iconFollow };
     juce::TextButton floatOnTopButton { R3WRKLookAndFeel::iconFloatTop };
     bool floatStateApplied = false;
 

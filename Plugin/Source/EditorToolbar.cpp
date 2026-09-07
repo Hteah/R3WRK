@@ -342,7 +342,6 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     addAndMakeVisible(loopButton);
     addAndMakeVisible(scrubButton);
     addAndMakeVisible(sliceButton);
-    addAndMakeVisible(followButton);
     addAndMakeVisible(timeLabel);
     addAndMakeVisible(recordButton);
     addAndMakeVisible(toolsButton);
@@ -360,7 +359,6 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     loopButton.setClickingTogglesState(true);
     scrubButton.setClickingTogglesState(true);
     sliceButton.setClickingTogglesState(true);
-    followButton.setClickingTogglesState(true);
     autoRecordButton.setClickingTogglesState(true);
 
     playFromStartButton.setTooltip("Play from start");
@@ -371,7 +369,6 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     sliceButton.setTooltip("Slice tool -- double-click adds a marker, right-click plays that slice, "
                            "drag a marker to move it, double-click a marker's top/bottom handle "
                            "to delete it (Tools has the export)");
-    followButton.setTooltip("Follow playhead -- keeps the playhead on screen while playing when zoomed in");
     recordButton.setTooltip("Record");
     toolsButton.setTooltip("Tools");
     reverseButton.setTooltip("Reverse the selection (or the whole clip, if nothing's selected)");
@@ -386,7 +383,7 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
                                 "folder. Press to start, press again to stop.");
 
     for (auto* b : { &playFromStartButton, &playButton, &loopButton, &scrubButton, &sliceButton,
-                     &followButton, &recordButton, &toolsButton, &reverseButton, &clearButton,
+                     &recordButton, &toolsButton, &reverseButton, &clearButton,
                      &autoRecordButton })
     {
         b->setLookAndFeel(&toolbarLnF);
@@ -460,11 +457,6 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
         }
         document.notifyChanged();
     };
-    followButton.onClick = [this]
-    {
-        document.followPlayheadEnabled = followButton.getToggleState();
-        document.notifyChanged();   // WaveformDisplay's 30Hz timer does the actual view-following
-    };
     reverseButton.onClick = [this] { EditActions::reverse(document); };
     clearButton.onClick = [this]
     {
@@ -501,7 +493,7 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
 EditorToolbar::~EditorToolbar()
 {
     for (auto* b : { &playFromStartButton, &playButton, &loopButton, &scrubButton, &sliceButton,
-                     &followButton, &recordButton, &toolsButton, &reverseButton, &clearButton,
+                     &recordButton, &toolsButton, &reverseButton, &clearButton,
                      &autoRecordButton })
         b->setLookAndFeel(nullptr);   // detach before toolbarLnF is destroyed
     desktopRecButton.setLookAndFeel(nullptr);
@@ -546,12 +538,6 @@ void EditorToolbar::applyTheme()
     sliceButton.setColour(juce::TextButton::buttonOnColourId, pal.accent);
     sliceButton.setColour(juce::TextButton::textColourOffId, pal.screenText);
     sliceButton.setColour(juce::TextButton::textColourOnId, pal.windowBg);
-
-    // Follow: same toggling treatment.
-    followButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
-    followButton.setColour(juce::TextButton::buttonOnColourId, pal.accent);
-    followButton.setColour(juce::TextButton::textColourOffId, pal.screenText);
-    followButton.setColour(juce::TextButton::textColourOnId, pal.windowBg);
 
     recordButton.setColour(juce::TextButton::buttonColourId, pal.recordButton);
     recordButton.setColour(juce::TextButton::textColourOffId, juce::Colours::white);   // the stop-square ink while recording
@@ -601,7 +587,7 @@ void EditorToolbar::paint(juce::Graphics& g)
 
     // Faint group hairlines (mid-gap between two buttons, repositioned on resized()):
     //   [standalone] around the secondary recording group -- after Record/Auto-Record and
-    //   before Reverse -- and, in every build, between the waveform tools (Follow) and the
+    //   before Reverse -- and, in every build, between the waveform tools (Slice) and the
     //   Tools menu.
     g.setColour(theme->palette().screenText.withAlpha(0.22f));
     const float y0 = 5.0f, y1 = (float) getHeight() - 5.0f;
@@ -618,7 +604,7 @@ void EditorToolbar::paint(juce::Graphics& g)
         hairlineBetween(autoRecordButton, desktopRecButton);
         hairlineBetween(captureOutButton, reverseButton);
     }
-    hairlineBetween(followButton, toolsButton);
+    hairlineBetween(sliceButton, toolsButton);
 }
 
 //==============================================================================
@@ -1048,11 +1034,9 @@ void EditorToolbar::updateTransportButtonText()
     loopButton.setToggleState(document.loopEnabled.load(), juce::dontSendNotification);
     scrubButton.setToggleState(document.scrubModeEnabled, juce::dontSendNotification);
     sliceButton.setToggleState(document.sliceModeEnabled, juce::dontSendNotification);
-    followButton.setToggleState(document.followPlayheadEnabled, juce::dontSendNotification);
     recordButton.setEnabled((! playing || micRec) && ! desktopRec);
     scrubButton.setEnabled(! rec);
     sliceButton.setEnabled(! rec);
-    followButton.setEnabled(! rec);
     reverseButton.setEnabled(! rec);
     clearButton.setEnabled(! rec);
     autoRecordButton.setEnabled(! rec);
@@ -1317,9 +1301,9 @@ void EditorToolbar::resized()
     };
     // Order set by the user: transport (Play-from-start, Play, Loop) -> primary record
     // (Record, Auto-Record) -> secondary record (Record Desktop, Capture Output; standalone
-    // only) -> waveform tools (Reverse, Scrub, Slice, Follow) -> Tools menu -> Clear, with
-    // the time readout pinned right. All round icon buttons. paint() draws hairlines around
-    // the secondary-record group.
+    // only) -> waveform tools (Reverse, Scrub, Slice) -> Tools menu -> Clear, with the time
+    // readout pinned right. All round icon buttons. paint() draws the section hairlines.
+    // (Follow-playhead moved to the header row next to Float-on-top -- see PluginEditor.)
     add(playFromStartButton, 28);
     add(playButton, 28);
     add(loopButton, 28);
@@ -1333,7 +1317,6 @@ void EditorToolbar::resized()
     add(reverseButton, 28);
     add(scrubButton, 28);
     add(sliceButton, 28);
-    add(followButton, 28);
     add(toolsButton, 28);
     add(clearButton, 28);
     fb.items.add(juce::FlexItem().withFlex(1.0f));

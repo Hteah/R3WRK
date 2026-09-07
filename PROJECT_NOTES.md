@@ -813,13 +813,25 @@ Section dividers (faint 1 px hairlines drawn in `paint()` at the mid-gap
 between two buttons/knobs, low-alpha theme ink, repositioned on `resized()`):
 - **`EditorToolbar`** — `autoRecordButton | desktopRecButton` and
   `captureOutButton | reverseButton` (standalone-only, bracketing the
-  secondary recording group), plus `followButton | toolsButton` (every build).
+  secondary recording group), plus `sliceButton | toolsButton` (every build).
   Button order is Play-from-start / Play / Loop / Record / Auto-Record │
-  Record-Desktop / Capture-Output │ Reverse / Scrub / Slice / Follow │ Tools /
-  Clear (Reverse sits left of Scrub).
+  Record-Desktop / Capture-Output │ Reverse / Scrub / Slice │ Tools / Clear
+  (Reverse sits left of Scrub). **Follow-playhead is not on this strip** — it
+  moved to the header row (see below).
 - **`KnobRow`** — three, in the gaps before knob index 3 / 6 / 8, marking
   `Pitch·Speed·Stretch │ Base·Width·Q │ Start·End │ Gain`; the last is
   standalone-only (the Gain knob only exists there).
+
+**Header-row corner buttons** (`R3WRKAudioProcessorEditor`, not `HeaderBar` —
+editor-level children overlaid on the header strip's right end, sharing one
+`R3WRKIconRectLookAndFeel cornerButtonLnF` for the small-rounded-rect look, and
+`applyHeaderButtonThemes()` for colours, called from the ctor + the theme
+`changeListenerCallback`): **Follow-playhead** (every build; toggles
+`document.followPlayheadEnabled`, `onClick` lives here now, not on
+`EditorToolbar` — the transport strip only kept a cosmetic `setEnabled(!rec)`
+which was dropped, since `WaveformDisplay::followPlayheadIfNeeded()` already
+no-ops while recording) then **Float-on-top** outermost (standalone only). Laid
+out right-to-left in `resized()` with `removeFromRight(42)` + a 6 px gap each.
 
 The plugin's own outer window/editor bounds are **not** rounded and won't be —
 in a host the editor is a plain rectangle the host draws its own frame around,
