@@ -100,6 +100,18 @@ KnobRow::KnobRow(AudioDocument& doc, bool standalone)
         k.pull  = [this] { return document.filterResonance.load(); };
     }
 
+    //== Drive (Octatrack-DIST-style pre-filter saturation) ================
+    {
+        auto& k = addKnob("Drive");
+        k.slider.setRange(0.0, 1.0, 0.0);
+        k.slider.setDoubleClickReturnValue(true, 0.0);   // 0 = clean
+        k.slider.textFromValueFunction = [](double v) { return juce::String(juce::roundToInt(v * 100.0)) + "%"; };
+        k.slider.setValue(document.filterDrive.load(), juce::dontSendNotification);
+        k.slider.updateText();
+        k.apply = [this](double v) { document.filterDrive.store(v); };
+        k.pull  = [this] { return document.filterDrive.load(); };
+    }
+
     //== Start / End (selection edges) ========================================
     {
         auto& k = addKnob("Start");
@@ -266,7 +278,7 @@ void KnobRow::resized()
     const int n = juce::jmax(1, knobs.size());
 
     // Auto-fit: prefer a fairly tight column, but shrink further so every knob still shows at
-    // the minimum window width (8-9 knobs: Pitch/Speed/Stretch/Base/Width/Q/Start/End[/Gain]).
+    // the minimum window width (9-10: Pitch/Speed/Stretch/Base/Width/Q/Drive/Start/End[/Gain]).
     // The rotary disc is sized off the column height, not its width, so a narrower column just
     // packs the knobs closer without shrinking them; the cap keeps the time readouts (Start /
     // End) from clipping.
@@ -281,9 +293,9 @@ void KnobRow::resized()
         k->caption.setBounds(col.removeFromTop(14));
         k->slider.setBounds(col);
 
-        // A wide gap where a section-divider dot sits (before knob 3 / 6 / 8, i.e. after
-        // knob 2 / 5 / 7 -- see paint()), so the groups read as distinct blocks.
-        const bool beforeDot = (i == 2 || i == 5 || i == 7);
+        // A wide gap where a section-divider dot sits (before knob 3 / 7 / 9, i.e. after
+        // knob 2 / 6 / 8 -- see paint()), so the groups read as distinct blocks.
+        const bool beforeDot = (i == 2 || i == 6 || i == 8);
         r.removeFromLeft(beforeDot ? dotGap : gap);
     }
     repaint();   // reposition the section dividers for the new knob width
@@ -294,7 +306,7 @@ void KnobRow::paint(juce::Graphics& g)
     // A small vertical run of three dots, centred in the gap before each of these knob
     // indices, marking the section boundaries: time/pitch | filter | selection | output gain.
     // Index 8 (Gain) only exists in the Standalone build.
-    static constexpr int boundaryBefore[] = { 3 /*Base*/, 6 /*Start*/, 8 /*Gain*/ };
+    static constexpr int boundaryBefore[] = { 3 /*Base*/, 7 /*Start*/, 9 /*Gain*/ };
 
     const float cy = (float) getHeight() * 0.5f;
     constexpr int   count = 3;

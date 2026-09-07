@@ -257,10 +257,13 @@ public:
     //                     1 = no low-pass. ("Width" knob.)
     //   filterResonance : 0..1, mapped to Q at both edges by r3wrk::filterResonanceToQ.
     //                     ("Q" knob.)
-    // Base 0 + Width 1 = wide open (no effect); that's the default / double-click state.
+    //   filterDrive     : 0..1, pre-filter tanh saturation (harmonics ahead of the poles) --
+    //                     R3WRK's Octatrack-DIST-style filter drive. ("Drive" knob.)
+    // Base 0 + Width 1 + Drive 0 = wide open (no effect); that's the default / double-click.
     std::atomic<double> filterBase      { 0.0 };
     std::atomic<double> filterWidth     { 1.0 };
     std::atomic<double> filterResonance { 0.0 };
+    std::atomic<double> filterDrive     { 0.0 };
 
     // Output "Gain" knob (Standalone only -- KnobRow adds the knob just in that build; the
     // atomic sits here for everyone but stays at 0). In dB, 0 = unity (default volume);

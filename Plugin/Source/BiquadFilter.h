@@ -47,12 +47,13 @@ namespace r3wrk
         fHighEdge = filterPosToHz (juce::jmin (1.0, base01 + width01));
     }
 
-    // "Engaged" == at least one edge is doing something audible. Base ~0 => no high-pass;
-    // Base+Width ~1 => no low-pass. Neither => bypass, and callers skip the filter (and don't
-    // count it as a playback knob that forces the slow RubberBand / offline render path).
-    inline bool filterEngaged (double base01, double width01)
+    // "Engaged" == the filter would change the sound: at least one edge is doing something
+    // audible (Base ~0 => no high-pass; Base+Width ~1 => no low-pass), OR Drive is up (drive
+    // alone, with both edges open, is just a saturator). Otherwise callers skip it and don't
+    // count it as a playback knob that forces the slow RubberBand / offline render path.
+    inline bool filterEngaged (double base01, double width01, double drive01 = 0.0)
     {
-        return base01 > 0.004 || (base01 + width01) < 0.996;
+        return base01 > 0.004 || (base01 + width01) < 0.996 || drive01 > 0.001;
     }
 
     struct Biquad
@@ -136,22 +137,29 @@ namespace r3wrk
 
         Each edge stage bypasses itself when it isn't doing anything, so an "open" filter is a
         true passthrough. A narrow, resonant band stacks two peaks and can get very loud -- a
-        mild width/Q-dependent output trim keeps that musical rather than explosive (stands in
-        for the Octatrack's DIST/headroom control, not ported here).
+        mild width/Q-dependent output trim keeps that musical rather than explosive.
+
+        Drive (0..1) is a pre-filter saturator: input gain 1x..10x into a tanh, then partial
+        makeup gain -- so cranking Drive adds harmonics (which the two edges then shape) more
+        than it adds level. This is R3WRK's take on the Octatrack's filter DIST, which the OT
+        manual describes only as "sets the headroom of the filter -- higher value = lower
+        headroom" (i.e. drive harder into a fixed ceiling, ahead of the poles). The OT loses
+        more level than this does; ride the Gain knob if you want it darker still.
     */
     struct MultiModeFilter
     {
         Biquad hp, lp;
-        bool  hpOn = false, lpOn = false;
-        float outTrim = 1.0f;
+        bool  hpOn = false, lpOn = false, driveOn = false;
+        float outTrim = 1.0f, driveGain = 1.0f, driveMakeup = 1.0f;
 
         void reset() noexcept { hp.reset(); lp.reset(); }
 
-        void setParams (double base01, double width01, double res01, double fs) noexcept
+        void setParams (double base01, double width01, double res01, double drive01, double fs) noexcept
         {
             base01  = juce::jlimit (0.0, 1.0, base01);
             width01 = juce::jlimit (0.0, 1.0, width01);
             res01   = juce::jlimit (0.0, 1.0, res01);
+            drive01 = juce::jlimit (0.0, 1.0, drive01);
 
             double fLow, fHigh;
             filterEdges (base01, width01, fLow, fHigh);
@@ -169,10 +177,15 @@ namespace r3wrk
             outTrim = (hpOn && lpOn)
                 ? (float) (1.0 / (1.0 + 3.0 * res01 * juce::jmax (0.0, 0.5 - width01)))
                 : 1.0f;
+
+            driveOn     = drive01 > 0.001;
+            driveGain   = (float) (1.0 + drive01 * 9.0);
+            driveMakeup = (float) std::pow ((double) driveGain, -0.6);   // partial level comp
         }
 
         inline float processSample (float x) noexcept
         {
+            if (driveOn) x = std::tanh (x * driveGain) * driveMakeup;
             if (hpOn) x = hp.processSample (x);
             if (lpOn) x = lp.processSample (x);
             return x * outTrim;

@@ -123,9 +123,10 @@ private:
     // Multi-mode filter on the playback output (after the stretcher). One biquad per channel;
     // cutoff is per-block-smoothed so a knob sweep doesn't zipper the coefficients. Reset on a
     // fresh play pass and when the mode changes, so re-enabling doesn't thump.
-    r3wrk::MultiModeFilter playbackFilter[2];   // Octatrack-style Base/Width, per channel
+    r3wrk::MultiModeFilter playbackFilter[2];   // Octatrack-style Base/Width + Drive, per channel
     juce::SmoothedValue<double> smoothedFilterBase  { 0.0 };
     juce::SmoothedValue<double> smoothedFilterWidth { 1.0 };
+    juce::SmoothedValue<double> smoothedFilterDrive { 0.0 };
     bool lastFilterEngaged = false;
     void applyPlaybackFilter (juce::AudioBuffer<float>& buffer, int numCh, int numSamples,
                               bool freshPlayPass);

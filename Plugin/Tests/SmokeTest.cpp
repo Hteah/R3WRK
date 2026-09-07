@@ -499,13 +499,15 @@ int main()
         // Octatrack-style Base/Width MultiModeFilter: Base 0 + Width 1 is a true passthrough;
         // Base 0 + narrow Width is a low-pass (kills the 8 kHz tone); Base up + Width 1 is a
         // high-pass (kills the 200 Hz tone).
-        auto runMMF = [&](juce::AudioBuffer<float> buf, double base01, double width01, double res01)
+        auto runMMF = [&](juce::AudioBuffer<float> buf, double base01, double width01, double res01,
+                          double drive01 = 0.0)
         {
-            r3wrk::MultiModeFilter mmf; mmf.setParams(base01, width01, res01, sr);
+            r3wrk::MultiModeFilter mmf; mmf.setParams(base01, width01, res01, drive01, sr);
             mmf.processBlock(buf.getWritePointer(0), buf.getNumSamples());
             return buf;
         };
         check(! r3wrk::filterEngaged(0.0, 1.0), "Base 0 + Width 1 reads as not engaged");
+        check(  r3wrk::filterEngaged(0.0, 1.0, 0.5), "Drive alone reads as engaged");
         checkNear(rms(runMMF(makeSineBuffer(1, n, sr, 1000.0, 0.5f), 0.0, 1.0, 0.0), 0),
                   rms(makeSineBuffer(1, n, sr, 1000.0, 0.5f), 0), 0.01,
                   "Base 0 + Width 1 passes a 1 kHz tone untouched");
@@ -513,6 +515,38 @@ int main()
               "Base 0 + Width ~500 Hz (low-pass) crushes an 8 kHz tone");
         check(rms(runMMF(tone200, r3wrk::filterHzToPos(3000.0), 1.0, 0.2), 0) < rms(tone200, 0) * 0.2,
               "Base ~3 kHz + Width 1 (high-pass) crushes a 200 Hz tone");
+
+        // Drive on a pure 1 kHz sine, filter wide open -> tanh saturation adds harmonics.
+        // Project each signal onto the 1 kHz fundamental, subtract it, and measure the leftover
+        // power as a fraction of total: ~0 for a pure sine, clearly non-zero once driven.
+        {
+            const double w = 2.0 * juce::MathConstants<double>::pi * 1000.0 / (double) sr;
+            auto residualFrac = [&](const juce::AudioBuffer<float>& b)
+            {
+                const float* d = b.getReadPointer(0);
+                const int    N = b.getNumSamples();
+                double ps = 0.0, pc = 0.0, tot = 0.0;
+                for (int i = 0; i < N; ++i)
+                {
+                    ps  += d[i] * std::sin(w * i);
+                    pc  += d[i] * std::cos(w * i);
+                    tot += (double) d[i] * d[i];
+                }
+                const double as = 2.0 * ps / N, ac = 2.0 * pc / N;
+                double resid = 0.0;
+                for (int i = 0; i < N; ++i)
+                {
+                    const double fund = as * std::sin(w * i) + ac * std::cos(w * i);
+                    resid += (d[i] - fund) * (d[i] - fund);
+                }
+                return resid / juce::jmax(1.0e-12, tot);
+            };
+            const double cleanR  = residualFrac(makeSineBuffer(1, n, sr, 1000.0, 0.5f));
+            const double drivenR = residualFrac(runMMF(makeSineBuffer(1, n, sr, 1000.0, 0.5f),
+                                                       0.0, 1.0, 0.0, 0.8));
+            check(cleanR < 0.01 && drivenR > 0.08,
+                  "Drive adds harmonics to a pure 1 kHz sine (clean ~pure, driven not)");
+        }
 
         // renderWithPlaybackKnobs applies the filter: a low-pass at ~500 Hz on a 200+8000 Hz
         // mix drops the level (the 8 kHz half is removed); wide open is a passthrough.

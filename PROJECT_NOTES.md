@@ -611,7 +611,7 @@ once. The stored audio is never modified. The red playhead tracks the doc read
 cursor, so it runs slightly ahead of what you hear by the stretcher latency when
 the knobs are engaged (more so at high Stretch).
 
-## Base/Width filter (Base / Width / Q knobs)
+## Base/Width filter (Base / Width / Q / Drive knobs)
 
 User: "My favourite digital filter is on my Octatrack... use that design." The
 Octatrack multimode filter isn't cutoff + mode — it's a **BASE / WIDTH** filter:
@@ -619,9 +619,9 @@ a high-pass and a low-pass in series whose *two edges* you dial directly. BASE i
 the low edge (HP cutoff); WIDTH is how far above it the high edge (LP cutoff)
 sits. BASE 0 + WIDTH max = wide open; BASE 0 + WIDTH low = low-pass; BASE up +
 WIDTH max = high-pass; BASE mid + WIDTH small = a resonant, variable-gap
-band-pass. (Not ported from the Octatrack SETUP page: the 12/24 dB slope switch
-and the DIST drive — "Base / Width / Q only" per the user.) Non-destructive, live
-on the knobs and baked into Save/Export like Speed/Pitch/Stretch.
+band-pass. **DIST/Drive** was added later (see below); the 12/24 dB slope switch
+is still not ported. Non-destructive, live on the knobs and baked into
+Save/Export like Speed/Pitch/Stretch.
 
 - **`Source/BiquadFilter.h`** (header-only, **not** `juce::dsp` — same reason as
   before: `AudioDocument.cpp` bakes the filter and is in the juce_dsp-less smoke
@@ -633,36 +633,40 @@ on the knobs and baked into Save/Export like Speed/Pitch/Stretch.
   2-pole HP (Base) + 2-pole LP (Base+Width) in series, Q on both, each stage
   self-bypassing at its extreme so "open" is a true passthrough. A narrow, resonant
   band stacks two peaks and can get very loud, so `outTrim` pulls the output back
-  toward unity as `width→0` with `Q` up (stands in for the OT's DIST/headroom).
-- **`AudioDocument`**: `filterBase` (0..1, default 0), `filterWidth` (0..1,
-  default 1), `filterResonance` (0..1, default 0) — `std::atomic`, reset to
-  0/1/0 on load/new/clear. `playbackKnobsEngaged()` is now
-  `timePitchKnobsEngaged() || r3wrk::filterEngaged(base,width)`;
-  `renderWithPlaybackKnobs` runs a fresh `MultiModeFilter` per channel over the
-  (stretched) buffer when engaged.
+  toward unity as `width→0` with `Q` up.
+  **Drive** (`filterDrive` 0..1) is a *pre-filter* saturator inside
+  `MultiModeFilter::processSample`: `x = tanh(x * driveGain) * driveMakeup` before
+  the HP/LP stages, so the harmonics it adds get shaped by both edges.
+  `driveGain = 1 + drive·9` (1×…10×); `driveMakeup = driveGain^-0.6` (partial
+  level comp — the OT's DIST loses more, "ride the Gain knob"). `filterEngaged()`
+  gained an optional `drive01` arg so Drive alone (edges open) still runs.
+- **`AudioDocument`**: `filterBase` (0..1, def 0), `filterWidth` (0..1, def 1),
+  `filterResonance` (0..1, def 0), `filterDrive` (0..1, def 0) — `std::atomic`,
+  reset on load/new/clear. `playbackKnobsEngaged()` uses
+  `r3wrk::filterEngaged(base,width,drive)`; `renderWithPlaybackKnobs` runs a fresh
+  `MultiModeFilter` per channel (with drive) when engaged.
 - **`PluginProcessor`**: `r3wrk::MultiModeFilter playbackFilter[2]` + per-block
-  `smoothedFilterBase` / `smoothedFilterWidth` (`SmoothedValue`, 30 ms, in the
-  0..1 edge space) so a sweep doesn't zipper. `applyPlaybackFilter()` runs last
-  in the playback chain, resets the biquads on a fresh play pass or when the
-  engaged/bypassed line is crossed, and — if the filter is switched on
-  mid-playback — seeds the smoothers to "open" so it eases in without a click.
-  Scrub is left dry.
-- **`KnobRow`**: three knobs after Stretch — **Base** (0..1, skewed for a log-Hz
-  feel, readout "440 Hz" / "1.00 kHz" via `filterPosToHz`, dbl-click 0 = no HP),
-  **Width** (0..1 %, dbl-click 1 = no LP / open), **Q** (0..1 %, dbl-click 0).
-  `resized()` still auto-fits knob width (46–78 px) for all 8.
-- **State**: `kStateMagic` `'R3W7'`→`'R3W8'` (filter is `filterBase` +
-  `filterWidth` + `filterResonance`, three doubles, replacing R3W7's
-  `int filterMode` + `filterCutoffHz` + `filterResonance`). `setStateInformation`
-  still reads `'R3W7'`/`'R3W6'`/`'R3W5'`: an old mode/cutoff filter is **migrated**
-  onto Base/Width (LP → Base 0 / Width at cutoff; HP → Base at cutoff / Width 1;
-  BP → a narrow band at cutoff; Off/Notch → open) and the old single-biquad
-  resonance is **dropped to 0** (it doesn't map onto the new two-edge Q).
-- Smoke test: `MultiModeFilter` — Base 0 + Width 1 is a true passthrough and
-  reads as not engaged; Base 0 + narrow Width (low-pass) crushes an 8 kHz tone;
-  Base up + Width 1 (high-pass) crushes a 200 Hz tone; `renderWithPlaybackKnobs`
-  with a ~500 Hz low-pass measurably lowers a 200+8000 Hz mix and keeps the
-  length; filter-on flips `playbackKnobsEngaged()` with the stretch centred.
+  `smoothedFilterBase` / `smoothedFilterWidth` / `smoothedFilterDrive`
+  (`SmoothedValue`, 30 ms) so a sweep doesn't zipper. `applyPlaybackFilter()` runs
+  last in the playback chain, resets the biquads on a fresh play pass or when the
+  engaged/bypassed line is crossed, and — if switched on mid-playback — seeds the
+  smoothers to "open, no drive" so it eases in. Scrub is left dry.
+- **`KnobRow`**: filter group after Stretch — **Base** (0..1, skewed log-Hz feel,
+  readout "440 Hz"/"1.00 kHz" via `filterPosToHz`, dbl-click 0 = no HP), **Width**
+  (0..1 %, dbl-click 1 = open), **Q** (0..1 %, dbl-click 0), **Drive** (0..1 %,
+  dbl-click 0 = clean). 10 knobs total in the standalone; section-divider dots now
+  at knob index 3 / 7 / 9 (was 3 / 6 / 8).
+- **State**: `kStateMagic` `'R3W8'`→`'R3W9'` (adds `filterDrive`, a 4th double
+  before `playbackGainDb`). `setStateInformation` reads `'R3W8'` (base/width/res,
+  drive → 0), `'R3W7'`/`'R3W6'` (old mode/cutoff **migrated** onto Base/Width —
+  LP → Base 0 / Width at cutoff; HP → Base at cutoff / Width 1; BP → narrow band;
+  Off/Notch → open; old resonance dropped to 0), and `'R3W5'`.
+- Smoke test: `MultiModeFilter` — Base 0 + Width 1 is a true passthrough & reads
+  as not engaged; Drive alone reads as engaged; Base 0 + narrow Width (LP) crushes
+  8 kHz; Base up + Width 1 (HP) crushes 200 Hz; Drive on a pure 1 kHz sine adds
+  harmonics (fundamental-projection residual jumps from ~0 to >0.08);
+  `renderWithPlaybackKnobs` with a ~500 Hz LP lowers a 200+8000 Hz mix & keeps the
+  length; filter-on flips `playbackKnobsEngaged()`.
 
 ## Saving / output folder
 

@@ -5,7 +5,8 @@
 
 namespace
 {
-    constexpr int kStateMagic     = 0x52335738;   // 'R3W8' - filter is Base/Width, not mode/cutoff
+    constexpr int kStateMagic     = 0x52335739;   // 'R3W9' - adds filterDrive
+    constexpr int kStateMagicR3W8 = 0x52335738;   // 'R3W8' - filter is Base/Width, no drive
     constexpr int kStateMagicR3W7 = 0x52335737;   // 'R3W7' - mode/cutoff/res filter + playbackGainDb
     constexpr int kStateMagicR3W6 = 0x52335736;   // 'R3W6' - mode/cutoff/res filter, no gain
     constexpr int kStateMagicR3W5 = 0x52335735;   // 'R3W5' - no filter, no gain
@@ -62,8 +63,10 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 
     smoothedFilterBase.reset(sampleRate, 0.03);
     smoothedFilterWidth.reset(sampleRate, 0.03);
+    smoothedFilterDrive.reset(sampleRate, 0.03);
     smoothedFilterBase.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.filterBase.load()));
     smoothedFilterWidth.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.filterWidth.load()));
+    smoothedFilterDrive.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.filterDrive.load()));
     playbackFilter[0].reset();
     playbackFilter[1].reset();
     lastFilterEngaged = false;
@@ -454,7 +457,8 @@ void R3WRKAudioProcessor::applyPlaybackFilter(juce::AudioBuffer<float>& buffer, 
 {
     const double base01  = juce::jlimit(0.0, 1.0, document.filterBase.load(std::memory_order_relaxed));
     const double width01 = juce::jlimit(0.0, 1.0, document.filterWidth.load(std::memory_order_relaxed));
-    const bool   engaged = r3wrk::filterEngaged(base01, width01);
+    const double drive01 = juce::jlimit(0.0, 1.0, document.filterDrive.load(std::memory_order_relaxed));
+    const bool   engaged = r3wrk::filterEngaged(base01, width01, drive01);
 
     if (freshPlayPass || engaged != lastFilterEngaged)
     {
@@ -465,12 +469,14 @@ void R3WRKAudioProcessor::applyPlaybackFilter(juce::AudioBuffer<float>& buffer, 
         {
             smoothedFilterBase.setCurrentAndTargetValue(base01);
             smoothedFilterWidth.setCurrentAndTargetValue(width01);
+            smoothedFilterDrive.setCurrentAndTargetValue(drive01);
         }
         else if (engaged && ! lastFilterEngaged)
         {
-            // Switched on mid-playback: ramp in from "wide open" so it eases in, no click.
+            // Switched on mid-playback: ramp in from "wide open, no drive" so it eases in.
             smoothedFilterBase.setCurrentAndTargetValue(0.0);
             smoothedFilterWidth.setCurrentAndTargetValue(1.0);
+            smoothedFilterDrive.setCurrentAndTargetValue(0.0);
         }
     }
     lastFilterEngaged = engaged;
@@ -480,13 +486,15 @@ void R3WRKAudioProcessor::applyPlaybackFilter(juce::AudioBuffer<float>& buffer, 
 
     smoothedFilterBase.setTargetValue(base01);
     smoothedFilterWidth.setTargetValue(width01);
+    smoothedFilterDrive.setTargetValue(drive01);
     const double b = smoothedFilterBase.skip(numSamples);    // one coefficient set per block
     const double w = smoothedFilterWidth.skip(numSamples);
+    const double d = smoothedFilterDrive.skip(numSamples);
     const double res = juce::jlimit(0.0, 1.0, document.filterResonance.load(std::memory_order_relaxed));
 
     for (int ch = 0; ch < juce::jmin(numCh, 2); ++ch)
     {
-        playbackFilter[ch].setParams(b, w, res, currentSampleRate);
+        playbackFilter[ch].setParams(b, w, res, d, currentSampleRate);
         playbackFilter[ch].processBlock(buffer.getWritePointer(ch), numSamples);
     }
 }
@@ -769,6 +777,7 @@ void R3WRKAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     out.writeDouble(document.filterBase.load());
     out.writeDouble(document.filterWidth.load());
     out.writeDouble(document.filterResonance.load());
+    out.writeDouble(document.filterDrive.load());
     out.writeDouble(document.playbackGainDb.load());
 
     auto& buf = document.getBuffer();
@@ -785,12 +794,14 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     juce::MemoryInputStream in(data, (size_t) sizeInBytes, false);
     const int magic = in.readInt();
-    if (magic != kStateMagic && magic != kStateMagicR3W7
+    if (magic != kStateMagic && magic != kStateMagicR3W8 && magic != kStateMagicR3W7
         && magic != kStateMagicR3W6 && magic != kStateMagicR3W5)
         return;
-    const bool hasBaseWidthFilter = (magic == kStateMagic);                               // R3W8+
+    const bool hasBaseWidthFilter = (magic == kStateMagic || magic == kStateMagicR3W8);    // R3W8+
+    const bool hasDriveField      = (magic == kStateMagic);                                // R3W9+
     const bool hasOldModeFilter   = (magic == kStateMagicR3W7 || magic == kStateMagicR3W6);
-    const bool hasGainField       = (magic == kStateMagic || magic == kStateMagicR3W7);
+    const bool hasGainField       = (magic == kStateMagic || magic == kStateMagicR3W8
+                                     || magic == kStateMagicR3W7);
 
     double sr = in.readDouble();
     int numCh = in.readInt();
@@ -805,12 +816,14 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     double str = in.readDouble();
     double thresh = in.readDouble();
 
-    double fBase = 0.0, fWidth = 1.0, fRes = 0.0, gDb = 0.0;
+    double fBase = 0.0, fWidth = 1.0, fRes = 0.0, fDrive = 0.0, gDb = 0.0;
     if (hasBaseWidthFilter)
     {
         fBase  = in.readDouble();
         fWidth = in.readDouble();
         fRes   = in.readDouble();
+        if (hasDriveField)
+            fDrive = in.readDouble();
     }
     else if (hasOldModeFilter)
     {
@@ -863,6 +876,7 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     document.filterBase.store(juce::jlimit(0.0, 1.0, fBase));
     document.filterWidth.store(juce::jlimit(0.0, 1.0, fWidth));
     document.filterResonance.store(juce::jlimit(0.0, 1.0, fRes));
+    document.filterDrive.store(juce::jlimit(0.0, 1.0, fDrive));
     document.playbackGainDb.store(juce::jlimit(AudioDocument::kMinGainDb, AudioDocument::kMaxGainDb, gDb));
 
     document.clearSliceMarkers();   // session-only; a restored document starts with no markers
