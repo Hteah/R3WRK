@@ -3,6 +3,21 @@
  #include "StandaloneWindowShape.h"
 #endif
 
+namespace
+{
+    // R3WRK's own "drag a selection out to Ableton/Finder" temp files live in this folder
+    // (see WaveformDisplay::beginSelectionDragExport). Dragging one back onto our own window
+    // and releasing it there must NOT reload it as a new document -- that's an accidental
+    // self-drop, not the user opening a file. Dragging OUT still works; this only refuses the
+    // round trip back in.
+    bool isOwnSelectionDragFile(const juce::String& path)
+    {
+        static const auto dragDir = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                                        .getChildFile("R3WRK");
+        return juce::File(path).isAChildOf(dragDir);
+    }
+}
+
 R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
     : AudioProcessorEditor(&p),
       standaloneWindow(p.wrapperType == juce::AudioProcessor::wrapperType_Standalone),
@@ -264,6 +279,12 @@ bool R3WRKAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
 
 bool R3WRKAudioProcessorEditor::isInterestedInFileDrag(const juce::StringArray& files)
 {
+    // A selection dragged out of our own waveform, released back over our window -> ignore it
+    // (the user was aiming at another app and missed). Dragging out still works.
+    for (auto& f : files)
+        if (isOwnSelectionDragFile(f))
+            return false;
+
     // Same extensions Tools ▾ -> "Open…"'s FileChooser filters to (EditorToolbar::openFile()).
     for (auto& f : files)
         if (juce::File(f).hasFileExtension("wav;aiff;aif;flac;ogg;mp3"))
@@ -290,6 +311,9 @@ void R3WRKAudioProcessorEditor::filesDropped(const juce::StringArray& files, int
 
     for (auto& f : files)
     {
+        if (isOwnSelectionDragFile(f))
+            return;   // our own selection export, dropped back onto us -- ignore (see above)
+
         juce::File file(f);
         if (file.hasFileExtension("wav;aiff;aif;flac;ogg;mp3"))
         {
