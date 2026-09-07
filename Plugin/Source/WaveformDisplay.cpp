@@ -94,6 +94,30 @@ int64_t WaveformDisplay::playheadDrawSample() const
 
 void WaveformDisplay::timerCallback()
 {
+    // A selection drag parked at a side edge: scroll the view that way and re-derive the
+    // dragged marker from the (edge-pinned) pointer x, so it tracks over the newly revealed
+    // content. Driven here, not from mouseDrag, so it keeps going while the pointer is held
+    // still against the edge. panByPixels() no-ops when fully zoomed out and clamps at the
+    // clip ends, so the scroll naturally stops there.
+    if (edgeScrollDir != 0
+        && (dragKind == DragKind::newSelection
+            || dragKind == DragKind::resizeStart || dragKind == DragKind::resizeEnd))
+    {
+        const float w = (float) juce::jmax(1, getWidth());
+        const float depthPastInner = edgeScrollDir < 0 ? (edgeScrollZonePx - edgeScrollMouseX)
+                                                       : (edgeScrollMouseX - (w - edgeScrollZonePx));
+        const float stepPx = juce::jlimit(8.0f, 40.0f, depthPastInner * 1.5f);
+        panByPixels((float) -edgeScrollDir * stepPx);   // dir +1 -> viewStart increases
+
+        const int64_t f  = xToSample(edgeScrollMouseX);
+        const int64_t lo = juce::jmin(dragAnchor, f);
+        const int64_t hi = juce::jmax(dragAnchor, f);
+        if (dragKind == DragKind::newSelection)
+            document.setSelection(lo, hi);
+        else
+            document.setSelection(lo, juce::jmax(hi, lo + 1));
+    }
+
     // Rebuild whenever the audio content changed, or the view range is stale / degenerate,
     // or the component was resized before the buffer existed. Cheaper than trusting only the
     // async ChangeBroadcaster, and self-heals any ordering race on first load.
@@ -1152,7 +1176,8 @@ void WaveformDisplay::mouseDrag(const juce::MouseEvent& e)
         return;
     }
 
-    const int64_t f  = xToSample((float) e.x);
+    const float   mx = (float) e.x;
+    const int64_t f  = xToSample(mx);
     const int64_t lo = juce::jmin(dragAnchor, f);
     const int64_t hi = juce::jmax(dragAnchor, f);
 
@@ -1160,10 +1185,20 @@ void WaveformDisplay::mouseDrag(const juce::MouseEvent& e)
         document.setSelection(lo, hi);                    // end <= start reads as "no selection"
     else
         document.setSelection(lo, juce::jmax(hi, lo + 1));
+
+    // Pointer at (or past) a side edge -> arm the auto-scroll; timerCallback() drives it, so it
+    // keeps going even while the pointer is held still against the edge (mouseDrag stops firing).
+    const float w = (float) juce::jmax(1, getWidth());
+    edgeScrollMouseX = juce::jlimit(0.0f, w, mx);
+    edgeScrollDir = mx <= edgeScrollZonePx        ? -1
+                  : mx >= w - edgeScrollZonePx    ?  1
+                  :                                  0;
 }
 
 void WaveformDisplay::mouseUp(const juce::MouseEvent& e)
 {
+    edgeScrollDir = 0;   // the drag is over -- stop any edge auto-scroll
+
     if (document.sliceModeEnabled)
     {
         const bool wasClick = e.getDistanceFromDragStart() < 4 && ! sliceDragMoved;

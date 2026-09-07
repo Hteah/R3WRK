@@ -170,6 +170,13 @@ private:
     bool dragOutStarted = false;     // the native file drag for this gesture has been kicked off
     static constexpr float edgeTolerancePx = 8.0f;
 
+    // While a selection drag is parked at (or past) a side edge, timerCallback() auto-scrolls
+    // the view that way so the marker can be dragged deeper than the current viewport shows.
+    // dir: -1 left / +1 right / 0 not scrolling. mouseX is the pointer x clamped on-screen.
+    static constexpr float edgeScrollZonePx = 28.0f;
+    int   edgeScrollDir = 0;
+    float edgeScrollMouseX = 0.0f;
+
     // Scrub tool (document.scrubModeEnabled) -- entirely separate from the DragKind state
     // above; a scrub drag never touches the selection. Shuttle-style: mouseDown drops an
     // anchor at the press point, and mouseDrag derives a velocity (raw samples/sec, signed)

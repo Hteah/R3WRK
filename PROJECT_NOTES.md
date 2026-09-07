@@ -585,6 +585,16 @@ points, else the whole clip) straight from the buffer under a try-lock. The
   an edge, centred if the selection is wider than the view, no-op fully zoomed
   out.
 
+Dragging a selection bracket (`DragKind::resizeStart`/`resizeEnd`/`newSelection`)
+with the *mouse* to a side edge does the same by a different route: `mouseDrag`
+arms `edgeScrollDir` (±1) whenever the pointer is within `edgeScrollZonePx` (28)
+of an edge, and `timerCallback()` (30 Hz, so it keeps going while the pointer is
+held still) pans via `panByPixels()` — 8→40 px/tick, faster the deeper past the
+zone's inner edge — and re-derives the dragged marker from the edge-pinned
+pointer x so it tracks over the newly revealed content. `panByPixels()` no-ops
+fully zoomed out and clamps at the clip ends, so the scroll stops there;
+`mouseUp` clears `edgeScrollDir`.
+
 Speed / Pitch / Stretch live as `std::atomic<double>` on `AudioDocument` (not the
 processor — so views can read them too, see "Visual time-stretch" below). When
 *all three* are centred (`speed==1`, `pitch==0`, `stretch==1`) playback is a plain
