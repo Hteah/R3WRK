@@ -184,7 +184,7 @@ void R3WRKAudioProcessorEditor::resized()
         {
             // Float-on-top toggle at the far right, in line with the file name -- a small
             // rounded rect (its own shape, not a pill), like RCRDR / Sieve.
-            floatOnTopButton.setBounds(headerRow.removeFromRight(34).withSizeKeepingCentre(32, 24));
+            floatOnTopButton.setBounds(headerRow.removeFromRight(42).withSizeKeepingCentre(40, 26));
             headerRow.removeFromRight(6);
         }
         header.setBounds(headerRow);

@@ -331,46 +331,60 @@ namespace
         g.fillEllipse (cx - r, screen.getCentreY() - r, r * 2.0f, r * 2.0f);
     }
 
-    // Float on top: a freehand of macOS's `pip.enter` glyph (the icon RCRDR uses) -- a rounded
-    // "window" outline, a small filled box tucked into its bottom-right corner, and a short
-    // diagonal arrow pointing down-right into that box. Accent-filled button while the toggle
-    // is on.
+    // Float on top: a close trace of macOS's `pip.enter` symbol -- a stroked landscape
+    // "window", a big filled rounded box overlapping and poking out of its lower-right (it
+    // covers the window outline where they meet), and a solid down-right arrow (thick shaft +
+    // filled triangular head) in the upper-left. Accent-filled button while the toggle is on.
     void drawFloatTopIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
     {
-        // A centred landscape "window" rectangle. Height off the button height (with margin),
-        // width from a fixed window aspect -- clamped so it can't overrun a narrow button.
-        const float ih = juce::jmin (bounds.getHeight() * 0.68f, bounds.getWidth() * 0.62f);
-        const float iw = ih / 0.80f;
-        juce::Rectangle<float> win (bounds.getCentreX() - iw * 0.5f,
-                                    bounds.getCentreY() - ih * 0.5f, iw, ih);
-        const float stroke = juce::jmax (1.5f, ih * 0.13f);
+        // Window rect, ~1.32:1. The corner box sticks ~0.30*winW right and ~0.32*winH below,
+        // so lay the whole composite out and centre it in `bounds`.
+        const float winH = juce::jmin (bounds.getHeight() * 0.66f, bounds.getWidth() * 0.52f);
+        const float winW = winH * 1.32f;
+        const float outR = winW * 0.30f;
+        const float outB = winH * 0.32f;
+
+        const float wx = bounds.getCentreX() - (winW + outR) * 0.5f;
+        const float wy = bounds.getCentreY() - (winH + outB) * 0.5f;
+        juce::Rectangle<float> win (wx, wy, winW, winH);
+
+        const float stroke = juce::jmax (1.6f, winH * 0.11f);
 
         g.setColour (ink);
-        g.drawRoundedRectangle (win.reduced (stroke * 0.5f), ih * 0.20f, stroke);
 
-        // Filled box tucked into the bottom-right corner.
-        const float bw = iw * 0.46f, bh = ih * 0.46f;
-        juce::Rectangle<float> box (win.getRight()  - bw - stroke * 0.6f,
-                                    win.getBottom() - bh - stroke * 0.6f, bw, bh);
-        g.fillRoundedRectangle (box, ih * 0.13f);
+        // 1. Window outline.
+        g.drawRoundedRectangle (win.reduced (stroke * 0.5f), winH * 0.16f, stroke);
 
-        // Short diagonal arrow pointing down-right into the box's top-left corner.
-        const juce::Point<float> tip  (box.getX() - stroke * 0.2f, box.getY() - stroke * 0.2f);
-        const juce::Point<float> tail (win.getX() + iw * 0.30f,    win.getY() + ih * 0.32f);
+        // 2. Corner box, drawn on top so the window outline reads as "cut" where they meet.
+        juce::Rectangle<float> box (win.getX() + winW * 0.455f,
+                                    win.getY() + winH * 0.490f,
+                                    winW * 0.845f,
+                                    winH * 0.825f);
+        g.fillRoundedRectangle (box, winH * 0.17f);
+
+        // 3. Arrow, upper-left, pointing down-right.
+        const float tx = win.getX() + winW * 0.13f, ty = win.getY() + winH * 0.16f;   // tail
+        const float px = win.getX() + winW * 0.40f, py = win.getY() + winH * 0.52f;   // tip
+        float dx = px - tx, dy = py - ty;
+        const float len = juce::jmax (0.0001f, std::sqrt (dx * dx + dy * dy));
+        dx /= len; dy /= len;                       // unit shaft direction
+        const float nx = -dy, ny = dx;             // perpendicular
+
+        const float hl = winH * 0.30f;             // head length back from the tip
+        const float hw = winH * 0.24f;             // head half-width
 
         juce::Path shaft;
-        shaft.startNewSubPath (tail);
-        shaft.lineTo (tip);
+        shaft.startNewSubPath (tx, ty);
+        shaft.lineTo (px - dx * hl * 0.6f, py - dy * hl * 0.6f);
         g.strokePath (shaft, juce::PathStrokeType (stroke, juce::PathStrokeType::curved,
                                                    juce::PathStrokeType::rounded));
 
-        const float ah = ih * 0.30f;
         juce::Path head;
-        head.startNewSubPath (tip.x - ah, tip.y);
-        head.lineTo (tip.x, tip.y);
-        head.lineTo (tip.x, tip.y - ah);
-        g.strokePath (head, juce::PathStrokeType (stroke, juce::PathStrokeType::curved,
-                                                  juce::PathStrokeType::rounded));
+        head.startNewSubPath (px, py);
+        head.lineTo (px - dx * hl + nx * hw, py - dy * hl + ny * hw);
+        head.lineTo (px - dx * hl - nx * hw, py - dy * hl - ny * hw);
+        head.closeSubPath();
+        g.fillPath (head);
     }
 }
 

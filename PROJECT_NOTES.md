@@ -1731,10 +1731,13 @@ corrected to the **right** side; wants RCRDR's icon -- the `pip.enter` SF Symbol
 `r3wrkSetWindowFloatOnTop(component, bool)` in `StandaloneWindowShape.mm` sets
 `nsWindow.level = onTop ? NSFloatingWindowLevel : NSNormalWindowLevel` (same as the other two
 apps). `PluginEditor` owns a toggling `floatOnTopButton` (`R3WRKLookAndFeel::iconFloatTop` +
-`drawFloatTopIcon` -- a freehand of `pip.enter`: a landscape rounded-rect "window", a filled
-box in its bottom-right corner, a short ↘ arrow into that box), added only when
-`standaloneWindow`; `resized()` carves a 34px slot off the **right** of the header row (button
-32x24, vertically centred), in line with the file name (below the traffic lights). Unlike the
+`drawFloatTopIcon` -- a close trace of `pip.enter` (rendered the actual SF Symbol to a PNG
+and matched proportions): a stroked landscape "window", a big filled rounded box that overlaps
++ pokes out of its lower-right (drawn on top, so the window outline reads as "cut" where they
+meet), and a solid ↘ arrow (thick shaft + filled triangular head) in the window's upper-left),
+added only when `standaloneWindow`; `resized()` carves a 42px slot off the **right** of the
+header row (button 40x26, vertically centred), in line with the file name (below the traffic
+lights). Unlike the
 other buttons it's **not** a pill/circle -- `R3WRKIconRectLookAndFeel` (subclass of
 `R3WRKLookAndFeel`, keeps the icon rendering) draws a small-radius rounded rect with a faint
 constant tint + hairline border, accent-filled while on -- the way RCRDR / Sieve draw their
