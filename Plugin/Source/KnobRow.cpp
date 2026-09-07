@@ -272,13 +272,18 @@ void KnobRow::resized()
     const int avail = juce::jmax(0, r.getWidth() - gap * (n - 1));
     const int knobW = juce::jlimit(46, 53, avail / n);
 
-    for (auto* k : knobs)
+    for (int i = 0; i < knobs.size(); ++i)
     {
         if (r.getWidth() < 24) break;
+        auto* k = knobs[i];
         auto col = r.removeFromLeft(juce::jmin(knobW, r.getWidth()));
         k->caption.setBounds(col.removeFromTop(14));
         k->slider.setBounds(col);
-        r.removeFromLeft(gap);
+
+        // Double the gap where a section-divider dot sits (before knob 3 / 6 / 8, i.e. after
+        // knob 2 / 5 / 7 -- see paint()), so the dot has room and the groups read clearly.
+        const bool beforeDot = (i == 2 || i == 5 || i == 7);
+        r.removeFromLeft(beforeDot ? gap * 2 : gap);
     }
     repaint();   // reposition the section dividers for the new knob width
 }
