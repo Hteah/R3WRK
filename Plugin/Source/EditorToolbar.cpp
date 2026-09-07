@@ -1125,7 +1125,13 @@ void EditorToolbar::exportSelectionToFolder()
 
     if (EditActions::exportSelection(document, file, opts))
     {
-        file.revealToUser();   // open Finder with the exported file selected
+        // Reveal in Finder, the same way "Capture Output" does on stop. Deferred a beat:
+        // this runs inside the Tools popup-menu callback, and the menu's native window
+        // tearing down immediately afterwards otherwise pulls focus straight back off Finder
+        // the instant it comes forward -- the Capture Output button has no menu teardown, so
+        // its reveal lands cleanly without this. Capturing `file` by value (no `this`), so
+        // it's safe even if the toolbar is gone by the time it fires.
+        juce::Timer::callAfterDelay(200, [file] { file.revealToUser(); });
         if (onStatusMessage) onStatusMessage("Exported " + file.getFileName());
     }
     else if (onStatusMessage)
