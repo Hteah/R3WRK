@@ -26,6 +26,10 @@ public:
     KnobRow(AudioDocument& document, bool standalone);
     ~KnobRow() override;
 
+    // Fired while the Start / End knobs slide the selection, so the editor can scroll the
+    // waveform view to keep the selection markers on screen when zoomed in.
+    std::function<void()> onSelectionKnobMoved;
+
     void resized() override;
     void paint(juce::Graphics&) override;   // faint group dividers between the knob sections
 

@@ -129,6 +129,7 @@ KnobRow::KnobRow(AudioDocument& doc, bool standalone)
                 if (e <= s) e = juce::jmin(n, s + 1);
             }
             document.setSelection(s, e);
+            if (onSelectionKnobMoved) onSelectionKnobMoved();
         };
         k.pull = [this]
         {
@@ -153,6 +154,7 @@ KnobRow::KnobRow(AudioDocument& doc, bool standalone)
             int64_t s = fracToSample(startKnob->slider.getValue(), n);
             if (s >= e) s = juce::jmax((int64_t) 0, e - 1);
             document.setSelection(s, e);
+            if (onSelectionKnobMoved) onSelectionKnobMoved();
         };
         k.pull = [this]
         {

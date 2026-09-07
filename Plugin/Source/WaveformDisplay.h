@@ -65,6 +65,11 @@ public:
     void zoomIn();
     void zoomOut();
 
+    // Scroll the view (no zoom change) so the current selection stays in frame -- called
+    // while the KnobRow's Start/End knobs slide the selection, so it doesn't run off-screen
+    // when you're zoomed in. No-op when zoomed all the way out or with no selection.
+    void scrollSelectionIntoView();
+
     // Left/Right arrow keys (see PluginEditor::keyPressed). dir = -1 back / +1 forward.
     // Scrolls the view by a step; while stopped, the playhead rides along by the same amount
     // (so the red line stays put on screen while the waveform slides, and still moves when the

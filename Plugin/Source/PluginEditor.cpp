@@ -65,6 +65,9 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
     // Slice tool: clicking a slice has already set the selection + playhead; kick off playback.
     waveformDisplay.onSlicePlay = [this] { processorRef.startPlayback(); };
 
+    // Turning the Start / End knobs slides the selection -- keep it on screen when zoomed in.
+    knobRow.onSelectionKnobMoved = [this] { waveformDisplay.scrollSelectionIntoView(); };
+
     // Follow-playhead toggle -- header row, every build (moved off the transport strip).
     followButton.setClickingTogglesState(true);
     followButton.setWantsKeyboardFocus(false);

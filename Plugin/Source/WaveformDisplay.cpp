@@ -380,6 +380,47 @@ void WaveformDisplay::panByPixels(float dxPixels)
     repaint();
 }
 
+void WaveformDisplay::scrollSelectionIntoView()
+{
+    if (! document.hasSelection())
+        return;
+
+    const int64_t span    = viewEnd - viewStart;
+    const int64_t maxSpan = maxViewSpan();
+    if (span <= 0 || span >= maxSpan)
+        return;   // fully zoomed out -- the whole clip is visible, nothing to follow
+
+    // Raw samples visible across the width, and the visible raw window's left/right edges
+    // (viewStart is the left edge in the same sense xToSample(0) uses; see xToSample()).
+    const double  timeScale = juce::jmax(0.0001, document.getTimeScale());
+    const int64_t visRaw    = juce::jmax((int64_t) 1, (int64_t) ((double) span / timeScale));
+    const int64_t visLeft   = viewStart;
+    const int64_t visRight  = viewStart + visRaw;
+
+    const int64_t selS = document.getSelectionStart();
+    const int64_t selE = document.getSelectionEnd();
+    const int64_t margin = visRaw / 12;   // start tracking a little before a marker hits the edge
+
+    int64_t newStart = viewStart;
+    if (selE - selS >= visRaw)
+        newStart = (selS + selE) / 2 - visRaw / 2;              // wider than the view -> centre it
+    else if (selS - margin < visLeft)
+        newStart = selS - margin;                                // start marker near/past the left
+    else if (selE + margin > visRight)
+        newStart = selE + margin - visRaw;                       // end marker near/past the right
+    else
+        return;                                                  // selection already comfortably in view
+
+    newStart = juce::jlimit((int64_t) 0, juce::jmax((int64_t) 0, maxSpan - span), newStart);
+    if (newStart == viewStart)
+        return;
+
+    viewStart = newStart;
+    viewEnd   = newStart + span;
+    rebuildWaveformPath();
+    repaint();
+}
+
 void WaveformDisplay::rebuildPeakCache()
 {
     juce::AudioBuffer<float> copy;

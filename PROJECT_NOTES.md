@@ -578,7 +578,12 @@ points, else the whole clip) straight from the buffer under a try-lock. The
 - **Start / End** — normalised (0–1) knobs on the document selection edges,
   reading out as `m:ss.mmm` and following bracket drags. Start slides the whole
   window (End moves with it, length preserved, pegs at the buffer end); End
-  moves independently to change the length.
+  moves independently to change the length. While either knob is turned,
+  `KnobRow::onSelectionKnobMoved` fires → `WaveformDisplay::scrollSelectionIntoView()`
+  scrolls the view (no zoom change) to keep the selection markers on screen when
+  zoomed in — minimal scroll once a marker comes within ~1/12 of the viewport of
+  an edge, centred if the selection is wider than the view, no-op fully zoomed
+  out.
 
 Speed / Pitch / Stretch live as `std::atomic<double>` on `AudioDocument` (not the
 processor — so views can read them too, see "Visual time-stretch" below). When
