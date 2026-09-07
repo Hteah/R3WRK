@@ -585,19 +585,22 @@ void EditorToolbar::paint(juce::Graphics& g)
     g.setColour(theme->palette().panelBg);
     g.fillRoundedRectangle(getLocalBounds().toFloat(), 10.0f);
 
-    // A single small dot centred in the (widened, see resized()) gap between two buttons, at
-    // each group boundary: [standalone] around the secondary recording group -- after
-    // Record/Auto-Record and before Reverse -- and, in every build, between the waveform
-    // tools (Slice) and the Tools menu.
-    g.setColour(theme->palette().screenText.withAlpha(0.45f));
+    // A small dot inside a thin ring, centred in the (widened, see resized()) gap between two
+    // buttons, at each group boundary: [standalone] around the secondary recording group --
+    // after Record/Auto-Record and before Reverse -- and, in every build, between the waveform
+    // tools (Slice) and the Tools menu. Matches the KnobRow section-divider mark.
+    const auto ink = theme->palette().screenText;
     auto dotBetween = [&](const juce::Component& left, const juce::Component& right)
     {
         if (right.getX() <= left.getRight())
             return;   // not laid out yet
         const float x  = (left.getRight() + right.getX()) * 0.5f;
         const float cy = (float) getHeight() * 0.5f;
-        constexpr float radius = 2.0f;
-        g.fillEllipse(x - radius, cy - radius, radius * 2.0f, radius * 2.0f);
+        constexpr float dotR = 1.75f, ringR = 5.0f;
+        g.setColour(ink.withAlpha(0.55f));
+        g.fillEllipse(x - dotR, cy - dotR, dotR * 2.0f, dotR * 2.0f);
+        g.setColour(ink.withAlpha(0.35f));
+        g.drawEllipse(x - ringR, cy - ringR, ringR * 2.0f, ringR * 2.0f, 1.0f);
     };
 
     if (standaloneApp)
