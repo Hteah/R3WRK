@@ -291,14 +291,14 @@ void KnobRow::resized()
 
 void KnobRow::paint(juce::Graphics& g)
 {
-    // A small thin ring, centred in the gap before each of these knob indices, marking the
+    // A small filled circle, centred in the gap before each of these knob indices, marking the
     // section boundaries: time/pitch | filter | selection | output gain. Index 8 (Gain) only
     // exists in the Standalone build.
     static constexpr int boundaryBefore[] = { 3 /*Base*/, 6 /*Start*/, 8 /*Gain*/ };
 
-    const float cy  = (float) getHeight() * 0.5f;
-    constexpr float ringR = 5.0f;
-    g.setColour(theme->palette().text.withAlpha(0.42f));
+    const float cy = (float) getHeight() * 0.5f;
+    constexpr float r = 5.0f;
+    g.setColour(theme->palette().text.withAlpha(0.35f));
 
     for (int idx : boundaryBefore)
     {
@@ -309,6 +309,6 @@ void KnobRow::paint(juce::Graphics& g)
         if (right.getX() <= left.getRight())
             continue;   // not laid out yet
         const float x = (float) (left.getRight() + right.getX()) * 0.5f;
-        g.drawEllipse(x - ringR, cy - ringR, ringR * 2.0f, ringR * 2.0f, 1.0f);
+        g.fillEllipse(x - r, cy - r, r * 2.0f, r * 2.0f);
     }
 }
