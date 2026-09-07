@@ -261,7 +261,8 @@ void KnobRow::timerCallback()
 void KnobRow::resized()
 {
     auto r = getLocalBounds().reduced(4, 2);
-    const int gap = 2;
+    const int gap    = 2;
+    const int dotGap = 16;   // the wider gap at a section-divider dot (before knob 3 / 6 / 8)
     const int n = juce::jmax(1, knobs.size());
 
     // Auto-fit: prefer a fairly tight column, but shrink further so every knob still shows at
@@ -280,10 +281,10 @@ void KnobRow::resized()
         k->caption.setBounds(col.removeFromTop(14));
         k->slider.setBounds(col);
 
-        // Double the gap where a section-divider dot sits (before knob 3 / 6 / 8, i.e. after
-        // knob 2 / 5 / 7 -- see paint()), so the dot has room and the groups read clearly.
+        // A wide gap where a section-divider dot sits (before knob 3 / 6 / 8, i.e. after
+        // knob 2 / 5 / 7 -- see paint()), so the groups read as distinct blocks.
         const bool beforeDot = (i == 2 || i == 5 || i == 7);
-        r.removeFromLeft(beforeDot ? gap * 2 : gap);
+        r.removeFromLeft(beforeDot ? dotGap : gap);
     }
     repaint();   // reposition the section dividers for the new knob width
 }
