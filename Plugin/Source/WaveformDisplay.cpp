@@ -466,37 +466,62 @@ void WaveformDisplay::rebuildWaveformPath()
     const int smearRadius = juce::jlimit(0, 8,
                                 juce::roundToInt(std::abs(std::log2(timeScale)) * 1.4));
 
-    // Deep zoom (fewer than one peak-cache bin per pixel): copy just the actually-visible raw
-    // span (w * samplesPerPixel raw samples -- bounded even at extreme Stretch, unlike the full
-    // [viewStart,viewEnd) range) so the per-pixel loop below can read real samples. Try-lock
-    // only -- with follow-playhead on during playback this runs every frame, and a blocking
-    // lock would keep beating processBlock's try-lock -> dropped block -> crackle. If we can't
-    // get it, `raw` stays empty and the loop falls back to the (coarser) bin cache this frame.
-    juce::AudioBuffer<float> raw;
-    int64_t rawStart = 0;
+    // Deep zoom (fewer than one peak-cache bin per pixel): draw from a copy of the real
+    // samples. `rawCache` holds a span WIDER than the viewport and is kept across rebuilds --
+    // it's only refreshed when the view has scrolled past its margins or the audio changed --
+    // so a frame whose try-lock on getLock() loses to processBlock still has samples to draw
+    // (before, a lock-miss frame fell back to the blocky bin cache, strobing the waveform
+    // during follow-playhead playback). Try-lock only -- a blocking lock would beat
+    // processBlock's try-lock -> dropped block -> crackle.
     if (samplesPerPixel < (double) peakBinSize)
     {
-        rawStart = juce::jlimit((int64_t) 0, total, viewStart);
-        const int64_t visibleSamples = (int64_t) (samplesPerPixel * (double) w) + 6;
-        const int rawLen = (int) juce::jlimit((int64_t) 0, total - rawStart, visibleSamples);
-        const juce::CriticalSection::ScopedTryLockType sl(document.getLock());
-        if (sl.isLocked())
+        const int64_t firstVis = juce::jlimit((int64_t) 0, total, viewStart);
+        const int64_t visible  = (int64_t) (samplesPerPixel * (double) w) + 8;
+        const int64_t lastVis  = juce::jlimit((int64_t) 0, total, firstVis + visible);
+
+        const bool cacheCovers = rawCacheVersion == document.getBufferVersion()
+                              && rawCache.getNumSamples() > 0
+                              && rawCacheStart <= firstVis
+                              && rawCacheStart + (int64_t) rawCache.getNumSamples() >= lastVis;
+
+        if (! cacheCovers)
         {
-            auto& src = document.getBuffer();
-            const int copyLen = juce::jmin(rawLen, src.getNumSamples() - (int) rawStart);
-            if (copyLen > 0)
+            const juce::CriticalSection::ScopedTryLockType sl(document.getLock());
+            if (sl.isLocked())
             {
-                raw.setSize(src.getNumChannels(), copyLen);
-                for (int ch = 0; ch < src.getNumChannels(); ++ch)
-                    raw.copyFrom(ch, 0, src, ch, (int) rawStart, copyLen);
+                auto& src = document.getBuffer();
+                const int64_t srcLen = (int64_t) src.getNumSamples();
+                const int64_t margin = juce::jmax(visible, (int64_t) 8192) * 2;   // scroll slack each side
+                const int64_t wantStart = juce::jlimit((int64_t) 0, srcLen, firstVis - margin);
+                const int64_t wantLen   = juce::jmax((int64_t) 0,
+                                              juce::jmin(srcLen - wantStart, (lastVis - wantStart) + margin));
+                if (wantLen > 0 && src.getNumChannels() > 0)
+                {
+                    rawCache.setSize(src.getNumChannels(), (int) wantLen, false, false, true);
+                    for (int ch = 0; ch < src.getNumChannels(); ++ch)
+                        rawCache.copyFrom(ch, 0, src, ch, (int) wantStart, (int) wantLen);
+                    rawCacheStart = wantStart;
+                    rawCacheVersion = document.getBufferVersion();
+                }
             }
         }
     }
 
+    // The cache is usable this frame if it's for the current audio and starts at or before the
+    // view. Per-pixel/per-sample loops below still bounds-check each index, so a cache that
+    // only partially covers the right edge just leaves a sliver of bin-cache pixels there,
+    // never a full strobe.
+    const bool haveRaw = samplesPerPixel < (double) peakBinSize
+                      && rawCacheVersion == document.getBufferVersion()
+                      && rawCache.getNumSamples() > 0
+                      && rawCacheStart <= juce::jmax((int64_t) 0, viewStart);
+    const juce::AudioBuffer<float>& raw = rawCache;
+    const int64_t rawStart = rawCacheStart;
+
     // Once there's more than a pixel per sample, a min/max envelope has nothing left to show --
     // it flattens into a sample-and-hold staircase. Draw a polyline through the actual sample
     // values instead (paint() strokes it), and past ~5 px/sample also mark each sample.
-    waveformIsSampleLine = raw.getNumSamples() > 0 && samplesPerPixel < 1.0;
+    waveformIsSampleLine = haveRaw && samplesPerPixel < 1.0;
     showSampleDots       = waveformIsSampleLine && samplesPerPixel < 0.2;
     if (waveformIsSampleLine)
         sampleDots.assign((size_t) numCh, {});
@@ -552,7 +577,7 @@ void WaveformDisplay::rebuildWaveformPath()
 
             float mn = 0.0f, mx = 0.0f;
             const int64_t r0 = s0 - rawStart, r1 = s1 - rawStart;
-            if (raw.getNumSamples() > 0 && ch < raw.getNumChannels()
+            if (haveRaw && ch < raw.getNumChannels()
                 && r0 >= 0 && r1 <= raw.getNumSamples() && r1 > r0)
             {
                 const auto r = juce::FloatVectorOperations::findMinAndMax(raw.getReadPointer(ch) + r0,

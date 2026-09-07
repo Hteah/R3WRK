@@ -151,6 +151,16 @@ private:
     int peakVersion = -1;
     int64_t peakTotalSamples = 0;
 
+    // Deep-zoom raw-sample cache: a copy of a span wider than the viewport, kept across
+    // rebuilds so a frame whose try-lock on getLock() loses to processBlock still has real
+    // samples to draw from -- otherwise, with follow-playhead on during playback,
+    // rebuildWaveformPath() ran every frame and the lock-miss frames fell back to the coarse
+    // bin cache, strobing the waveform between the fine and blocky renders. Refreshed only
+    // when the view scrolls past its margins or the audio content changes.
+    juce::AudioBuffer<float> rawCache;
+    int64_t rawCacheStart = 0;
+    int rawCacheVersion = -1;
+
     // A scroll/trackpad gesture sends a rapid burst of small wheel events; re-reading the
     // pointer's exact x on every single one means incidental mouse jitter during the gesture
     // (nobody's hand is perfectly still) nudges the zoom anchor a little each time, drifting

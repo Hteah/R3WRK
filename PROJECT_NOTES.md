@@ -530,9 +530,21 @@ Zoom / pan / resize call `rebuildWaveformPath()`, which builds the display
 access**. This matters because `processBlock` guards playback with a try-lock on
 `document.getLock()` and emits a silent block when it fails — so the old
 "scan the buffer under the lock on every wheel event" made playback click while
-zooming in a DAW. Deep zoom (< 64 samples/pixel) copies just the small visible
-span out under a brief `ScopedLock` for per-sample detail; `rebuildPeakCache()`
-holds the lock only for one `makeCopyOf`.
+zooming in a DAW. `rebuildPeakCache()` holds the lock only for one `makeCopyOf`.
+
+**Deep-zoom raw cache (`rawCache`).** Below 64 samples/pixel the bin cache is too
+coarse, so `rebuildWaveformPath()` draws from a copy of the real samples. That
+copy is now **kept across rebuilds** (`rawCache` / `rawCacheStart` /
+`rawCacheVersion`), spanning a margin (`max(visible, 8192) * 2` each side) beyond
+the viewport, and only refreshed — under a **try-lock** — when the view scrolls
+past that margin or `bufferVersion` changes. Fixes a strobe: with follow-playhead
+on during playback, `rebuildWaveformPath()` runs every frame, and the frames
+whose try-lock lost to `processBlock` used to fall back to the blocky bin cache,
+flickering the waveform (very visible at extreme Stretch, where bin-cache pixels
+each span a huge sample range). Now a lock-miss frame just reuses the cache;
+`haveRaw` gates both render paths and every index is still bounds-checked, so a
+cache that only partly covers the right edge leaves a thin sliver of bin pixels
+there rather than a full strobe.
 
 ## Thread safety
 
