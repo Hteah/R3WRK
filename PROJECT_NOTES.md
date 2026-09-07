@@ -1914,6 +1914,30 @@ system output), captures whatever is playing on the Mac straight into the editor
   Privacy & Security > Screen Recording). Ad-hoc-signed rebuilds can reset that grant, so it
   may need re-approving after a fresh build.
 
+## "Capture Output" -- tap R3WRK's own output to a file (Standalone only)
+
+User: "add a way to record the output of r3wrk. Press a button and it records to a new file
+that goes in the same r3wrk folder." A performance capture -- play / loop / scrub and twiddle
+the knobs, and it records exactly what you hear.
+
+- `PluginProcessor::captureOutput()` -- audio-thread-only single-producer append (same shape
+  as `recordingAccumulator`), called at the **end** of the playback branch, the scrub branch,
+  and the idle branch (so a stop/start of playback mid-capture doesn't splice the parts with
+  no gap -- idle is silence in the Standalone, where the input is muted). It taps `buffer`
+  *after* `applyPlaybackFilter` + `applyPlaybackGain`, so filter / gain / stretch / pitch are
+  all already baked in -- no `renderWithPlaybackKnobs` (that would double-apply).
+- `startOutputCapture()` seeds a 30 s buffer then sets `capturingOutput` last (so the audio
+  thread only appends once the buffer's ready). `stopOutputCaptureAndWrite(dest, opts)` clears
+  the flag, copies out `outputCaptureWritePos` samples, and writes via
+  `AudioDocument::writeAudioFile` (so it honours the Save Options format / rate / bit depth,
+  extension coerced). Returns the written `juce::File` (or `File()` on failure / empty).
+- `EditorToolbar::captureOutButton` (`iconCaptureOut` -- a record dot + downward arrow),
+  standalone-only, next to Record Desktop, outlined record-red, stop-square while capturing.
+  `toggleOutputCapture()` names the file `R3WRK capture <timestamp>.<ext>` in the output
+  folder, `revealToUser()`s it, flashes "Captured …". Disabled while a mic/desktop take is
+  running (and vice versa). The time readout shows `● CAP m:ss` (wall-clock from
+  `captureStartMs`) while capturing. Does NOT touch the document or the transport.
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).

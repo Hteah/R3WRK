@@ -350,7 +350,10 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     addAndMakeVisible(clearButton);
     addAndMakeVisible(autoRecordButton);
     if (standaloneApp)
+    {
         addAndMakeVisible(desktopRecButton);
+        addAndMakeVisible(captureOutButton);
+    }
 
     timeLabel.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::plain));
     timeLabel.setJustificationType(juce::Justification::centredRight);
@@ -378,6 +381,9 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     desktopRecButton.setTooltip("Record Desktop -- captures whatever audio is playing on this Mac "
                                 "straight into the editor (first use asks for Screen Recording "
                                 "permission in System Settings)");
+    captureOutButton.setTooltip("Capture Output -- records R3WRK's own output (stretch, pitch, "
+                                "filter, gain -- everything you hear) to a new file in the output "
+                                "folder. Press to start, press again to stop.");
 
     for (auto* b : { &playFromStartButton, &playButton, &loopButton, &scrubButton, &sliceButton,
                      &followButton, &recordButton, &toolsButton, &reverseButton, &clearButton,
@@ -399,6 +405,10 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
         desktopRecButton.setLookAndFeel(&toolbarLnF);
         desktopRecButton.setWantsKeyboardFocus(false);
         desktopRecButton.onClick = [this] { toggleDesktopRecording(); };
+
+        captureOutButton.setLookAndFeel(&toolbarLnF);
+        captureOutButton.setWantsKeyboardFocus(false);
+        captureOutButton.onClick = [this] { toggleOutputCapture(); };
 
         // The capture wrapper reports start/stop/errors on a background queue; PluginProcessor
         // already marshals to the message thread before calling this, so just surface it.
@@ -495,6 +505,7 @@ EditorToolbar::~EditorToolbar()
                      &autoRecordButton })
         b->setLookAndFeel(nullptr);   // detach before toolbarLnF is destroyed
     desktopRecButton.setLookAndFeel(nullptr);
+    captureOutButton.setLookAndFeel(nullptr);
     processor.onDesktopStatus = nullptr;
     theme->removeChangeListener(this);
     document.changeBroadcaster.removeChangeListener(this);
@@ -572,6 +583,10 @@ void EditorToolbar::applyTheme()
     desktopRecButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
     desktopRecButton.setColour(juce::TextButton::textColourOffId, pal.recordButton);
 
+    // Capture Output: same outlined record-red treatment as Record Desktop.
+    captureOutButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+    captureOutButton.setColour(juce::TextButton::textColourOffId, pal.recordButton);
+
     // timeLabel's colour flips to pal.playhead while recording -- see timerCallback().
     timeLabel.setColour(juce::Label::textColourId, pal.screenTextDim);
     repaint();
@@ -623,6 +638,37 @@ void EditorToolbar::toggleDesktopRecording()
         document.channelFocus = AudioDocument::ChannelFocus::stereo;
         if (onSourceNameChanged) onSourceNameChanged({});
         processor.startDesktopRecording();        // async -- document.isRecording flips on the started cb
+    }
+    updateTransportButtonText();
+}
+
+void EditorToolbar::toggleOutputCapture()
+{
+    if (processor.isCapturingOutput())
+    {
+        const auto opts = outputSettings->saveOptions();
+        const auto name = juce::Time::getCurrentTime().formatted("R3WRK capture %Y-%m-%d %H.%M.%S")
+                            + opts.extension();
+        const auto dest = outputSettings->folder().getChildFile(name).getNonexistentSibling();
+
+        const auto written = processor.stopOutputCaptureAndWrite(dest, opts);
+        if (written != juce::File())
+        {
+            written.revealToUser();
+            if (onStatusMessage) onStatusMessage("Captured " + written.getFileName());
+        }
+        else if (onStatusMessage)
+        {
+            onStatusMessage(opts.format == AudioSaveOptions::Format::mp3 && ! AudioDocument::mp3ExportAvailable()
+                                ? juce::String("MP3 needs the 'lame' tool -- brew install lame")
+                                : "Nothing captured");
+        }
+    }
+    else if (! document.isRecording.load())
+    {
+        processor.startOutputCapture();
+        captureStartMs = juce::Time::getMillisecondCounterHiRes();
+        if (onStatusMessage) onStatusMessage("Capturing output\xE2\x80\xA6");   // "Capturing output…"
     }
     updateTransportButtonText();
 }
@@ -909,9 +955,15 @@ void EditorToolbar::updateTransportButtonText()
 
     if (standaloneApp)
     {
+        const bool capturing = processor.isCapturingOutput();
+
         desktopRecButton.setButtonText(desktopRec ? R3WRKLookAndFeel::iconStop
                                                   : R3WRKLookAndFeel::iconDesktopRec);
-        desktopRecButton.setEnabled(desktopRec || (! micRec && ! playing));
+        desktopRecButton.setEnabled((desktopRec || (! micRec && ! playing)) && ! capturing);
+
+        captureOutButton.setButtonText(capturing ? R3WRKLookAndFeel::iconStop
+                                                 : R3WRKLookAndFeel::iconCaptureOut);
+        captureOutButton.setEnabled(capturing || ! rec);   // don't run alongside a mic/desktop take
     }
 }
 
@@ -939,6 +991,12 @@ void EditorToolbar::timerCallback()
         const double recSec = (double) document.recordedSamples.load() / sr;
         timeLabel.setColour(juce::Label::textColourId, theme->palette().playhead);
         timeLabel.setText(juce::String::fromUTF8("\xE2\x97\x8F REC  ") + mmss(recSec), juce::dontSendNotification);
+    }
+    else if (standaloneApp && processor.isCapturingOutput())
+    {
+        const double capSec = (juce::Time::getMillisecondCounterHiRes() - captureStartMs) / 1000.0;
+        timeLabel.setColour(juce::Label::textColourId, theme->palette().playhead);
+        timeLabel.setText(juce::String::fromUTF8("\xE2\x97\x8F CAP  ") + mmss(capSec), juce::dontSendNotification);
     }
     else
     {
@@ -1157,7 +1215,10 @@ void EditorToolbar::resized()
     add(recordButton, 28);
     add(autoRecordButton, 28);
     if (standaloneApp)
+    {
         add(desktopRecButton, 28);
+        add(captureOutButton, 28);
+    }
     add(scrubButton, 28);
     add(reverseButton, 28);
     add(sliceButton, 28);

@@ -345,6 +345,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         }
 
         applyPlaybackGain(buffer, numCh, numSamples);   // Gain knob rides scrub monitoring too
+        captureOutput(buffer, numCh, numSamples);
 
         wasScrubbing = true;
         wasPlaying = false;   // so normal playback resets the stretcher cleanly if it resumes
@@ -413,6 +414,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         // (a filtered near-silent block is still correct), and to both direct + stretched paths.
         applyPlaybackFilter(buffer, numCh, numSamples, ! wasPlaying);
         applyPlaybackGain(buffer, numCh, numSamples);
+        captureOutput(buffer, numCh, numSamples);
 
         wasPlaying = true;
         return;
@@ -438,6 +440,11 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         if (peakDb >= (float) document.autoRecordThresholdDb.load(std::memory_order_relaxed))
             document.autoRecordTriggered.store(true, std::memory_order_relaxed);
     }
+
+    // Keep the captured timeline continuous through idle gaps (in the Standalone the input is
+    // muted, so this is silence -- but it stops a stop/start of playback mid-capture from
+    // splicing the two parts together with no gap).
+    captureOutput(buffer, numCh, numSamples);
 }
 
 void R3WRKAudioProcessor::applyPlaybackFilter(juce::AudioBuffer<float>& buffer, int numCh, int numSamples,
@@ -487,6 +494,59 @@ void R3WRKAudioProcessor::applyPlaybackGain(juce::AudioBuffer<float>& buffer, in
 
     for (int ch = 0; ch < numCh; ++ch)
         buffer.applyGainRamp(ch, 0, numSamples, g0, g1);
+}
+
+void R3WRKAudioProcessor::captureOutput(const juce::AudioBuffer<float>& out, int numCh, int numSamples)
+{
+    if (! capturingOutput.load(std::memory_order_relaxed) || numSamples <= 0 || numCh <= 0)
+        return;
+
+    const int ch = juce::jlimit(1, 2, numCh);
+    const int64_t needed = outputCaptureWritePos + numSamples;
+    if (outputCaptureBuffer.getNumChannels() < ch || (int64_t) outputCaptureBuffer.getNumSamples() < needed)
+    {
+        int64_t cap = juce::jmax((int64_t) outputCaptureBuffer.getNumSamples(),
+                                 (int64_t) (currentSampleRate * 30.0));
+        while (cap < needed) cap *= 2;
+        outputCaptureBuffer.setSize(ch, (int) cap, true, true, true);
+    }
+    for (int c = 0; c < ch; ++c)
+        outputCaptureBuffer.copyFrom(c, (int) outputCaptureWritePos, out, juce::jmin(c, numCh - 1), 0, numSamples);
+    outputCaptureWritePos += numSamples;
+}
+
+void R3WRKAudioProcessor::startOutputCapture()
+{
+    if (capturingOutput.load(std::memory_order_relaxed))
+        return;
+    outputCaptureWritePos = 0;
+    outputCaptureBuffer.setSize(2, (int) juce::jmax(1.0, currentSampleRate * 30.0), false, true, true);
+    capturingOutput.store(true, std::memory_order_relaxed);   // last: audio thread only appends once the buffer's ready
+}
+
+juce::File R3WRKAudioProcessor::stopOutputCaptureAndWrite(const juce::File& dest, const AudioSaveOptions& opts)
+{
+    capturingOutput.store(false, std::memory_order_relaxed);
+
+    const int64_t n = outputCaptureWritePos;
+    const int ch = outputCaptureBuffer.getNumChannels();
+    if (n <= 0 || ch <= 0)
+    {
+        outputCaptureBuffer.setSize(0, 0);
+        outputCaptureWritePos = 0;
+        return {};
+    }
+
+    juce::AudioBuffer<float> finalBuf(ch, (int) n);
+    for (int c = 0; c < ch; ++c)
+        finalBuf.copyFrom(c, 0, outputCaptureBuffer, c, 0, (int) n);
+    outputCaptureBuffer.setSize(0, 0);
+    outputCaptureWritePos = 0;
+
+    const juce::File out = dest.withFileExtension(opts.extension());
+    if (! AudioDocument::writeAudioFile(std::move(finalBuf), currentSampleRate, out, opts))
+        return {};
+    return out;
 }
 
 void R3WRKAudioProcessor::startRecording()

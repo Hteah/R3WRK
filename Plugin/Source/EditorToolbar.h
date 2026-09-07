@@ -42,6 +42,7 @@ public:
     void saveInPlace();   // ⌘S -- overwrite the current file (falls back to Save As if there isn't one)
     void toggleTransport();   // Record button: record if idle, else stop
     void toggleDesktopRecording();   // Standalone-only "Record Desktop" button: system-audio capture on/off
+    void toggleOutputCapture();      // Standalone-only "Capture Output" button: tap the playback output to a WAV
     void togglePlay();        // Space: play if idle, else stop
     void playFromStart();     // restarts playback at sample 0 (region-snapped, see processBlock)
 
@@ -84,9 +85,9 @@ private:
     R3WRKLookAndFeel toolbarLnF;
     Clipboard clipboard;
 
-    // "Record Desktop" only exists in the Standalone app -- a VST3/AU plugin is handed audio
-    // by its host and has no business grabbing the Mac's system output. Set once in the ctor.
+    // "Record Desktop" / "Capture Output" only exist in the Standalone app. Set once in the ctor.
     const bool standaloneApp;
+    double captureStartMs = 0.0;   // wall-clock start of the current output capture, for the "● CAP m:ss" readout
 
     // The file the document is currently backed by (last opened / last Save As / last
     // recording auto-save). "Save" (⌘S) overwrites it; empty => "Save" behaves as "Save As".
@@ -124,6 +125,9 @@ private:
                                                                             // the Mac's system audio via
                                                                             // ScreenCaptureKit; shows a stop
                                                                             // square while capturing
+    juce::TextButton captureOutButton { R3WRKLookAndFeel::iconCaptureOut };  // Standalone only -- taps the
+                                                                            // processed playback output to a
+                                                                            // WAV in the output folder
     juce::TextButton toolsButton   { R3WRKLookAndFeel::iconTools };    // opens the Tools ▾ pop-up menu
     juce::TextButton reverseButton { R3WRKLookAndFeel::iconReverse };  // runs immediately, like Tools ▾'s
                                                                        // own Reverse item -- not a toggle

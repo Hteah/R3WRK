@@ -386,6 +386,32 @@ namespace
         head.closeSubPath();
         g.fillPath (head);
     }
+
+    // Capture Output: a record dot with a downward arrow beneath it -- "record what's coming
+    // out, down to a file". Inked in the record red on the button.
+    void drawCaptureOutIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
+    {
+        auto a = bounds.reduced (bounds.getHeight() * 0.24f);
+        const float cx = a.getCentreX();
+        const float stroke = juce::jmax (1.5f, a.getHeight() * 0.12f);
+
+        g.setColour (ink);
+
+        // Record dot, top.
+        const float r = a.getWidth() * 0.18f;
+        const float dotCy = a.getY() + r;
+        g.fillEllipse (cx - r, dotCy - r, r * 2.0f, r * 2.0f);
+
+        // Shaft + arrowhead, pointing down.
+        const float shaftTop = dotCy + r + a.getHeight() * 0.08f;
+        const float shaftBot = a.getBottom() - a.getHeight() * 0.24f;
+        g.fillRect (cx - stroke * 0.5f, shaftTop, stroke, juce::jmax (0.0f, shaftBot - shaftTop));
+
+        const float aw = a.getWidth() * 0.22f;
+        juce::Path head;
+        head.addTriangle (cx - aw, shaftBot, cx + aw, shaftBot, cx, a.getBottom());
+        g.fillPath (head);
+    }
 }
 
 void R3WRKLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int width, int height,
@@ -470,7 +496,7 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
         && text != iconPlayFromStart && text != iconTools && text != iconScrub
         && text != iconReverse && text != iconClear && text != iconAutoRecord
         && text != iconSlice && text != iconFollow && text != iconDesktopRec
-        && text != iconFloatTop)
+        && text != iconFloatTop && text != iconCaptureOut)
     {
         juce::LookAndFeel_V4::drawButtonText(g, button, isMouseOverButton, isButtonDown);
         return;
@@ -515,6 +541,11 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     if (text == iconFloatTop)
     {
         drawFloatTopIcon(g, bounds, ink);
+        return;
+    }
+    if (text == iconCaptureOut)
+    {
+        drawCaptureOutIcon(g, bounds, ink);
         return;
     }
     if (text == iconReverse)

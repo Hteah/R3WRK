@@ -54,6 +54,16 @@ public:
     static bool isDesktopCaptureSupported() { return DesktopAudioCapture::isSupported(); }
     std::function<void(juce::String)> onDesktopStatus;
 
+    // "Capture Output" (Standalone only): taps the fully-processed playback/scrub output --
+    // stretch, pitch, filter, gain, everything you hear -- into a growable buffer while
+    // capturing, then writes it to `dest` (format/bit-depth from `opts`) on stop. Does NOT
+    // touch the document or the transport: you play/loop/twiddle knobs and it records the
+    // performance. Returns the written file (extension coerced to the format), or File() on
+    // failure / nothing captured.
+    void startOutputCapture();
+    juce::File stopOutputCaptureAndWrite(const juce::File& dest, const AudioSaveOptions& opts);
+    bool isCapturingOutput() const { return capturingOutput.load(std::memory_order_relaxed); }
+
     // Live playback knobs (Speed/Pitch/Stretch) live on `document` now -- see
     // AudioDocument.h -- so the views can read them too, not just the audio thread. All
     // three are realised by a real-time RubberBand stretcher on the playback stream; the
@@ -81,6 +91,14 @@ private:
     int     desktopRecChannels = 2;
     void appendDesktopSamples(const float* const* data, int numChannels, int numFrames, double sr);
     void finalizeDesktopRecording();
+
+    // Output capture: audio-thread-only growable buffer (same single-producer pattern as
+    // recordingAccumulator). captureOutput() appends the finished output block while
+    // capturingOutput; stopOutputCaptureAndWrite() clears the flag, then reads it.
+    std::atomic<bool> capturingOutput { false };
+    juce::AudioBuffer<float> outputCaptureBuffer;
+    int64_t outputCaptureWritePos = 0;
+    void captureOutput(const juce::AudioBuffer<float>& out, int numCh, int numSamples);
 
     //==============================================================================
     // Real-time pitch/tape engine, rebuilt in prepareToPlay().
