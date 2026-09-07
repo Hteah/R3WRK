@@ -1849,6 +1849,24 @@ Persisted in `OutputSettings` (`floatOnTop` key); `maybeApplyPersistedFloatOnTop
 once the window peer exists (called from both `parentHierarchyChanged()` and the first
 `resized()`, guarded by `floatStateApplied`).
 
+**Keeping it stuck.** macOS silently drops a custom `NSWindow.level` back to normal on all
+sorts of ordinary events (zoom, miniaturise+restore, full-screen toggle, Space changes, a file
+dialog/callout opening, app hide/show, and sometimes for no clear reason) -- the button would
+stay "pressed" while the window quietly stopped floating. `StandaloneWindowShape.mm` keeps
+`static NSWindow* g_floatWindow` (the window that's meant to float; `nil` when Float is off)
+and `r3wrkReassertFloatLevel()` re-sets `NSFloatingWindowLevel` **only if it drifted** (guarded,
+so re-asserting is a glitch-free no-op the rest of the time). It's driven from: (1) explicit
+call after `r3wrkTitleBarDoubleClick`'s `zoom:`; (2) `NSNotificationCenter` observers on ~a
+dozen `NSWindow*`/`NSApplication*` notifications (BecomeKey/ResignKey, Deminiaturize, Resize/
+Move, EndLiveResize, Enter/ExitFullScreen, ChangeScreen, App DidBecomeActive/ResignActive/
+DidUnhide); (3) an `NSWorkspaceActiveSpaceDidChange` observer on `NSWorkspace`'s own centre
+(Spaces don't post to the default centre); (4) a **1 s keep-alive `NSTimer`** added to
+`NSRunLoopCommonModes` as a catch-all for anything not covered -- it keeps firing during menu
+tracking / live resize / a modal panel, which is when resets tend to happen. Observers +
+timer are installed once, the first time Float is switched on, and left running (no-op while
+`g_floatWindow == nil`). This .mm is non-ARC, so the statics are unretained raw pointers --
+fine, they outlive the app.
+
 ## Phantom loop marker after Trim + Undo (`2b13baf`)
 
 User: selection -> right-click Trim -> Undo left a stray yellow/orange vertical line mid-clip

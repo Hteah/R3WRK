@@ -68,18 +68,22 @@ void r3wrkBeginWindowDrag (void* componentPtr)
 // --- "Float on top", made sticky -------------------------------------------------------------
 // macOS silently drops a custom NSWindow.level back to normal on a bunch of ordinary window
 // operations -- zoom, miniaturise + restore, entering/leaving full screen, moving between
-// Spaces, the app being hidden then shown. Setting the level once (as this used to) meant
-// "Float on top" quietly stopped working after a while of normal use. Now we remember which
-// window is meant to float and re-assert the level whenever one of those operations settles.
+// Spaces, the app being hidden then shown, a file dialog or callout opening/closing, and
+// occasionally for no obvious reason. Setting the level once (as this used to) meant "Float on
+// top" quietly stopped working after a while. We remember which window is meant to float,
+// re-assert the level whenever a known trigger settles (notification observers below), AND run
+// a 1 s keep-alive timer as a catch-all for triggers we haven't enumerated -- the guard in
+// r3wrkReassertFloatLevel() makes it a pure no-op whenever the level is already correct.
 // Standalone has exactly one window for the life of the app, so a single slot is enough. This
-// .mm is compiled without ARC, so g_floatWindow is an unretained raw pointer -- fine, the
-// window outlives everything.
+// .mm is compiled without ARC, so the statics are unretained raw pointers -- fine, everything
+// here outlives the app.
 static NSWindow* g_floatWindow = nil;
 static bool      g_floatObserversInstalled = false;
+static NSTimer*  g_floatKeepAliveTimer = nil;
 
 static void r3wrkReassertFloatLevel()
 {
-    if (g_floatWindow != nil)
+    if (g_floatWindow != nil && g_floatWindow.level != NSFloatingWindowLevel)
         g_floatWindow.level = NSFloatingWindowLevel;
 }
 
@@ -133,25 +137,41 @@ void r3wrkSetWindowFloatOnTop (void* componentPtr, bool onTop)
     {
         g_floatObserversInstalled = true;
 
-        NSNotificationCenter* nc = [NSNotificationCenter defaultCenter];
         void (^reassert)(NSNotification*) = ^(NSNotification*) { r3wrkReassertFloatLevel(); };
 
         // Any of these can have just cleared the level; re-assert once each settles. Scoped to
         // no particular object (there's only our window + transient panels), and a no-op while
         // g_floatWindow is nil, so leaving them registered when Float is off costs nothing.
-        NSArray<NSNotificationName>* names = @[ NSWindowDidBecomeKeyNotification,
-                                               NSWindowDidDeminiaturizeNotification,
-                                               NSWindowDidResizeNotification,
-                                               NSWindowDidEndLiveResizeNotification,
-                                               NSWindowDidExitFullScreenNotification,
-                                               NSWindowDidChangeScreenNotification,
-                                               NSApplicationDidBecomeActiveNotification,
-                                               NSApplicationDidUnhideNotification ];
-        for (NSNotificationName n in names)
-            [nc addObserverForName: n
-                            object: nil
-                             queue: [NSOperationQueue mainQueue]
-                        usingBlock: reassert];
+        NSNotificationCenter* nc = [NSNotificationCenter defaultCenter];
+        for (NSNotificationName n in @[ NSWindowDidBecomeKeyNotification,
+                                       NSWindowDidResignKeyNotification,
+                                       NSWindowDidDeminiaturizeNotification,
+                                       NSWindowDidResizeNotification,
+                                       NSWindowDidMoveNotification,
+                                       NSWindowDidEndLiveResizeNotification,
+                                       NSWindowDidEnterFullScreenNotification,
+                                       NSWindowDidExitFullScreenNotification,
+                                       NSWindowDidChangeScreenNotification,
+                                       NSApplicationDidBecomeActiveNotification,
+                                       NSApplicationDidResignActiveNotification,
+                                       NSApplicationDidUnhideNotification ])
+            [nc addObserverForName: n object: nil
+                            queue: [NSOperationQueue mainQueue] usingBlock: reassert];
+
+        // Spaces / Mission Control changes come through NSWorkspace's own centre, not the
+        // default one -- moving the window between Spaces is a known level-reset trigger.
+        [[[NSWorkspace sharedWorkspace] notificationCenter]
+            addObserverForName: NSWorkspaceActiveSpaceDidChangeNotification object: nil
+                        queue: [NSOperationQueue mainQueue] usingBlock: reassert];
+
+        // Catch-all: a 1 s keep-alive for triggers not covered above. Added to the common run
+        // loop modes so it keeps firing during menu tracking / live resize / a modal file
+        // panel, which is exactly when the level tends to get reset. r3wrkReassertFloatLevel()
+        // no-ops unless the level actually drifted, so this is cheap and glitch-free.
+        g_floatKeepAliveTimer = [NSTimer timerWithTimeInterval: 1.0
+                                                       repeats: YES
+                                                         block: ^(NSTimer*) { r3wrkReassertFloatLevel(); }];
+        [[NSRunLoop mainRunLoop] addTimer: g_floatKeepAliveTimer forMode: NSRunLoopCommonModes];
     }
 }
 #endif
