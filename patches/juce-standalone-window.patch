@@ -1,5 +1,5 @@
 diff --git a/modules/juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h b/modules/juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h
-index d2bd701..0b8d0fe 100644
+index d2bd701..66c3671 100644
 --- a/modules/juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h
 +++ b/modules/juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h
 @@ -38,6 +38,20 @@
@@ -23,7 +23,33 @@ index d2bd701..0b8d0fe 100644
  namespace juce
  {
  
-@@ -664,6 +678,14 @@ public:
+@@ -360,6 +374,25 @@ public:
+                                   true,
+                                   preferredDefaultDeviceName,
+                                   preferredSetupOptions);
++
++       #if ! (JUCE_IOS || JUCE_ANDROID)
++        // R3WRK: pin the device to 44.1 kHz at every launch. The engine runs at the audio
++        // device's rate (files are resampled to it on load, playback assumes engine == device
++        // rate), so every recording -- mic, Record Desktop, Capture Output -- is written at
++        // whatever the device is running. Forcing 44100 here is what makes "all recordings are
++        // 44.1 kHz / 24-bit" true (bit depth is already 24 on the record path). The user can
++        // still pick another rate in Audio Settings for the rest of the session; the next
++        // launch comes back to 44.1 kHz. Falls back to the nearest supported rate if the
++        // hardware genuinely can't do 44100.
++        {
++            auto r3wrkSetup = deviceManager.getAudioDeviceSetup();
++            if (r3wrkSetup.sampleRate != 44100.0)
++            {
++                r3wrkSetup.sampleRate = 44100.0;
++                deviceManager.setAudioDeviceSetup (r3wrkSetup, true);   // nearest supported if the device can't do 44100
++            }
++        }
++       #endif
+     }
+ 
+     //==============================================================================
+@@ -664,6 +697,14 @@ public:
          Component::addAndMakeVisible (optionsButton);
          optionsButton.addListener (this);
          optionsButton.setTriggeredOnMouseDown (true);
@@ -38,7 +64,7 @@ index d2bd701..0b8d0fe 100644
         #endif
  
         #if JUCE_IOS || JUCE_ANDROID
-@@ -712,6 +734,16 @@ public:
+@@ -712,6 +753,16 @@ public:
              if (auto* editor = processor->getActiveEditor())
                  setResizable (editor->isResizable(), false);
         #endif
@@ -55,7 +81,7 @@ index d2bd701..0b8d0fe 100644
      }
  
      //==============================================================================
-@@ -807,7 +839,13 @@ public:
+@@ -807,7 +858,13 @@ public:
      void resized() override
      {
          DocumentWindow::resized();
@@ -69,7 +95,7 @@ index d2bd701..0b8d0fe 100644
      }
  
      virtual StandalonePluginHolder* getPluginHolder()    { return pluginHolder.get(); }
-@@ -942,10 +980,21 @@ private:
+@@ -942,10 +999,21 @@ private:
                  settingsButton.setColour (TextButton::textColourOffId, Colour (0xffe0e0e0));
                  settingsButton.addListener (settingsButtonListener);
  
@@ -91,7 +117,7 @@ index d2bd701..0b8d0fe 100644
              void paint (Graphics& g) override
              {
                  auto r = getLocalBounds();
-@@ -961,6 +1010,12 @@ private:
+@@ -961,6 +1029,12 @@ private:
              {
                  auto r = getLocalBounds().reduced (5);
  
@@ -104,7 +130,7 @@ index d2bd701..0b8d0fe 100644
                  settingsButton.setBounds (r.removeFromRight (70));
                  notification.setBounds (r);
              }
-@@ -972,6 +1027,13 @@ private:
+@@ -972,6 +1046,13 @@ private:
          //==============================================================================
          void inputMutedChanged (bool newInputMutedValue)
          {
@@ -118,7 +144,7 @@ index d2bd701..0b8d0fe 100644
              shouldShowNotification = newInputMutedValue;
              notification.setVisible (shouldShowNotification);
  
-@@ -1091,4 +1153,16 @@ private:
+@@ -1091,4 +1172,16 @@ private:
      JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (StandaloneFilterWindow)
  };
  

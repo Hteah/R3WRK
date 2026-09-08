@@ -58,5 +58,16 @@ VST3/AU — those are hosted inside a DAW's own window. In one file:
    traffic lights don't sit on top of it. The feedback-loop detection/muting itself is
    untouched.
 
+5. **Pin the audio device to 44.1 kHz at launch.** `reloadAudioDeviceState()`, right after
+   `deviceManager.initialise(...)`, forces the setup's `sampleRate` to `44100` (nearest
+   supported if the hardware can't do it). R3WRK's engine runs at the audio device's rate —
+   files are resampled to it on load, playback assumes engine == device rate — so the device
+   rate *is* the rate every recording (mic / Record Desktop / Capture Output) is written at.
+   This is what makes "all recordings are 44.1 kHz / 24-bit" hold (the record path is already
+   24-bit WAV). Not persisted-sticky: the user can change the rate in Audio Settings for the
+   rest of the session, but the next launch comes back to 44.1 kHz. `! (JUCE_IOS ||
+   JUCE_ANDROID)` only. Desktop/VST3/AU wrappers don't compile this TU and are unaffected
+   (a plugin can't dictate the host's rate anyway).
+
 If JUCE is ever upgraded to a newer tag, re-check this still applies — `git apply --check`
 reports without touching anything.

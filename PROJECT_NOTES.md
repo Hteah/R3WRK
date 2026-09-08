@@ -1041,6 +1041,19 @@ The document stores audio at whatever rate it was recorded or loaded at.
 Loading a file resamples it (via `juce::LagrangeInterpolator`) to the host's
 current sample rate if they differ, so pitch/speed is correct in your DAW.
 
+**Standalone is pinned to 44.1 kHz.** User: "I would like to change all recordings
+to be made in 24bit 44.100". Because the engine runs at the audio device's rate
+(files resample to it on load; playback assumes engine == device rate), the only
+place a recording's rate is decided is the device itself. The
+`juce-standalone-window.patch` now forces `AudioDeviceSetup::sampleRate` to
+`44100` in `reloadAudioDeviceState()`, right after `deviceManager.initialise()`
+(nearest supported rate if the hardware genuinely can't do 44.1 k). So every
+Standalone recording — mic, Record Desktop, Capture Output — lands at 44.1 kHz,
+and since the record path already auto-saves 24-bit WAV, "24-bit / 44.1 kHz" holds
+end to end. Not persisted-sticky: Audio Settings can still change the rate for the
+session, but the next launch snaps back to 44.1 k. VST3/AU are untouched (the host
+owns the rate; a plugin can't dictate it). See `patches/README.md` point 5.
+
 ## Scrub tool
 
 User: "I'd like for you to add a function to R3WRK that when you press a
