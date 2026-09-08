@@ -249,8 +249,9 @@ public:
 
     // Octatrack-style Base/Width multimode filter on the playback stream (after the stretcher).
     // Non-destructive; baked into Save/Export by renderWithPlaybackKnobs. See BiquadFilter.h
-    // (r3wrk::MultiModeFilter): a 2-pole high-pass at Base, a 2-pole low-pass at Base+Width,
-    // Q on both -- you dial the two edges of the passband instead of picking a mode.
+    // (r3wrk::MultiModeFilter): a high-pass at Base, a low-pass at Base+Width (each 12 or
+    // 24 dB/oct per filterHpSlope24/filterLpSlope24), Q on both -- you dial the two edges of
+    // the passband instead of picking a mode.
     //   filterBase      : 0..1, low edge (high-pass cutoff), log-mapped 20 Hz..20 kHz.
     //                     0 = no high-pass. ("Base" knob.)
     //   filterWidth     : 0..1, passband width above Base -> high edge (low-pass cutoff).
@@ -259,11 +260,17 @@ public:
     //                     ("Q" knob.)
     //   filterDrive     : 0..1, pre-filter tanh saturation (harmonics ahead of the poles) --
     //                     R3WRK's Octatrack-DIST-style filter drive. ("Drive" knob.)
+    //   filterHpSlope24 : false = 12 dB/oct high-pass edge, true = 24 dB/oct (two cascaded
+    //                     stages). Matches the OT's independent HP slope switch. ("HP Slope" knob.)
+    //   filterLpSlope24 : same, for the low-pass edge. ("LP Slope" knob.)
     // Base 0 + Width 1 + Drive 0 = wide open (no effect); that's the default / double-click.
+    // Slopes default to 12 dB (false) so existing sessions/state keep their original sound.
     std::atomic<double> filterBase      { 0.0 };
     std::atomic<double> filterWidth     { 1.0 };
     std::atomic<double> filterResonance { 0.0 };
     std::atomic<double> filterDrive     { 0.0 };
+    std::atomic<bool>   filterHpSlope24 { false };
+    std::atomic<bool>   filterLpSlope24 { false };
 
     // Output "Gain" knob (Standalone only -- KnobRow adds the knob just in that build; the
     // atomic sits here for everyone but stays at 0). In dB, 0 = unity (default volume);

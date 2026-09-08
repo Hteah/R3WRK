@@ -642,8 +642,9 @@ the low edge (HP cutoff); WIDTH is how far above it the high edge (LP cutoff)
 sits. BASE 0 + WIDTH max = wide open; BASE 0 + WIDTH low = low-pass; BASE up +
 WIDTH max = high-pass; BASE mid + WIDTH small = a resonant, variable-gap
 band-pass. **DIST/Drive** was added later (see below); the 12/24 dB slope switch
-is still not ported. Non-destructive, live on the knobs and baked into
-Save/Export like Speed/Pitch/Stretch.
+(independent per edge, matching the OT's Multi Mode Filter Setup page) has since
+been ported too — see **HP Slope / LP Slope** below. Non-destructive, live on
+the knobs and baked into Save/Export like Speed/Pitch/Stretch.
 
 - **`Source/BiquadFilter.h`** (header-only, **not** `juce::dsp` — same reason as
   before: `AudioDocument.cpp` bakes the filter and is in the juce_dsp-less smoke
@@ -652,10 +653,18 @@ Save/Export like Speed/Pitch/Stretch.
   `filterPosToHz`/`filterHzToPos` (edge position 0..1 ↔ 20 Hz–20 kHz, log),
   `filterEdges(base,width)` → the two edge frequencies, `filterEngaged(base,width)`
   (true unless BASE≈0 *and* BASE+WIDTH≈1), and **`r3wrk::MultiModeFilter`** — a
-  2-pole HP (Base) + 2-pole LP (Base+Width) in series, Q on both, each stage
-  self-bypassing at its extreme so "open" is a true passthrough. A narrow, resonant
-  band stacks two peaks and can get very loud, so `outTrim` pulls the output back
-  toward unity as `width→0` with `Q` up.
+  HP (Base) + LP (Base+Width) in series, Q on both, each stage self-bypassing at
+  its extreme so "open" is a true passthrough. A narrow, resonant band stacks two
+  peaks and can get very loud, so `outTrim` pulls the output back toward unity as
+  `width→0` with `Q` up.
+  **Slope** (`hp24`/`lp24` bools, one per edge): false = one 2-pole (12 dB/oct)
+  stage, true = two identical cascaded 2-pole stages (24 dB/oct), same fc/Q —
+  matches the OT's independently-switchable HP/LP slope. Cascading roughly
+  squares that edge's resonant peak, so `outTrim` gets an extra
+  `1/(1 + 0.5·res·extraStages)` term when one or both edges are in 24 dB mode.
+  This is a modelling choice (not a hardware measurement) — a real 4-pole filter
+  at a given Q does resonate harder than a 2-pole one, but the exact curve here
+  is a guess, same caveat as the Base/Width Hz mapping below.
   **Drive** (`filterDrive` 0..1) is a *pre-filter* saturator inside
   `MultiModeFilter::processSample`: `x = tanh(x * driveGain) * driveMakeup` before
   the HP/LP stages, so the harmonics it adds get shaped by both edges.
@@ -663,30 +672,38 @@ Save/Export like Speed/Pitch/Stretch.
   level comp — the OT's DIST loses more, "ride the Gain knob"). `filterEngaged()`
   gained an optional `drive01` arg so Drive alone (edges open) still runs.
 - **`AudioDocument`**: `filterBase` (0..1, def 0), `filterWidth` (0..1, def 1),
-  `filterResonance` (0..1, def 0), `filterDrive` (0..1, def 0) — `std::atomic`,
-  reset on load/new/clear. `playbackKnobsEngaged()` uses
-  `r3wrk::filterEngaged(base,width,drive)`; `renderWithPlaybackKnobs` runs a fresh
-  `MultiModeFilter` per channel (with drive) when engaged.
+  `filterResonance` (0..1, def 0), `filterDrive` (0..1, def 0), `filterHpSlope24`
+  / `filterLpSlope24` (bool, def false = 12 dB — keeps existing sessions' sound
+  unchanged) — `std::atomic`, reset on load/new/clear. `playbackKnobsEngaged()`
+  uses `r3wrk::filterEngaged(base,width,drive)`; `renderWithPlaybackKnobs` runs a
+  fresh `MultiModeFilter` per channel (with drive + slopes) when engaged.
 - **`PluginProcessor`**: `r3wrk::MultiModeFilter playbackFilter[2]` + per-block
   `smoothedFilterBase` / `smoothedFilterWidth` / `smoothedFilterDrive`
-  (`SmoothedValue`, 30 ms) so a sweep doesn't zipper. `applyPlaybackFilter()` runs
-  last in the playback chain, resets the biquads on a fresh play pass or when the
-  engaged/bypassed line is crossed, and — if switched on mid-playback — seeds the
-  smoothers to "open, no drive" so it eases in. Scrub is left dry.
+  (`SmoothedValue`, 30 ms) so a sweep doesn't zipper (slopes aren't smoothed —
+  they're a discrete switch, read straight off the atomics each block).
+  `applyPlaybackFilter()` runs last in the playback chain, resets the biquads on a
+  fresh play pass or when the engaged/bypassed line is crossed, and — if switched
+  on mid-playback — seeds the smoothers to "open, no drive" so it eases in. Scrub
+  is left dry.
 - **`KnobRow`**: filter group after Stretch — **Base** (0..1, skewed log-Hz feel,
   readout "440 Hz"/"1.00 kHz" via `filterPosToHz`, dbl-click 0 = no HP), **Width**
   (0..1 %, dbl-click 1 = open), **Q** (0..1 %, dbl-click 0), **Drive** (0..1 %,
-  dbl-click 0 = clean). 10 knobs total in the standalone; section-divider dots now
-  at knob index 3 / 7 / 9 (was 3 / 6 / 8).
-- **State**: `kStateMagic` `'R3W8'`→`'R3W9'` (adds `filterDrive`, a 4th double
-  before `playbackGainDb`). `setStateInformation` reads `'R3W8'` (base/width/res,
-  drive → 0), `'R3W7'`/`'R3W6'` (old mode/cutoff **migrated** onto Base/Width —
-  LP → Base 0 / Width at cutoff; HP → Base at cutoff / Width 1; BP → narrow band;
-  Off/Notch → open; old resonance dropped to 0), and `'R3W5'`.
+  dbl-click 0 = clean), **HP Slope** / **LP Slope** (step-1 two-position knobs,
+  0 = "12 dB", 1 = "24 dB", dbl-click 0). 12 knobs total in the standalone;
+  section-divider dots now at knob index 3 / 9 / 11 (was 3 / 7 / 9).
+- **State**: `kStateMagic` `'R3W9'`→`'R3WA'` (adds `filterHpSlope24` /
+  `filterLpSlope24`, two bools before `playbackGainDb`). `setStateInformation`
+  reads `'R3W9'` (base/width/res/drive, slopes → false/12dB), `'R3W8'`
+  (base/width/res, drive → 0, slopes → false), `'R3W7'`/`'R3W6'` (old mode/cutoff
+  **migrated** onto Base/Width — LP → Base 0 / Width at cutoff; HP → Base at
+  cutoff / Width 1; BP → narrow band; Off/Notch → open; old resonance dropped to
+  0), and `'R3W5'`.
 - Smoke test: `MultiModeFilter` — Base 0 + Width 1 is a true passthrough & reads
   as not engaged; Drive alone reads as engaged; Base 0 + narrow Width (LP) crushes
   8 kHz; Base up + Width 1 (HP) crushes 200 Hz; Drive on a pure 1 kHz sine adds
-  harmonics (fundamental-projection residual jumps from ~0 to >0.08);
+  harmonics (fundamental-projection residual jumps from ~0 to >0.08); a 500 Hz
+  tone through a 1 kHz HP comes through quieter at 24 dB slope than 12 dB (proves
+  the cascade actually steepens the rolloff, not just relabels it);
   `renderWithPlaybackKnobs` with a ~500 Hz LP lowers a 200+8000 Hz mix & keeps the
   length; filter-on flips `playbackKnobsEngaged()`.
 

@@ -500,9 +500,9 @@ int main()
         // Base 0 + narrow Width is a low-pass (kills the 8 kHz tone); Base up + Width 1 is a
         // high-pass (kills the 200 Hz tone).
         auto runMMF = [&](juce::AudioBuffer<float> buf, double base01, double width01, double res01,
-                          double drive01 = 0.0)
+                          double drive01 = 0.0, bool hp24 = false, bool lp24 = false)
         {
-            r3wrk::MultiModeFilter mmf; mmf.setParams(base01, width01, res01, drive01, sr);
+            r3wrk::MultiModeFilter mmf; mmf.setParams(base01, width01, res01, drive01, sr, hp24, lp24);
             mmf.processBlock(buf.getWritePointer(0), buf.getNumSamples());
             return buf;
         };
@@ -515,6 +515,18 @@ int main()
               "Base 0 + Width ~500 Hz (low-pass) crushes an 8 kHz tone");
         check(rms(runMMF(tone200, r3wrk::filterHzToPos(3000.0), 1.0, 0.2), 0) < rms(tone200, 0) * 0.2,
               "Base ~3 kHz + Width 1 (high-pass) crushes a 200 Hz tone");
+
+        // 12/24 dB slope: a tone one octave below the HP cutoff (transition band, not the deep
+        // stopband) should come through noticeably quieter at 24 dB than at 12 dB -- the whole
+        // point of the steeper slope. Base = 1 kHz cutoff, tone = 500 Hz, Width open (pure HP).
+        {
+            auto tone500 = makeSineBuffer(1, n, sr, 500.0, 0.5f);
+            const double baseAt1k = r3wrk::filterHzToPos(1000.0);
+            const double r12 = rms(runMMF(tone500, baseAt1k, 1.0, 0.0, 0.0, false, false), 0);
+            const double r24 = rms(runMMF(tone500, baseAt1k, 1.0, 0.0, 0.0, true,  false), 0);
+            check(r24 < r12 * 0.9,
+                  "HP Slope 24 dB attenuates a transition-band tone harder than 12 dB");
+        }
 
         // Drive on a pure 1 kHz sine, filter wide open -> tanh saturation adds harmonics.
         // Project each signal onto the 1 kHz fundamental, subtract it, and measure the leftover

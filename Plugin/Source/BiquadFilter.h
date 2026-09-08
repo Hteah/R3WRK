@@ -126,9 +126,9 @@ namespace r3wrk
     };
 
     /**
-        The Octatrack-style multimode filter: a 2-pole high-pass (the Base / low edge) and a
-        2-pole low-pass (the Base+Width / high edge) in series, resonance (Q) on both. You dial
-        the two edges of the passband directly instead of picking a mode:
+        The Octatrack-style multimode filter: a high-pass (the Base / low edge) and a low-pass
+        (the Base+Width / high edge) in series, resonance (Q) on both. You dial the two edges of
+        the passband directly instead of picking a mode:
 
             Base 0    + Width 1    -> both edges bypassed, wide open (no effect)
             Base 0    + Width mid  -> low-pass
@@ -139,6 +139,15 @@ namespace r3wrk
         true passthrough. A narrow, resonant band stacks two peaks and can get very loud -- a
         mild width/Q-dependent output trim keeps that musical rather than explosive.
 
+        Slope: each edge is independently switchable between 12 dB/oct (one 2-pole stage) and
+        24 dB/oct (two identical 2-pole stages in series, same fc/Q), matching the OT's "12/24dB
+        Multi Mode Filter" setup page, which lets HP and LP each pick their own slope. Cascading
+        two stages at the *same* Q roughly squares the magnitude response: steeper rolloff, and
+        a noticeably sharper/louder resonant peak at a given Q than the 12 dB stage -- which
+        matches how a real 4-pole filter behaves relative to a 2-pole one at equal per-stage Q.
+        This is a deliberate modelling choice (not a measurement of the real unit), and the
+        extra gain from the second stage gets a bit more output-trim compensation below.
+
         Drive (0..1) is a pre-filter saturator: input gain 1x..10x into a tanh, then partial
         makeup gain -- so cranking Drive adds harmonics (which the two edges then shape) more
         than it adds level. This is R3WRK's take on the Octatrack's filter DIST, which the OT
@@ -148,18 +157,23 @@ namespace r3wrk
     */
     struct MultiModeFilter
     {
-        Biquad hp, lp;
+        Biquad hp, hp2, lp, lp2;
         bool  hpOn = false, lpOn = false, driveOn = false;
+        bool  hp24 = false, lp24 = false;   // slope per edge: false = 12 dB, true = 24 dB
         float outTrim = 1.0f, driveGain = 1.0f, driveMakeup = 1.0f;
 
-        void reset() noexcept { hp.reset(); lp.reset(); }
+        void reset() noexcept { hp.reset(); hp2.reset(); lp.reset(); lp2.reset(); }
 
-        void setParams (double base01, double width01, double res01, double drive01, double fs) noexcept
+        // hpSlope24 / lpSlope24: false = 12 dB/oct (one stage), true = 24 dB/oct (two stages).
+        void setParams (double base01, double width01, double res01, double drive01, double fs,
+                        bool hpSlope24 = false, bool lpSlope24 = false) noexcept
         {
             base01  = juce::jlimit (0.0, 1.0, base01);
             width01 = juce::jlimit (0.0, 1.0, width01);
             res01   = juce::jlimit (0.0, 1.0, res01);
             drive01 = juce::jlimit (0.0, 1.0, drive01);
+            hp24 = hpSlope24;
+            lp24 = lpSlope24;
 
             double fLow, fHigh;
             filterEdges (base01, width01, fLow, fHigh);
@@ -169,14 +183,28 @@ namespace r3wrk
             lpOn = (base01 + width01) < 0.996 && fHigh < juce::jmax (1.0, fs) * 0.49;
 
             if (hpOn)
+            {
                 hp.setCoeffs (filterHP, fLow, q, fs);
+                if (hp24) hp2.setCoeffs (filterHP, fLow, q, fs);
+            }
             if (lpOn)
-                lp.setCoeffs (filterLP, juce::jmax (fHigh, fLow * 1.02), q, fs);
+            {
+                const double fLpEdge = juce::jmax (fHigh, fLow * 1.02);
+                lp.setCoeffs (filterLP, fLpEdge, q, fs);
+                if (lp24) lp2.setCoeffs (filterLP, fLpEdge, q, fs);
+            }
 
             // Only trims when the band is genuinely narrow *and* resonant; unity by width 0.5.
             outTrim = (hpOn && lpOn)
                 ? (float) (1.0 / (1.0 + 3.0 * res01 * juce::jmax (0.0, 0.5 - width01)))
                 : 1.0f;
+
+            // A second cascaded stage per engaged edge roughly squares that edge's resonant
+            // peak -- pull the trim back a bit further per extra stage, scaled by how far Q is
+            // dialled up (at res01 0 the two stages are just a steeper slope, no extra gain).
+            const int extraStages = (hpOn && hp24 ? 1 : 0) + (lpOn && lp24 ? 1 : 0);
+            if (extraStages > 0)
+                outTrim *= (float) (1.0 / (1.0 + 0.5 * res01 * extraStages));
 
             driveOn     = drive01 > 0.001;
             driveGain   = (float) (1.0 + drive01 * 9.0);
@@ -186,8 +214,16 @@ namespace r3wrk
         inline float processSample (float x) noexcept
         {
             if (driveOn) x = std::tanh (x * driveGain) * driveMakeup;
-            if (hpOn) x = hp.processSample (x);
-            if (lpOn) x = lp.processSample (x);
+            if (hpOn)
+            {
+                x = hp.processSample (x);
+                if (hp24) x = hp2.processSample (x);
+            }
+            if (lpOn)
+            {
+                x = lp.processSample (x);
+                if (lp24) x = lp2.processSample (x);
+            }
             return x * outTrim;
         }
 

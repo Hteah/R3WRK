@@ -78,6 +78,7 @@ void AudioDocument::newEmptyDocument(int numChannels, double sr)
     // instance.)
     playbackSpeed = 1.0; playbackPitch = 0.0; playbackStretch = 1.0;
     filterBase = 0.0; filterWidth = 1.0; filterResonance = 0.0; filterDrive = 0.0; playbackGainDb = 0.0;
+    filterHpSlope24 = false; filterLpSlope24 = false;
     previewActive = false; previewGainLinear = 1.0f; previewStretchRatio = 1.0;
     channelFocus = ChannelFocus::stereo;
     sliceMarkers.clear();
@@ -129,6 +130,7 @@ bool AudioDocument::loadFromFile(const juce::File& file, double resampleToRate)
     loopEnabled = false;
     playbackSpeed = 1.0; playbackPitch = 0.0; playbackStretch = 1.0;   // see newEmptyDocument()
     filterBase = 0.0; filterWidth = 1.0; filterResonance = 0.0; filterDrive = 0.0; playbackGainDb = 0.0;
+    filterHpSlope24 = false; filterLpSlope24 = false;
     previewActive = false; previewGainLinear = 1.0f; previewStretchRatio = 1.0;
     channelFocus = ChannelFocus::stereo;
     sliceMarkers.clear();
@@ -192,11 +194,13 @@ juce::AudioBuffer<float> AudioDocument::renderWithPlaybackKnobs(const juce::Audi
     const double fDrive = filterDrive.load(std::memory_order_relaxed);
     if (r3wrk::filterEngaged(fBase, fWidth, fDrive) && out.getNumSamples() > 0)
     {
-        const double fRes = filterResonance.load(std::memory_order_relaxed);
+        const double fRes  = filterResonance.load(std::memory_order_relaxed);
+        const bool   fHp24 = filterHpSlope24.load(std::memory_order_relaxed);
+        const bool   fLp24 = filterLpSlope24.load(std::memory_order_relaxed);
         for (int ch = 0; ch < out.getNumChannels(); ++ch)
         {
             r3wrk::MultiModeFilter mmf;
-            mmf.setParams(fBase, fWidth, fRes, fDrive, sampleRate);
+            mmf.setParams(fBase, fWidth, fRes, fDrive, sampleRate, fHp24, fLp24);
             mmf.processBlock(out.getWritePointer(ch), out.getNumSamples());
         }
     }

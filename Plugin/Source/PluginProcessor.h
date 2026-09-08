@@ -120,9 +120,10 @@ private:
     double lastAppliedPitchScale = -1.0;
     bool   stretchRatioNeedsSnap = true;
 
-    // Multi-mode filter on the playback output (after the stretcher). One biquad per channel;
-    // cutoff is per-block-smoothed so a knob sweep doesn't zipper the coefficients. Reset on a
-    // fresh play pass and when the mode changes, so re-enabling doesn't thump.
+    // Multi-mode filter on the playback output (after the stretcher). One MultiModeFilter per
+    // channel (each edge 12 or 24 dB/oct per document.filterHpSlope24/filterLpSlope24); cutoff
+    // is per-block-smoothed so a knob sweep doesn't zipper the coefficients. Reset on a fresh
+    // play pass and when the mode changes, so re-enabling doesn't thump.
     r3wrk::MultiModeFilter playbackFilter[2];   // Octatrack-style Base/Width + Drive, per channel
     juce::SmoothedValue<double> smoothedFilterBase  { 0.0 };
     juce::SmoothedValue<double> smoothedFilterWidth { 1.0 };
