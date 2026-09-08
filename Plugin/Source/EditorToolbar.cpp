@@ -8,6 +8,17 @@
 // link); StandaloneWindowShape.mm carries a weak no-op so the VST3/AU targets still link (the
 // menu item that calls this is standalone-only anyway).
 extern "C" void r3wrkShowAudioSettings();
+
+namespace
+{
+    // Launch a second copy of the standalone app as its own process ("open -n" always starts a
+    // fresh instance). Lets the user drag a selection out of one R3WRK window and into another.
+    void r3wrkOpenNewInstance()
+    {
+        const auto app = juce::File::getSpecialLocation(juce::File::currentApplicationFile);
+        juce::ChildProcess().start(juce::StringArray { "/usr/bin/open", "-n", app.getFullPathName() });
+    }
+}
 #endif
 
 namespace
@@ -772,6 +783,8 @@ void EditorToolbar::showToolsMenu()
 
     juce::PopupMenu m;
     m.addItem(tmiOpen,   juce::String::fromUTF8("Open\xE2\x80\xA6"));
+    if (standaloneApp)
+        m.addItem(tmiNewWindow, "New Window");
     m.addItem(keyed("Save", tmiSaveInPlace, ! empty, cmd + "S"));
     m.addItem(tmiSaveAs, juce::String::fromUTF8("Save As\xE2\x80\xA6"), ! empty);
     m.addItem(tmiSaveOptions, juce::String::fromUTF8("Save Options\xE2\x80\xA6  (")
@@ -859,6 +872,8 @@ void EditorToolbar::buildMenuBarMenu(juce::PopupMenu& m, ToolsMenuGroup group)
     {
         case ToolsMenuGroup::file:
             m.addItem(tmiOpen, juce::String::fromUTF8("Open\xE2\x80\xA6"));
+            if (standaloneApp)
+                m.addItem(tmiNewWindow, "New Window");
             m.addItem(tmiSaveInPlace, "Save", ! empty);
             m.addItem(tmiSaveAs, juce::String::fromUTF8("Save As\xE2\x80\xA6"), ! empty);
             m.addItem(tmiSaveOptions, juce::String::fromUTF8("Save Options\xE2\x80\xA6  (")
@@ -936,6 +951,11 @@ void EditorToolbar::performToolsItem(int r)
     switch (r)
     {
         case tmiOpen:         openFile();   break;
+        case tmiNewWindow:
+           #if JUCE_MAC
+            r3wrkOpenNewInstance();
+           #endif
+            break;
         case tmiSaveInPlace:  saveInPlace(); break;
         case tmiSaveAs:       saveAs();      break;
         case tmiSaveOptions:  showSaveOptionsCallout(); break;

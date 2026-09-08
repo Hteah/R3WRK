@@ -705,8 +705,17 @@ don't collide.
   `WaveformDisplay::beginSelectionDragExport()` writes the selection to
   `<temp>/R3WRK/R3WRK selection <timestamp>.wav` and starts a native file drag
   (`DragAndDropContainer::performExternalDragDropOfFiles`, `canMoveFiles=false`).
-  Drop it on an Ableton track / in Finder. Temp files >10 min old are swept each
-  drag.
+  Drop it on an Ableton track / in Finder / **another R3WRK window**. Temp files
+  >10 min old are swept each drag. The mac drag is async, so the exported path
+  is stashed in a file-static `g_selfExportPath` (cleared by the drop callback);
+  `WaveformDisplay::isSelfExportInFlight()` lets the editor's drop target refuse
+  *our own* in-flight export dropped back on *our own* window while still
+  accepting one dragged from another instance (separate process, its flag is
+  clear).
+- **Multiple windows:** Tools ▾ / menu-bar File → **"New Window"** (standalone
+  only) → `r3wrkOpenNewInstance()` runs `open -n <app bundle>`, a second
+  process. Two `AudioDeviceManager`s share the CoreAudio device fine. Purpose:
+  drag selections between R3WRK windows.
 
 Feedback is a `HeaderBar::flashMessage()` — a ~3 s accent-coloured line in the
 readout area ("Saved …", "Exported …", "Output folder: …"), driven from

@@ -61,6 +61,11 @@ public:
 
     void changeListenerCallback(juce::ChangeBroadcaster*) override;
 
+    // True while THIS process is mid-drag-exporting a selection and `path` is that temp file.
+    // The editor's file-drop target uses it to refuse our own in-flight export dropped back on
+    // our own window, while still accepting one dragged from another R3WRK instance.
+    static bool isSelfExportInFlight(const juce::String& path);
+
     void zoomToFit();
     void zoomIn();
     void zoomOut();

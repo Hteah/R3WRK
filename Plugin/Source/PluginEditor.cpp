@@ -5,16 +5,14 @@
 
 namespace
 {
-    // R3WRK's own "drag a selection out to Ableton/Finder" temp files live in this folder
-    // (see WaveformDisplay::beginSelectionDragExport). Dragging one back onto our own window
-    // and releasing it there must NOT reload it as a new document -- that's an accidental
-    // self-drop, not the user opening a file. Dragging OUT still works; this only refuses the
-    // round trip back in.
+    // A selection dragged OUT of our own waveform and released back onto our own window must
+    // NOT reload as a new document -- that's an accidental self-drop. But a selection dragged
+    // from *another* R3WRK instance (a separate process, so its export isn't in flight here)
+    // is a real "open this" and must go through. WaveformDisplay tracks the in-flight export
+    // path per process; this just asks it.
     bool isOwnSelectionDragFile(const juce::String& path)
     {
-        static const auto dragDir = juce::File::getSpecialLocation(juce::File::tempDirectory)
-                                        .getChildFile("R3WRK");
-        return juce::File(path).isAChildOf(dragDir);
+        return WaveformDisplay::isSelfExportInFlight(path);
     }
 }
 

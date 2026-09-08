@@ -63,7 +63,7 @@ public:
     // and dispatch selections through performToolsItem(). -----
     enum ToolsMenuItem
     {
-        tmiOpen = 1, tmiSaveInPlace, tmiSaveAs, tmiSaveOptions, tmiRevert,
+        tmiOpen = 1, tmiNewWindow, tmiSaveInPlace, tmiSaveAs, tmiSaveOptions, tmiRevert,
         tmiCut, tmiCopy, tmiPaste,
         tmiTrim, tmiDelete, tmiSilence,
         tmiChanBoth, tmiChanLeft, tmiChanRight, tmiMatchPeak, tmiMatchRms,

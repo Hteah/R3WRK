@@ -1317,6 +1317,18 @@ void WaveformDisplay::mouseDoubleClick(const juce::MouseEvent& e)
         onSelectionCommitted();
 }
 
+// The temp WAV THIS process is currently drag-exporting (empty when no drag is in flight).
+// PluginEditor's file-drop target checks it (via isSelfExportInFlight) to reject a drop of our
+// own in-flight export back onto our own window -- while still accepting an export dragged from
+// another R3WRK instance, whose separate process has its own (empty) flag.
+static juce::String g_selfExportPath;
+
+bool WaveformDisplay::isSelfExportInFlight(const juce::String& path)
+{
+    return g_selfExportPath.isNotEmpty()
+        && juce::File(path) == juce::File(g_selfExportPath);
+}
+
 void WaveformDisplay::beginSelectionDragExport()
 {
     if (! document.hasSelection())
@@ -1337,9 +1349,12 @@ void WaveformDisplay::beginSelectionDragExport()
     if (! EditActions::exportSelection(document, file))
         return;
 
-    // canMoveFiles = false: the receiver copies it, so our temp file stays valid.
-    juce::DragAndDropContainer::performExternalDragDropOfFiles({ file.getFullPathName() },
-                                                              false, this, nullptr);
+    // The mac drag is async (returns now, ends via the callback). Mark this file as our
+    // in-flight export until then. canMoveFiles = false: the receiver copies it.
+    g_selfExportPath = file.getFullPathName();
+    if (! juce::DragAndDropContainer::performExternalDragDropOfFiles(
+              { g_selfExportPath }, false, this, [] { g_selfExportPath.clear(); }))
+        g_selfExportPath.clear();   // drag never started
 }
 
 void WaveformDisplay::mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
