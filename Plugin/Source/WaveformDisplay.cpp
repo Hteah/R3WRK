@@ -843,6 +843,50 @@ void WaveformDisplay::paintSelectionPreview(juce::Graphics& g)
     }
 }
 
+// Tools -> Amplify with NO selection amplifies the whole clip; paintSelectionPreview() only
+// handles the selection case, so here the whole waveform gets a live vertical scale while the
+// panel's slider moves -- just an affine scale of the already-built channelPaths about each
+// lane's centre-line, drawn in the same accent "preview" colour, scoped to the focused
+// channel(s). The visual scale is capped so an extreme boost doesn't fill the lanes solid.
+void WaveformDisplay::paintWholeClipGainPreview(juce::Graphics& g)
+{
+    if (! document.previewActive || document.hasSelection() || channelPaths.empty())
+        return;
+
+    const float gain = document.previewGainLinear;
+    if (std::abs(gain - 1.0f) < 1.0e-4f)
+        return;
+
+    const int numCh     = juce::jmax(1, document.getNumChannels());
+    const int laneHeight = getHeight() / numCh;
+
+    // Let the loudest focused peak reach ~2x the lane half, matching paintSelectionPreview's
+    // per-sample clamp -- keeps a big boost from bleeding a solid block across the lanes.
+    float maxAbs = 0.05f;
+    for (int ch = 0; ch < (int) chPeakMax.size(); ++ch)
+    {
+        if (! document.channelInFocus(ch))
+            continue;
+        for (float v : chPeakMax[(size_t) ch]) maxAbs = juce::jmax(maxAbs, v);
+        for (float v : chPeakMin[(size_t) ch]) maxAbs = juce::jmax(maxAbs, -v);
+    }
+    const float visualGain = juce::jmin(gain, 2.0f / maxAbs);
+
+    g.setColour(theme->palette().accent.withAlpha(0.85f));
+    const juce::PathStrokeType stroke(1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded);
+
+    for (int ch = 0; ch < (int) channelPaths.size(); ++ch)
+    {
+        if (! document.channelInFocus(ch))
+            continue;
+        const float laneMid = (float) ch * (float) laneHeight + (float) laneHeight * 0.5f;
+        juce::Path p = channelPaths[(size_t) ch];
+        p.applyTransform(juce::AffineTransform::scale(1.0f, visualGain, 0.0f, laneMid));
+        if (waveformIsSampleLine) g.strokePath(p, stroke);
+        else                      g.fillPath(p);
+    }
+}
+
 void WaveformDisplay::paint(juce::Graphics& g)
 {
     if (document.isRecording.load(std::memory_order_relaxed))
@@ -918,6 +962,7 @@ void WaveformDisplay::paint(juce::Graphics& g)
     for (int ch = 1; ch < numCh; ++ch)
         g.drawHorizontalLine(ch * laneHeight, 0.0f, (float) getWidth());
 
+    paintWholeClipGainPreview(g);
     paintSelectionPreview(g);
 
     // Selection: a wash, plus a bracket at each edge — a 2 px line with a small handle pill

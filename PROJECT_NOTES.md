@@ -395,10 +395,18 @@ span starting at the selection's left edge — showing "this audio, once
 stretched, would occupy this much room and roughly look like this" (the actual
 semantics of what Apply will do), with a dashed line at the new right edge so
 it reads as a preview, not the committed bound. Pitch has no visual (it
-doesn't change the waveform's duration/shape here). No preview when there's no
-selection (opening Amplify/Stretch from Tools ▾ with nothing selected — which
-falls back to the whole clip — still works exactly as before, just without a
-live preview).
+doesn't change the waveform's duration/shape here).
+
+**Amplify from Tools ▾ with no selection** (falls back to the whole clip):
+`WaveformDisplay::paintWholeClipGainPreview()` handles that case —
+`previewActive && ! hasSelection` → take the already-built `channelPaths`,
+`applyTransform(AffineTransform::scale(1, gain, 0, laneMid))` per lane (scoped
+to the focused channel(s) via `channelInFocus`), draw in the same accent
+preview colour. No re-scan/re-copy — it's just an affine on the existing path.
+The visual scale is capped (`min(gain, 2 / loudestFocusedPeak)`, peak read from
+the `chPeakMin/Max` cache) so a big boost doesn't fill the lanes with a solid
+block, matching `paintSelectionPreview`'s per-sample ±2 clamp. Stretch from
+Tools ▾ with no selection still has no visual.
 
 **Bug found while testing this**: after stretching a selection, the *whole*
 waveform looked stretched, and a freshly loaded file did too. Not this
