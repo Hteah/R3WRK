@@ -233,6 +233,64 @@ namespace
     };
 
     //==============================================================================
+    // Splices a block of silence into the clip at the playhead (or the selection start), one
+    // undo step (EditActions::insertSilence). The duration is remembered in OutputSettings.
+    struct InsertSilencePanel : juce::Component
+    {
+        InsertSilencePanel(AudioDocument& doc, OutputSettings& os) : document(doc), settings(os)
+        {
+            title.setText("Insert Silence", juce::dontSendNotification);
+            title.setFont(juce::FontOptions(14.0f, juce::Font::bold));
+
+            secs.setRange(0.01, 10.0, 0.01);
+            secs.setSkewFactorFromMidPoint(0.5);   // fine control down low, room up to 10 s
+            secs.setValue(settings.insertSilenceSecs(), juce::dontSendNotification);
+            secs.setTextValueSuffix(" s");
+            secs.setNumDecimalPlacesToDisplay(2);
+            secs.setSliderStyle(juce::Slider::LinearHorizontal);
+            secs.setTextBoxStyle(juce::Slider::TextBoxRight, false, 64, 22);
+
+            insert.onClick = [this]
+            {
+                const double s = secs.getValue();
+                settings.setInsertSilenceSecs(s);
+                const double sr = juce::jmax(1.0, document.getSampleRate());
+                const int64_t at = document.hasSelection() ? document.getSelectionStart()
+                                                           : document.playhead.load();
+                EditActions::insertSilence(document, at, (int64_t) (s * sr + 0.5));
+                dismissEnclosingCallout(*this);
+            };
+
+            hint.setText("Splices in at the playhead (or the selection start).",
+                         juce::dontSendNotification);
+            hint.setFont(juce::FontOptions(11.0f));
+            hint.setColour(juce::Label::textColourId, juce::Colours::grey);
+
+            addAndMakeVisible(title);
+            addAndMakeVisible(secs);
+            addAndMakeVisible(hint);
+            addAndMakeVisible(insert);
+            setSize(300, 104);
+        }
+        void resized() override
+        {
+            auto r = getLocalBounds().reduced(10);
+            title.setBounds(r.removeFromTop(18));
+            r.removeFromTop(6);
+            secs.setBounds(r.removeFromTop(24));
+            r.removeFromTop(4);
+            hint.setBounds(r.removeFromTop(16));
+            r.removeFromTop(6);
+            insert.setBounds(r.removeFromTop(24).removeFromRight(78));
+        }
+        AudioDocument& document;
+        OutputSettings& settings;
+        juce::Label title, hint;
+        juce::Slider secs;
+        juce::TextButton insert { "Insert" };
+    };
+
+    //==============================================================================
     // Picks the container format / sample rate / bit depth that Save and Save As write with.
     // No Apply -- every change writes straight through to OutputSettings (persisted), same as
     // the threshold panel above. `opts` is the source of truth; sync() pushes it to the combos
@@ -797,6 +855,7 @@ void EditorToolbar::showToolsMenu()
     m.addItem(keyed("Trim to Selection", tmiTrim, sel, cmd + "T"));
     m.addItem(tmiDelete,  "Delete Selection",  sel);
     m.addItem(tmiSilence, "Silence Selection", ! empty);
+    m.addItem(tmiInsertSilence, juce::String::fromUTF8("Insert Silence\xE2\x80\xA6"), ! empty);
     m.addSeparator();
     {
         // Channels: pick which side of a stereo clip the gain-shaped processors below work
@@ -900,6 +959,7 @@ void EditorToolbar::buildMenuBarMenu(juce::PopupMenu& m, ToolsMenuGroup group)
             m.addItem(tmiTrim,    "Trim to Selection", sel);
             m.addItem(tmiDelete,  "Delete Selection",  sel);
             m.addItem(tmiSilence, "Silence Selection", ! empty);
+            m.addItem(tmiInsertSilence, juce::String::fromUTF8("Insert Silence\xE2\x80\xA6"), ! empty);
             break;
 
         case ToolsMenuGroup::tools:
@@ -966,6 +1026,7 @@ void EditorToolbar::performToolsItem(int r)
         case tmiTrim:      EditActions::trimToSelection(document); break;
         case tmiDelete:    EditActions::deleteSelection(document); break;
         case tmiSilence:   EditActions::silence(document);        break;
+        case tmiInsertSilence: showInsertSilenceCallout(toolsButton.getScreenBounds()); break;
 
         case tmiChanBoth:  document.channelFocus = CF::stereo; document.notifyChanged(); break;
         case tmiChanLeft:  document.channelFocus = CF::left;   document.notifyChanged(); break;
@@ -1015,10 +1076,17 @@ void EditorToolbar::showStretchCallout(juce::Rectangle<int> screenTargetArea)
                                            screenTargetArea, nullptr);
 }
 
+void EditorToolbar::showInsertSilenceCallout(juce::Rectangle<int> screenTargetArea)
+{
+    juce::CallOutBox::launchAsynchronously(std::make_unique<InsertSilencePanel>(document, *outputSettings),
+                                           screenTargetArea, nullptr);
+}
+
 //==============================================================================
 void EditorToolbar::showSelectionContextMenu(juce::Point<int> screenPosition)
 {
-    enum { idTrim = 1, idAmplify, idFadeIn, idFadeOut, idReverse, idStretch, idDelete, idClearSel };
+    enum { idTrim = 1, idAmplify, idFadeIn, idFadeOut, idReverse, idStretch,
+           idInsertSilence, idDelete, idClearSel };
 
     const juce::String cmd = juce::String::fromUTF8("\xe2\x8c\x98");   // ⌘
     juce::PopupMenu::Item trimItem("Trim to Selection");
@@ -1032,6 +1100,7 @@ void EditorToolbar::showSelectionContextMenu(juce::Point<int> screenPosition)
     m.addItem(idFadeOut, "Fade Out");   // which is the selection whenever there is one
     m.addItem(idReverse, "Reverse");
     m.addItem(idStretch, juce::String::fromUTF8("Stretch / Pitch\xE2\x80\xA6"));
+    m.addItem(idInsertSilence, juce::String::fromUTF8("Insert Silence\xE2\x80\xA6"));
     m.addSeparator();
     m.addItem(idDelete, "Delete Selection");        // splice the selected audio out
     m.addSeparator();
@@ -1048,6 +1117,7 @@ void EditorToolbar::showSelectionContextMenu(juce::Point<int> screenPosition)
             case idFadeOut:  EditActions::fadeOut(document); break;
             case idReverse:  EditActions::reverse(document); break;
             case idStretch:  showStretchCallout(targetArea); break;
+            case idInsertSilence: showInsertSilenceCallout(targetArea); break;
             case idDelete:   EditActions::deleteSelection(document); break;
             case idClearSel: document.clearSelection(); break;
             default: break;

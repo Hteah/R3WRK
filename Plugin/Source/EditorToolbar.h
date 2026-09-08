@@ -65,7 +65,7 @@ public:
     {
         tmiOpen = 1, tmiNewWindow, tmiSaveInPlace, tmiSaveAs, tmiSaveOptions, tmiRevert,
         tmiCut, tmiCopy, tmiPaste,
-        tmiTrim, tmiDelete, tmiSilence,
+        tmiTrim, tmiDelete, tmiSilence, tmiInsertSilence,
         tmiChanBoth, tmiChanLeft, tmiChanRight, tmiMatchPeak, tmiMatchRms,
         tmiToMono, tmiToStereo,
         tmiNormalize, tmiAmplify, tmiFadeIn, tmiFadeOut, tmiReverse,
@@ -97,6 +97,7 @@ private:
     void showToolsMenu();
     void showAmplifyCallout(juce::Rectangle<int> screenTargetArea);
     void showStretchCallout(juce::Rectangle<int> screenTargetArea);
+    void showInsertSilenceCallout(juce::Rectangle<int> screenTargetArea);   // duration slider -> insert at playhead
     void showThemeCallout();
     void showAutoRecordThresholdCallout();
     void chooseOutputFolder();

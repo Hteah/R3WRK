@@ -7,6 +7,7 @@ namespace
     const juce::String kSaveRateKey    = "saveSampleRate";
     const juce::String kSaveDepthKey   = "saveBitDepth";
     const juce::String kFloatOnTopKey  = "floatOnTop";
+    const juce::String kInsertSilenceKey = "insertSilenceSecs";
 
     juce::File defaultFolder()
     {
@@ -84,5 +85,16 @@ bool OutputSettings::floatOnTop()
 void OutputSettings::setFloatOnTop(bool on)
 {
     props().setValue(kFloatOnTopKey, on);
+    props().saveIfNeeded();
+}
+
+double OutputSettings::insertSilenceSecs()
+{
+    return juce::jlimit(0.01, 60.0, props().getDoubleValue(kInsertSilenceKey, 0.5));
+}
+
+void OutputSettings::setInsertSilenceSecs(double secs)
+{
+    props().setValue(kInsertSilenceKey, juce::jlimit(0.01, 60.0, secs));
     props().saveIfNeeded();
 }

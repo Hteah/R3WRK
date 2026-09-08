@@ -362,9 +362,10 @@ landed ("now it works great").
 Right-clicking inside a selection (`WaveformDisplay::onSelectionContextMenu`,
 fired from `mouseDown` when `e.mods.isPopupMenu()` lands inside the selection
 body) shows a small menu — Trim to Selection · Amplify… · Fade In · Fade Out ·
-Reverse · Stretch·Pitch… · **Delete Selection** (`EditActions::deleteSelection`,
-splices the audio out) · **Clear Selection** (`document.clearSelection()`, just
-drops the markers) — handled by `EditorToolbar::showSelectionContextMenu()`
+Reverse · Stretch·Pitch… · **Insert Silence…** (see below) · **Delete
+Selection** (`EditActions::deleteSelection`, splices the audio out) · **Clear
+Selection** (`document.clearSelection()`, just drops the markers) — handled by
+`EditorToolbar::showSelectionContextMenu()`
 since it already owns the `AmplifyPanel`/`StretchPanel` callouts and the
 `EditActions` calls Tools ▾ uses. Amplify/Stretch open the same panels Tools ▾
 does, just anchored at the click point (`showAmplifyCallout()`/
@@ -372,6 +373,15 @@ does, just anchored at the click point (`showAmplifyCallout()`/
 always using `toolsButton.getScreenBounds()`); everything else runs immediately,
 same as Tools ▾. (This menu has its own local item-id enum, separate from
 `EditorToolbar::ToolsMenuItem`.)
+
+**Insert Silence** — `Tools ▾ → "Insert Silence…"` (also the menu-bar **Edit**
+group and the selection right-click menu) opens the `InsertSilencePanel` callout:
+a seconds slider (0.01–10 s, skewed, remembered in `OutputSettings::
+insertSilenceSecs` — new `"insertSilenceSecs"` prop key, default 0.5) + an
+**Insert** button → `EditActions::insertSilence(doc, at, round(secs·sampleRate))`
+where `at` = the selection start if there's a selection, else `document.playhead`.
+`insertSilence()` already existed (splices a cleared buffer in via
+`replaceRangeWith`, one undo step, grows the doc) — this just wired UI to it.
 
 Both panels also give a **live preview** while their slider is dragged, before
 Apply — `AudioDocument` gained three plain (message-thread-only, not atomic)

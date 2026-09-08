@@ -32,6 +32,10 @@ public:
     bool floatOnTop();
     void setFloatOnTop(bool);
 
+    // Last "Insert Silence" duration in seconds, remembered across launches (default 0.5).
+    double insertSilenceSecs();
+    void setInsertSilenceSecs(double);
+
 private:
     juce::PropertiesFile& props();
     std::unique_ptr<juce::PropertiesFile> propsFile;
