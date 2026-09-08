@@ -71,14 +71,15 @@ void r3wrkBeginWindowDrag (void* componentPtr)
 }
 
 // --- "Float on top", made sticky -------------------------------------------------------------
-// macOS silently drops a custom NSWindow.level back to normal on a bunch of ordinary window
-// operations -- zoom, miniaturise + restore, entering/leaving full screen, moving between
-// Spaces, the app being hidden then shown, a file dialog or callout opening/closing, and
-// occasionally for no obvious reason. Setting the level once (as this used to) meant "Float on
-// top" quietly stopped working after a while. We remember which window is meant to float,
-// re-assert the level whenever a known trigger settles (notification observers below), AND run
-// a 1 s keep-alive timer as a catch-all for triggers we haven't enumerated -- the guard in
-// r3wrkReassertFloatLevel() makes it a pure no-op whenever the level is already correct.
+// Two problems, both handled here:
+//  1. A plain NSFloatingWindowLevel window gets LEFT BEHIND when you switch Spaces and is
+//     COVERED when another app goes full screen -- so the collectionBehavior below
+//     (CanJoinAllSpaces + FullScreenAuxiliary) is what actually makes it follow you around.
+//  2. macOS also silently drops the level, or sinks the window while the level stays numerically
+//     correct, on ordinary operations (zoom, miniaturise+restore, full-screen toggles, a file
+//     dialog opening, ...). r3wrkReassertFloatLevel() puts the level back AND re-lifts the
+//     window with orderFrontRegardless (front of its level, no focus steal). It's called from
+//     notification observers on the known triggers plus a 1 s keep-alive timer for the rest.
 // Standalone has exactly one window for the life of the app, so a single slot is enough. This
 // .mm is compiled without ARC, so the statics are unretained raw pointers -- fine, everything
 // here outlives the app.
@@ -86,10 +87,18 @@ static NSWindow* g_floatWindow = nil;
 static bool      g_floatObserversInstalled = false;
 static NSTimer*  g_floatKeepAliveTimer = nil;
 
+static const NSWindowCollectionBehavior kFloatCollectionBits =
+    NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary;
+
 static void r3wrkReassertFloatLevel()
 {
-    if (g_floatWindow != nil && g_floatWindow.level != NSFloatingWindowLevel)
+    if (g_floatWindow == nil)
+        return;
+    if (g_floatWindow.level != NSFloatingWindowLevel)
         g_floatWindow.level = NSFloatingWindowLevel;
+    if ((g_floatWindow.collectionBehavior & kFloatCollectionBits) != kFloatCollectionBits)
+        g_floatWindow.collectionBehavior |= kFloatCollectionBits;
+    [g_floatWindow orderFrontRegardless];   // re-lift without activating the app / stealing focus
 }
 
 void r3wrkTitleBarDoubleClick (void* componentPtr)
@@ -135,8 +144,19 @@ void r3wrkSetWindowFloatOnTop (void* componentPtr, bool onTop)
     if (nsWindow == nil)
         return;
 
-    nsWindow.level = onTop ? NSFloatingWindowLevel : NSNormalWindowLevel;
-    g_floatWindow  = onTop ? nsWindow : nil;
+    if (onTop)
+    {
+        nsWindow.level = NSFloatingWindowLevel;
+        nsWindow.collectionBehavior |= kFloatCollectionBits;   // follow across Spaces + over full-screen
+        g_floatWindow = nsWindow;
+        [nsWindow orderFrontRegardless];
+    }
+    else
+    {
+        nsWindow.level = NSNormalWindowLevel;
+        nsWindow.collectionBehavior &= ~kFloatCollectionBits;
+        g_floatWindow = nil;
+    }
 
     if (onTop && ! g_floatObserversInstalled)
     {
