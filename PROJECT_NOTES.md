@@ -361,13 +361,17 @@ landed ("now it works great").
 
 Right-clicking inside a selection (`WaveformDisplay::onSelectionContextMenu`,
 fired from `mouseDown` when `e.mods.isPopupMenu()` lands inside the selection
-body) shows a small menu — Amplify…/Reverse/Stretch·Pitch… — handled by
-`EditorToolbar::showSelectionContextMenu()` since it already owns the
-`AmplifyPanel`/`StretchPanel` callouts and the `EditActions` calls Tools ▾ uses.
-Amplify/Stretch open the same panels Tools ▾ does, just anchored at the click
-point (`showAmplifyCallout()`/`showStretchCallout()` now take a
-`juce::Rectangle<int> screenTargetArea` instead of always using
-`toolsButton.getScreenBounds()`); Reverse runs immediately, same as Tools ▾.
+body) shows a small menu — Trim to Selection · Amplify… · Fade In · Fade Out ·
+Reverse · Stretch·Pitch… · **Delete Selection** (`EditActions::deleteSelection`,
+splices the audio out) · **Clear Selection** (`document.clearSelection()`, just
+drops the markers) — handled by `EditorToolbar::showSelectionContextMenu()`
+since it already owns the `AmplifyPanel`/`StretchPanel` callouts and the
+`EditActions` calls Tools ▾ uses. Amplify/Stretch open the same panels Tools ▾
+does, just anchored at the click point (`showAmplifyCallout()`/
+`showStretchCallout()` take a `juce::Rectangle<int> screenTargetArea` instead of
+always using `toolsButton.getScreenBounds()`); everything else runs immediately,
+same as Tools ▾. (This menu has its own local item-id enum, separate from
+`EditorToolbar::ToolsMenuItem`.)
 
 Both panels also give a **live preview** while their slider is dragged, before
 Apply — `AudioDocument` gained three plain (message-thread-only, not atomic)

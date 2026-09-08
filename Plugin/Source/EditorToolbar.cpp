@@ -1018,7 +1018,7 @@ void EditorToolbar::showStretchCallout(juce::Rectangle<int> screenTargetArea)
 //==============================================================================
 void EditorToolbar::showSelectionContextMenu(juce::Point<int> screenPosition)
 {
-    enum { idTrim = 1, idAmplify, idFadeIn, idFadeOut, idReverse, idStretch };
+    enum { idTrim = 1, idAmplify, idFadeIn, idFadeOut, idReverse, idStretch, idDelete, idClearSel };
 
     const juce::String cmd = juce::String::fromUTF8("\xe2\x8c\x98");   // ⌘
     juce::PopupMenu::Item trimItem("Trim to Selection");
@@ -1032,18 +1032,24 @@ void EditorToolbar::showSelectionContextMenu(juce::Point<int> screenPosition)
     m.addItem(idFadeOut, "Fade Out");   // which is the selection whenever there is one
     m.addItem(idReverse, "Reverse");
     m.addItem(idStretch, juce::String::fromUTF8("Stretch / Pitch\xE2\x80\xA6"));
+    m.addSeparator();
+    m.addItem(idDelete, "Delete Selection");        // splice the selected audio out
+    m.addSeparator();
+    m.addItem(idClearSel, "Clear Selection");       // just drop the selection markers
 
     const auto targetArea = juce::Rectangle<int>(screenPosition.x, screenPosition.y, 1, 1);
     m.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(targetArea), [this, targetArea](int r)
     {
         switch (r)
         {
-            case idTrim:    EditActions::trimToSelection(document); break;
-            case idAmplify: showAmplifyCallout(targetArea); break;
-            case idFadeIn:  EditActions::fadeIn(document);  break;
-            case idFadeOut: EditActions::fadeOut(document); break;
-            case idReverse: EditActions::reverse(document); break;
-            case idStretch: showStretchCallout(targetArea); break;
+            case idTrim:     EditActions::trimToSelection(document); break;
+            case idAmplify:  showAmplifyCallout(targetArea); break;
+            case idFadeIn:   EditActions::fadeIn(document);  break;
+            case idFadeOut:  EditActions::fadeOut(document); break;
+            case idReverse:  EditActions::reverse(document); break;
+            case idStretch:  showStretchCallout(targetArea); break;
+            case idDelete:   EditActions::deleteSelection(document); break;
+            case idClearSel: document.clearSelection(); break;
             default: break;
         }
     });
