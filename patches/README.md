@@ -34,9 +34,13 @@ VST3/AU — those are hosted inside a DAW's own window. In one file:
    cropped corners read as genuinely transparent. `PluginEditor` keeps a thin band at the top
    clear of its own controls in the Standalone build (a standalone-only top inset).
 
-3. **"Options" button repositioned.** With a native title bar `getTitleBarHeight()` is 0, so
-   `resized()` floats the audio-device `optionsButton` at the top-**right**, opposite the
-   traffic lights.
+3. **"Options" button kept reachable.** With a native title bar `getTitleBarHeight()` is 0 and
+   the plugin editor's content fills the whole window, so JUCE's audio-device `optionsButton`
+   ended up *behind* the editor (added before `setContentOwned`) and unclickable — the only
+   remaining way into the Audio/MIDI settings was the muted-input banner's "Settings…" button,
+   which vanishes once you un-mute. Now `optionsButton.setAlwaysOnTop(true)` in the ctor and
+   `resized()` places it top-**left**, right of the traffic lights (top-right is taken by the
+   editor's own follow / float-on-top buttons), inside `PluginEditor`'s reserved top inset.
 
 4. **Notification banner recoloured + inset.** The built-in "Audio input is muted to avoid
    feedback loop" banner (`NotificationArea`) is recoloured from JUCE's stock bright yellow to

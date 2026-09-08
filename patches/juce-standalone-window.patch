@@ -1,5 +1,5 @@
 diff --git a/modules/juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h b/modules/juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h
-index a4ddcf2..67b7418 100644
+index d2bd701..e751149 100644
 --- a/modules/juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h
 +++ b/modules/juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h
 @@ -38,6 +38,20 @@
@@ -23,7 +23,23 @@ index a4ddcf2..67b7418 100644
  namespace juce
  {
  
-@@ -712,6 +726,16 @@ public:
+@@ -664,6 +678,15 @@ public:
+         Component::addAndMakeVisible (optionsButton);
+         optionsButton.addListener (this);
+         optionsButton.setTriggeredOnMouseDown (true);
++
++       #if JUCE_MAC
++        // R3WRK: the native-title-bar patch lets the plugin editor's content fill the whole
++        // window, which would render on top of (and swallow clicks to) this button. Float it
++        // so the audio-device settings stay reachable even when the muted-input banner (whose
++        // "Settings..." button is the only other way in) isn't showing. resized() puts it
++        // top-left, right of the traffic lights.
++        optionsButton.setAlwaysOnTop (true);
++       #endif
+        #endif
+ 
+        #if JUCE_IOS || JUCE_ANDROID
+@@ -712,6 +735,16 @@ public:
              if (auto* editor = processor->getActiveEditor())
                  setResizable (editor->isResizable(), false);
         #endif
@@ -40,36 +56,25 @@ index a4ddcf2..67b7418 100644
      }
  
      //==============================================================================
-@@ -807,7 +831,15 @@ public:
+@@ -807,7 +840,16 @@ public:
      void resized() override
      {
          DocumentWindow::resized();
 +       #if JUCE_MAC
 +        // R3WRK: native title bar -> getTitleBarHeight() is 0 and there's no drawn title-bar
-+        // strip. Keep the audio-device "Options" button reachable by floating it at the
-+        // top-right, opposite the traffic lights, in the strip PluginEditor keeps clear in the
-+        // Standalone build.
-+        optionsButton.setBounds (getWidth() - 66, 5, 58, 20);
++        // strip. The editor's own follow / float-on-top buttons sit top-right, so put the
++        // audio-device "Options" button top-left, just right of the traffic lights, in the
++        // inset band PluginEditor keeps clear. setAlwaysOnTop (in the ctor) keeps it above the
++        // full-size editor content.
++        optionsButton.setBounds (74, 3, 68, 18);
 +       #else
          optionsButton.setBounds (8, 6, 60, getTitleBarHeight() - 8);
 +       #endif
      }
  
      virtual StandalonePluginHolder* getPluginHolder()    { return pluginHolder.get(); }
-@@ -931,22 +963,40 @@ private:
-             {
-                 setOpaque (true);
- 
--                notification.setColour (Label::textColourId, Colours::black);
-+                // R3WRK: recoloured to sit quietly alongside the app's own dark UI instead of
-+                // JUCE's stock bright-yellow feedback-loop warning banner -- Midnight theme's
-+                // panelBg/accent/screenText, hardcoded rather than read live from R3WRK's
-+                // ThemeManager (this window lives outside the plugin editor entirely, so it
-+                // has no reach into the app's theme system without much deeper wiring).
-+                notification.setColour (Label::textColourId, Colour (0xffe0e0e0));
- 
-+                settingsButton.setColour (TextButton::buttonColourId, Colour (0xff2a2e35));
-+                settingsButton.setColour (TextButton::textColourOffId, Colour (0xffe0e0e0));
+@@ -942,10 +984,21 @@ private:
+                 settingsButton.setColour (TextButton::textColourOffId, Colour (0xffe0e0e0));
                  settingsButton.addListener (settingsButtonListener);
  
 +               #if JUCE_MAC
@@ -90,17 +95,7 @@ index a4ddcf2..67b7418 100644
              void paint (Graphics& g) override
              {
                  auto r = getLocalBounds();
- 
--                g.setColour (Colours::darkgoldenrod);
-+                g.setColour (Colour (0xff5ec2ff));
-                 g.fillRect (r.removeFromBottom (1));
- 
--                g.setColour (Colours::lightgoldenrodyellow);
-+                g.setColour (Colour (0xff17191e));
-                 g.fillRect (r);
-             }
- 
-@@ -954,6 +1004,12 @@ private:
+@@ -961,6 +1014,12 @@ private:
              {
                  auto r = getLocalBounds().reduced (5);
  
