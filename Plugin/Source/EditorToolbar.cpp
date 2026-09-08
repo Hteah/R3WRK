@@ -1197,8 +1197,14 @@ void EditorToolbar::saveAs()
                                 ? currentFile.getFileNameWithoutExtension()
                                 : juce::Time::getCurrentTime().formatted("R3WRK %Y-%m-%d %H.%M.%S");
 
+    // getNonexistentSibling(): don't pre-arm an overwrite. `currentFile` is usually a recording
+    // auto-save (so a take is never lost), which already exists on disk -- suggesting its exact
+    // name made Save As always pop the OS "replace?" prompt. The user still gets warned if they
+    // navigate to and pick an existing file themselves (warnAboutOverwriting, below).
+    const auto suggested = startDir.getChildFile(stem + ext).getNonexistentSibling();
+
     fileChooser = std::make_unique<juce::FileChooser>("Save audio as " + opts.formatName(),
-                                                      startDir.getChildFile(stem + ext), "*" + ext);
+                                                      suggested, "*" + ext);
     auto flags = juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
                | juce::FileBrowserComponent::warnAboutOverwriting;
     fileChooser->launchAsync(flags, [this](const juce::FileChooser& fc)

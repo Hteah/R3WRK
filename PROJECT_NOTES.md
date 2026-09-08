@@ -695,8 +695,12 @@ don't collide.
   by (`EditorToolbar::currentFile` — last Open / last Save As / last recording
   auto-save). No `currentFile` yet → falls through to Save As. See "Save / Save As
   / Save Options" below.
-- **"Save As…"** is a native dialog; extension + initial name come from the
-  current Save Options / `currentFile`.
+- **"Save As…"** is a native dialog; extension from the current Save Options,
+  initial name = `currentFile`'s stem (or a fresh `R3WRK <timestamp>`), run
+  through `getNonexistentSibling()` so the default target never already exists.
+  (`currentFile` is usually the recording auto-save, which *does* exist —
+  suggesting its exact name made Save As always pop the OS "replace?" prompt.
+  `warnAboutOverwriting` still fires if you pick an existing file yourself.)
 - **Drag out:** press inside the selection body (not near an edge) and drag —
   `WaveformDisplay::beginSelectionDragExport()` writes the selection to
   `<temp>/R3WRK/R3WRK selection <timestamp>.wav` and starts a native file drag
