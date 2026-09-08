@@ -46,10 +46,15 @@ VST3/AU — those are hosted inside a DAW's own window. In one file:
    so the VST3/AU targets (which don't compile that TU) still link — the strong definition
    wins in the Standalone target.
 
-4. **Notification banner recoloured + inset.** The built-in "Audio input is muted to avoid
-   feedback loop" banner (`NotificationArea`) is recoloured from JUCE's stock bright yellow to
-   R3WRK's Midnight-theme colours (hardcoded — this window is outside the plugin editor and
-   has no reach into `ThemeManager`), and its text is left-padded on mac so the floating
+4. **Notification banner suppressed (mac) + recoloured.** `MainContentComponent::inputMutedChanged`
+   forces `newInputMutedValue = false` on mac, so the built-in "Audio input is muted to avoid
+   feedback loop" banner (`NotificationArea` — the black strip at the top of the window) never
+   shows and the window never grows to make room for it. The muting itself (`muteInput`, and
+   the "Mute audio input" checkbox in Audio Settings) is untouched; the checkbox is now the
+   only place that state is surfaced. The banner is still recoloured from JUCE's stock bright
+   yellow to R3WRK's Midnight-theme colours (hardcoded — this window is outside the plugin
+   editor and has no reach into `ThemeManager`) for the non-mac builds, and its text is
+   left-padded on mac so the floating
    traffic lights don't sit on top of it. The feedback-loop detection/muting itself is
    untouched.
 
