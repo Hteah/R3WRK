@@ -6,6 +6,11 @@
 
 #if JUCE_MAC
 
+// Weak no-op so the VST3/AU targets link -- the real one is defined in the patched
+// juce_StandaloneFilterWindow.h, which only compiles into the Standalone target and there wins
+// the link (strong beats weak). Called from EditorToolbar's "Audio Settings…" menu item.
+extern "C" __attribute__((weak)) void r3wrkShowAudioSettings() {}
+
 void r3wrkApplyRoundedWindowCorners (void* windowPtr, float cornerRadiusPx)
 {
     auto* window = static_cast<juce::Component*> (windowPtr);

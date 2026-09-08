@@ -71,7 +71,7 @@ public:
         tmiNormalize, tmiAmplify, tmiFadeIn, tmiFadeOut, tmiReverse,
         tmiStretch, tmiExportSel,
         tmiSliceToFolder, tmiExportOt, tmiClearSlices,
-        tmiOutputFolder, tmiTheme, tmiAutoRecordThreshold,
+        tmiOutputFolder, tmiTheme, tmiAutoRecordThreshold, tmiAudioSettings,
         tmiUndo, tmiRedo
     };
 

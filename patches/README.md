@@ -34,13 +34,17 @@ VST3/AU — those are hosted inside a DAW's own window. In one file:
    cropped corners read as genuinely transparent. `PluginEditor` keeps a thin band at the top
    clear of its own controls in the Standalone build (a standalone-only top inset).
 
-3. **"Options" button kept reachable.** With a native title bar `getTitleBarHeight()` is 0 and
-   the plugin editor's content fills the whole window, so JUCE's audio-device `optionsButton`
-   ended up *behind* the editor (added before `setContentOwned`) and unclickable — the only
-   remaining way into the Audio/MIDI settings was the muted-input banner's "Settings…" button,
-   which vanishes once you un-mute. Now `optionsButton.setAlwaysOnTop(true)` in the ctor and
-   `resized()` places it top-**left**, right of the traffic lights (top-right is taken by the
-   editor's own follow / float-on-top buttons), inside `PluginEditor`'s reserved top inset.
+3. **"Options" button hidden + a bridge to the audio settings.** With a native title bar the
+   editor content fills the whole window, so JUCE's `optionsButton` (added before
+   `setContentOwned`) rendered behind it and was unclickable anyway. It's now
+   `setVisible(false)` on mac; the Audio/MIDI settings are reached from R3WRK's own menu bar /
+   Tools menu ("Audio Settings…"). Since `StandalonePluginHolder` is only visible inside
+   `juce_audio_plugin_client_Standalone.cpp`, the patch adds an `extern "C" void
+   r3wrkShowAudioSettings()` at the end of the header (calls
+   `StandalonePluginHolder::getInstance()->showAudioSettingsDialog()`); `EditorToolbar` calls
+   it, and `StandaloneWindowShape.mm` carries a `__attribute__((weak))` no-op of the same name
+   so the VST3/AU targets (which don't compile that TU) still link — the strong definition
+   wins in the Standalone target.
 
 4. **Notification banner recoloured + inset.** The built-in "Audio input is muted to avoid
    feedback loop" banner (`NotificationArea`) is recoloured from JUCE's stock bright yellow to

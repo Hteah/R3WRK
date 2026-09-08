@@ -1,5 +1,5 @@
 diff --git a/modules/juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h b/modules/juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h
-index d2bd701..e751149 100644
+index d2bd701..02e6f99 100644
 --- a/modules/juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h
 +++ b/modules/juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h
 @@ -38,6 +38,20 @@
@@ -23,23 +23,22 @@ index d2bd701..e751149 100644
  namespace juce
  {
  
-@@ -664,6 +678,15 @@ public:
+@@ -664,6 +678,14 @@ public:
          Component::addAndMakeVisible (optionsButton);
          optionsButton.addListener (this);
          optionsButton.setTriggeredOnMouseDown (true);
 +
 +       #if JUCE_MAC
-+        // R3WRK: the native-title-bar patch lets the plugin editor's content fill the whole
-+        // window, which would render on top of (and swallow clicks to) this button. Float it
-+        // so the audio-device settings stay reachable even when the muted-input banner (whose
-+        // "Settings..." button is the only other way in) isn't showing. resized() puts it
-+        // top-left, right of the traffic lights.
-+        optionsButton.setAlwaysOnTop (true);
++        // R3WRK: hidden. The native-title-bar patch lets the editor content fill the window, so
++        // this button ended up behind it anyway; the Audio/MIDI settings are reached instead
++        // from R3WRK's own menu bar / Tools menu ("Audio Settings…", via r3wrkShowAudioSettings
++        // below) and from the muted-input banner's "Settings…" button.
++        optionsButton.setVisible (false);
 +       #endif
         #endif
  
         #if JUCE_IOS || JUCE_ANDROID
-@@ -712,6 +735,16 @@ public:
+@@ -712,6 +734,16 @@ public:
              if (auto* editor = processor->getActiveEditor())
                  setResizable (editor->isResizable(), false);
         #endif
@@ -56,24 +55,21 @@ index d2bd701..e751149 100644
      }
  
      //==============================================================================
-@@ -807,7 +840,16 @@ public:
+@@ -807,7 +839,13 @@ public:
      void resized() override
      {
          DocumentWindow::resized();
 +       #if JUCE_MAC
-+        // R3WRK: native title bar -> getTitleBarHeight() is 0 and there's no drawn title-bar
-+        // strip. The editor's own follow / float-on-top buttons sit top-right, so put the
-+        // audio-device "Options" button top-left, just right of the traffic lights, in the
-+        // inset band PluginEditor keeps clear. setAlwaysOnTop (in the ctor) keeps it above the
-+        // full-size editor content.
-+        optionsButton.setBounds (74, 3, 68, 18);
++        // R3WRK: optionsButton is hidden on mac (see the ctor) -- audio settings come from the
++        // app's own menu. Bounds kept off in a corner just so it's not at 0,0.
++        optionsButton.setBounds (getWidth() - 66, 5, 58, 20);
 +       #else
          optionsButton.setBounds (8, 6, 60, getTitleBarHeight() - 8);
 +       #endif
      }
  
      virtual StandalonePluginHolder* getPluginHolder()    { return pluginHolder.get(); }
-@@ -942,10 +984,21 @@ private:
+@@ -942,10 +980,21 @@ private:
                  settingsButton.setColour (TextButton::textColourOffId, Colour (0xffe0e0e0));
                  settingsButton.addListener (settingsButtonListener);
  
@@ -95,7 +91,7 @@ index d2bd701..e751149 100644
              void paint (Graphics& g) override
              {
                  auto r = getLocalBounds();
-@@ -961,6 +1014,12 @@ private:
+@@ -961,6 +1010,12 @@ private:
              {
                  auto r = getLocalBounds().reduced (5);
  
@@ -108,3 +104,20 @@ index d2bd701..e751149 100644
                  settingsButton.setBounds (r.removeFromRight (70));
                  notification.setBounds (r);
              }
+@@ -1091,4 +1146,16 @@ private:
+     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (StandaloneFilterWindow)
+ };
+ 
++#if JUCE_MAC
++// R3WRK: a plain C bridge so the plugin editor can open the Audio/MIDI settings dialog from its
++// own menu -- it can't see StandalonePluginHolder directly (this header is only compiled into
++// juce_audio_plugin_client_Standalone.cpp). R3WRK weak-references this, so the VST3/AU targets
++// (which don't compile that TU) still link.
++extern "C" void r3wrkShowAudioSettings()
++{
++    if (auto* holder = StandalonePluginHolder::getInstance())
++        holder->showAudioSettingsDialog();
++}
++#endif
++
+ } // namespace juce

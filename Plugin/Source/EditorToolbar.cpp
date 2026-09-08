@@ -2,6 +2,14 @@
 #include "TimeStretchEngine.h"
 #include "ThemeEditor.h"
 
+#if JUCE_MAC
+// Opens JUCE's Audio/MIDI settings dialog. The real implementation lives in the patched
+// juce_StandaloneFilterWindow.h (only compiled into the Standalone target, where it wins the
+// link); StandaloneWindowShape.mm carries a weak no-op so the VST3/AU targets still link (the
+// menu item that calls this is standalone-only anyway).
+extern "C" void r3wrkShowAudioSettings();
+#endif
+
 namespace
 {
     juce::String formatTime(double seconds)
@@ -817,6 +825,8 @@ void EditorToolbar::showToolsMenu()
     m.addItem(tmiClearSlices,   "Clear Slice Markers", hasSlices);
     m.addSeparator();
     m.addItem(tmiOutputFolder, juce::String::fromUTF8("Output Folder\xE2\x80\xA6"));
+    if (standaloneApp)
+        m.addItem(tmiAudioSettings, juce::String::fromUTF8("Audio Settings\xE2\x80\xA6"));
     m.addItem(tmiTheme,        juce::String::fromUTF8("Theme\xE2\x80\xA6"));
     m.addItem(tmiAutoRecordThreshold, juce::String::fromUTF8("Auto-Record Threshold\xE2\x80\xA6"));
     m.addSeparator();
@@ -909,6 +919,8 @@ void EditorToolbar::buildMenuBarMenu(juce::PopupMenu& m, ToolsMenuGroup group)
             m.addItem(tmiStretch, juce::String::fromUTF8("Stretch / Pitch\xE2\x80\xA6"), ! empty);
             m.addItem(tmiClearSlices, "Clear Slice Markers", hasSlices);
             m.addSeparator();
+            if (standaloneApp)
+                m.addItem(tmiAudioSettings, juce::String::fromUTF8("Audio Settings\xE2\x80\xA6"));
             m.addItem(tmiTheme, juce::String::fromUTF8("Theme\xE2\x80\xA6"));
             m.addItem(tmiAutoRecordThreshold, juce::String::fromUTF8("Auto-Record Threshold\xE2\x80\xA6"));
             break;
@@ -958,6 +970,11 @@ void EditorToolbar::performToolsItem(int r)
         case tmiExportOt:      exportOctatrackChain();    break;
         case tmiClearSlices:   document.clearSliceMarkers(); break;
         case tmiOutputFolder: chooseOutputFolder();      break;
+        case tmiAudioSettings:
+           #if JUCE_MAC
+            r3wrkShowAudioSettings();
+           #endif
+            break;
         case tmiTheme:        showThemeCallout();        break;
         case tmiAutoRecordThreshold: showAutoRecordThresholdCallout(); break;
         case tmiUndo:      doUndo(); break;
