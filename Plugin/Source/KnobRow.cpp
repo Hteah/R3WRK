@@ -1,5 +1,5 @@
 #include "KnobRow.h"
-#include "BiquadFilter.h"   // r3wrk::filterPosToHz for the Base/Width knob readouts
+#include "BiquadFilter.h"   // r3wrk::mnm::{hpCutoffHz,lpCutoffHz} for the Base/Width knob readouts
 #include <cmath>
 
 namespace
@@ -11,6 +11,8 @@ namespace
 
     juce::String filterHzText(double hz)
     {
+        if (hz <= 0.0)      return "off";
+        if (hz >= 19000.0)  return "open";
         return hz >= 1000.0 ? juce::String(hz / 1000.0, hz < 10000.0 ? 2 : 1) + " kHz"
                             : juce::String(juce::roundToInt(hz)) + " Hz";
     }
@@ -63,77 +65,55 @@ KnobRow::KnobRow(AudioDocument& doc, bool standalone)
         k.pull  = [this] { return document.playbackStretch.load(); };
     }
 
-    //== Base (Octatrack-style filter: low edge / high-pass) ================
+    //== Base (Monomachine multimode filter: high-pass corner) =============
     {
         auto& k = addKnob("Base");
         k.slider.setRange(0.0, 1.0, 0.0);
         k.slider.setSkewFactorFromMidPoint(0.35);   // ~log Hz feel: fine control down low
         k.slider.setDoubleClickReturnValue(true, 0.0);   // 0 = no high-pass
-        k.slider.textFromValueFunction = [](double v) { return filterHzText(r3wrk::filterPosToHz(v)); };
+        k.slider.textFromValueFunction = [](double v) { return filterHzText(r3wrk::mnm::hpCutoffHz(v)); };
         k.slider.setValue(document.filterBase.load(), juce::dontSendNotification);
         k.slider.updateText();
         k.apply = [this](double v) { document.filterBase.store(v); };
         k.pull  = [this] { return document.filterBase.load(); };
     }
 
-    //== Width (filter high edge / low-pass, sits above Base) ===============
+    //== Width (low-pass corner, sits above Base at Base+Width) =============
     {
         auto& k = addKnob("Width");
         k.slider.setRange(0.0, 1.0, 0.0);
         k.slider.setDoubleClickReturnValue(true, 1.0);   // 1 = no low-pass (filter wide open)
-        k.slider.textFromValueFunction = [](double v) { return juce::String(juce::roundToInt(v * 100.0)) + "%"; };
+        k.slider.textFromValueFunction = [this](double v) {
+            return filterHzText(r3wrk::mnm::lpCutoffHz(document.filterBase.load(), v));
+        };
         k.slider.setValue(document.filterWidth.load(), juce::dontSendNotification);
         k.slider.updateText();
         k.apply = [this](double v) { document.filterWidth.store(v); };
         k.pull  = [this] { return document.filterWidth.load(); };
     }
 
-    //== Q (filter resonance, applied at both edges) =======================
+    //== HP Q (resonance at the high-pass edge) ===========================
     {
-        auto& k = addKnob("Q");
+        auto& k = addKnob("HP Q");
         k.slider.setRange(0.0, 1.0, 0.0);
         k.slider.setDoubleClickReturnValue(true, 0.0);
         k.slider.textFromValueFunction = [](double v) { return juce::String(juce::roundToInt(v * 100.0)) + "%"; };
-        k.slider.setValue(document.filterResonance.load(), juce::dontSendNotification);
+        k.slider.setValue(document.filterHpQ.load(), juce::dontSendNotification);
         k.slider.updateText();
-        k.apply = [this](double v) { document.filterResonance.store(v); };
-        k.pull  = [this] { return document.filterResonance.load(); };
+        k.apply = [this](double v) { document.filterHpQ.store(v); };
+        k.pull  = [this] { return document.filterHpQ.load(); };
     }
 
-    //== Drive (Octatrack-DIST-style pre-filter saturation) ================
+    //== LP Q (resonance at the low-pass edge) ============================
     {
-        auto& k = addKnob("Drive");
+        auto& k = addKnob("LP Q");
         k.slider.setRange(0.0, 1.0, 0.0);
-        k.slider.setDoubleClickReturnValue(true, 0.0);   // 0 = clean
+        k.slider.setDoubleClickReturnValue(true, 0.0);
         k.slider.textFromValueFunction = [](double v) { return juce::String(juce::roundToInt(v * 100.0)) + "%"; };
-        k.slider.setValue(document.filterDrive.load(), juce::dontSendNotification);
+        k.slider.setValue(document.filterLpQ.load(), juce::dontSendNotification);
         k.slider.updateText();
-        k.apply = [this](double v) { document.filterDrive.store(v); };
-        k.pull  = [this] { return document.filterDrive.load(); };
-    }
-
-    //== HP Slope (high-pass edge: 12 or 24 dB/oct) ==========================
-    {
-        auto& k = addKnob("HP Slope");
-        k.slider.setRange(0.0, 1.0, 1.0);   // step 1 -> only 0 (12dB) or 1 (24dB)
-        k.slider.setDoubleClickReturnValue(true, 0.0);   // 0 = 12 dB, matches the prior fixed slope
-        k.slider.textFromValueFunction = [](double v) { return v >= 0.5 ? "24 dB" : "12 dB"; };
-        k.slider.setValue(document.filterHpSlope24.load() ? 1.0 : 0.0, juce::dontSendNotification);
-        k.slider.updateText();
-        k.apply = [this](double v) { document.filterHpSlope24.store(v >= 0.5); };
-        k.pull  = [this] { return document.filterHpSlope24.load() ? 1.0 : 0.0; };
-    }
-
-    //== LP Slope (low-pass edge: 12 or 24 dB/oct) ===========================
-    {
-        auto& k = addKnob("LP Slope");
-        k.slider.setRange(0.0, 1.0, 1.0);   // step 1 -> only 0 (12dB) or 1 (24dB)
-        k.slider.setDoubleClickReturnValue(true, 0.0);   // 0 = 12 dB, matches the prior fixed slope
-        k.slider.textFromValueFunction = [](double v) { return v >= 0.5 ? "24 dB" : "12 dB"; };
-        k.slider.setValue(document.filterLpSlope24.load() ? 1.0 : 0.0, juce::dontSendNotification);
-        k.slider.updateText();
-        k.apply = [this](double v) { document.filterLpSlope24.store(v >= 0.5); };
-        k.pull  = [this] { return document.filterLpSlope24.load() ? 1.0 : 0.0; };
+        k.apply = [this](double v) { document.filterLpQ.store(v); };
+        k.pull  = [this] { return document.filterLpQ.load(); };
     }
 
     //== Start / End (selection edges) ========================================
@@ -298,14 +278,14 @@ void KnobRow::resized()
 {
     auto r = getLocalBounds().reduced(4, 2);
     const int gap    = 2;
-    const int dotGap = 16;   // the wider gap at a section-divider dot (before knob 3 / 6 / 8)
+    const int dotGap = 16;   // the wider gap at a section-divider dot (before knob 3 / 7 / 9)
     const int n = juce::jmax(1, knobs.size());
 
     // Auto-fit: prefer a fairly tight column, but shrink further so every knob still shows at
-    // the minimum window width (11-12: Pitch/Speed/Stretch/Base/Width/Q/Drive/HP Slope/LP
-    // Slope/Start/End[/Gain]). The rotary disc is sized off the column height, not its width,
-    // so a narrower column just packs the knobs closer without shrinking them; the cap keeps
-    // the time readouts (Start / End) from clipping.
+    // the minimum window width (9-10: Pitch/Speed/Stretch/Base/Width/HP Q/LP Q/Start/End
+    // [/Gain]). The rotary disc is sized off the column height, not its width, so a narrower
+    // column just packs the knobs closer without shrinking them; the cap keeps the time
+    // readouts (Start / End) from clipping.
     const int avail = juce::jmax(0, r.getWidth() - gap * (n - 1));
     const int knobW = juce::jlimit(46, 53, avail / n);
 
@@ -317,9 +297,9 @@ void KnobRow::resized()
         k->caption.setBounds(col.removeFromTop(14));
         k->slider.setBounds(col);
 
-        // A wide gap where a section-divider dot sits (before knob 3 / 9 / 11, i.e. after
-        // knob 2 / 8 / 10 -- see paint()), so the groups read as distinct blocks.
-        const bool beforeDot = (i == 2 || i == 8 || i == 10);
+        // A wide gap where a section-divider dot sits (before knob 3 / 7 / 9, i.e. after
+        // knob 2 / 6 / 8 -- see paint()), so the groups read as distinct blocks.
+        const bool beforeDot = (i == 2 || i == 6 || i == 8);
         r.removeFromLeft(beforeDot ? dotGap : gap);
     }
     repaint();   // reposition the section dividers for the new knob width
@@ -329,8 +309,8 @@ void KnobRow::paint(juce::Graphics& g)
 {
     // A small vertical run of three dots, centred in the gap before each of these knob
     // indices, marking the section boundaries: time/pitch | filter | selection | output gain.
-    // Index 11 (Gain) only exists in the Standalone build.
-    static constexpr int boundaryBefore[] = { 3 /*Base*/, 9 /*Start*/, 11 /*Gain*/ };
+    // Index 9 (Gain) only exists in the Standalone build.
+    static constexpr int boundaryBefore[] = { 3 /*Base*/, 7 /*Start*/, 9 /*Gain*/ };
 
     const float cy = (float) getHeight() * 0.5f;
     constexpr int   count = 3;

@@ -120,14 +120,15 @@ private:
     double lastAppliedPitchScale = -1.0;
     bool   stretchRatioNeedsSnap = true;
 
-    // Multi-mode filter on the playback output (after the stretcher). One MultiModeFilter per
-    // channel (each edge 12 or 24 dB/oct per document.filterHpSlope24/filterLpSlope24); cutoff
-    // is per-block-smoothed so a knob sweep doesn't zipper the coefficients. Reset on a fresh
-    // play pass and when the mode changes, so re-enabling doesn't thump.
-    r3wrk::MultiModeFilter playbackFilter[2];   // Octatrack-style Base/Width + Drive, per channel
+    // Modelled Monomachine multimode filter on the playback output (after the stretcher). One
+    // MultiModeFilter per channel; all four knob values are per-block-smoothed so a sweep
+    // doesn't zipper the coefficients. Reset on a fresh play pass and when the engaged line is
+    // crossed, so re-enabling doesn't thump.
+    r3wrk::MultiModeFilter playbackFilter[2];   // MnM Base/Width/HP Q/LP Q, per channel
     juce::SmoothedValue<double> smoothedFilterBase  { 0.0 };
     juce::SmoothedValue<double> smoothedFilterWidth { 1.0 };
-    juce::SmoothedValue<double> smoothedFilterDrive { 0.0 };
+    juce::SmoothedValue<double> smoothedFilterHpQ   { 0.0 };
+    juce::SmoothedValue<double> smoothedFilterLpQ   { 0.0 };
     bool lastFilterEngaged = false;
     void applyPlaybackFilter (juce::AudioBuffer<float>& buffer, int numCh, int numSamples,
                               bool freshPlayPass);

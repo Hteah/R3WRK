@@ -496,72 +496,38 @@ int main()
                   "notch at 1 kHz cuts a 1 kHz tone");
         }
 
-        // Octatrack-style Base/Width MultiModeFilter: Base 0 + Width 1 is a true passthrough;
+        // Modelled Monomachine MultiModeFilter: Base 0 + Width 1 is a true passthrough;
         // Base 0 + narrow Width is a low-pass (kills the 8 kHz tone); Base up + Width 1 is a
-        // high-pass (kills the 200 Hz tone).
-        auto runMMF = [&](juce::AudioBuffer<float> buf, double base01, double width01, double res01,
-                          double drive01 = 0.0, bool hp24 = false, bool lp24 = false)
+        // high-pass (kills the 200 Hz tone); HP Q gives a resonant boost at the corner.
+        auto runMMF = [&](juce::AudioBuffer<float> buf, double base01, double width01,
+                          double hpQ01, double lpQ01)
         {
-            r3wrk::MultiModeFilter mmf; mmf.setParams(base01, width01, res01, drive01, sr, hp24, lp24);
+            r3wrk::MultiModeFilter mmf; mmf.setParams(base01, width01, hpQ01, lpQ01, sr);
             mmf.processBlock(buf.getWritePointer(0), buf.getNumSamples());
             return buf;
         };
-        check(! r3wrk::filterEngaged(0.0, 1.0), "Base 0 + Width 1 reads as not engaged");
-        check(  r3wrk::filterEngaged(0.0, 1.0, 0.5), "Drive alone reads as engaged");
-        checkNear(rms(runMMF(makeSineBuffer(1, n, sr, 1000.0, 0.5f), 0.0, 1.0, 0.0), 0),
+        check(! r3wrk::filterEngaged(0.0, 1.0, 0.0, 0.0), "Base 0 + Width 1 reads as not engaged");
+        check(  r3wrk::filterEngaged(0.0, 1.0, 0.5, 0.0), "HP Q alone reads as engaged");
+        checkNear(rms(runMMF(makeSineBuffer(1, n, sr, 1000.0, 0.5f), 0.0, 1.0, 0.0, 0.0), 0),
                   rms(makeSineBuffer(1, n, sr, 1000.0, 0.5f), 0), 0.01,
                   "Base 0 + Width 1 passes a 1 kHz tone untouched");
-        check(rms(runMMF(tone8k,  0.0, r3wrk::filterHzToPos(500.0),  0.2), 0) < rms(tone8k, 0)  * 0.2,
-              "Base 0 + Width ~500 Hz (low-pass) crushes an 8 kHz tone");
-        check(rms(runMMF(tone200, r3wrk::filterHzToPos(3000.0), 1.0, 0.2), 0) < rms(tone200, 0) * 0.2,
-              "Base ~3 kHz + Width 1 (high-pass) crushes a 200 Hz tone");
+        check(rms(runMMF(tone8k, 0.0, 0.25, 0.0, 0.0), 0) < rms(tone8k, 0) * 0.3,
+              "Base 0 + low Width (low-pass) crushes an 8 kHz tone");
+        check(rms(runMMF(tone200, 0.6, 1.0, 0.0, 0.0), 0) < rms(tone200, 0) * 0.3,
+              "Base up + Width 1 (high-pass) crushes a 200 Hz tone");
 
-        // 12/24 dB slope: a tone one octave below the HP cutoff (transition band, not the deep
-        // stopband) should come through noticeably quieter at 24 dB than at 12 dB -- the whole
-        // point of the steeper slope. Base = 1 kHz cutoff, tone = 500 Hz, Width open (pure HP).
+        // Resonance: a tone sitting near the low-pass corner comes through louder with LP Q up
+        // than with LP Q 0 -- the measured Monomachine filter boosts hard at the corner.
         {
-            auto tone500 = makeSineBuffer(1, n, sr, 500.0, 0.5f);
-            const double baseAt1k = r3wrk::filterHzToPos(1000.0);
-            const double r12 = rms(runMMF(tone500, baseAt1k, 1.0, 0.0, 0.0, false, false), 0);
-            const double r24 = rms(runMMF(tone500, baseAt1k, 1.0, 0.0, 0.0, true,  false), 0);
-            check(r24 < r12 * 0.9,
-                  "HP Slope 24 dB attenuates a transition-band tone harder than 12 dB");
+            const double lpFc = r3wrk::mnm::lpCutoffHz(0.0, 0.35);
+            auto toneAtFc = makeSineBuffer(1, n, sr, lpFc, 0.3f);
+            const double dryQ  = rms(runMMF(juce::AudioBuffer<float>(toneAtFc), 0.0, 0.35, 0.0, 0.0), 0);
+            const double resoQ = rms(runMMF(juce::AudioBuffer<float>(toneAtFc), 0.0, 0.35, 0.0, 0.7), 0);
+            check(resoQ > dryQ * 1.5, "LP Q boosts a tone at the low-pass corner");
         }
 
-        // Drive on a pure 1 kHz sine, filter wide open -> tanh saturation adds harmonics.
-        // Project each signal onto the 1 kHz fundamental, subtract it, and measure the leftover
-        // power as a fraction of total: ~0 for a pure sine, clearly non-zero once driven.
-        {
-            const double w = 2.0 * juce::MathConstants<double>::pi * 1000.0 / (double) sr;
-            auto residualFrac = [&](const juce::AudioBuffer<float>& b)
-            {
-                const float* d = b.getReadPointer(0);
-                const int    N = b.getNumSamples();
-                double ps = 0.0, pc = 0.0, tot = 0.0;
-                for (int i = 0; i < N; ++i)
-                {
-                    ps  += d[i] * std::sin(w * i);
-                    pc  += d[i] * std::cos(w * i);
-                    tot += (double) d[i] * d[i];
-                }
-                const double as = 2.0 * ps / N, ac = 2.0 * pc / N;
-                double resid = 0.0;
-                for (int i = 0; i < N; ++i)
-                {
-                    const double fund = as * std::sin(w * i) + ac * std::cos(w * i);
-                    resid += (d[i] - fund) * (d[i] - fund);
-                }
-                return resid / juce::jmax(1.0e-12, tot);
-            };
-            const double cleanR  = residualFrac(makeSineBuffer(1, n, sr, 1000.0, 0.5f));
-            const double drivenR = residualFrac(runMMF(makeSineBuffer(1, n, sr, 1000.0, 0.5f),
-                                                       0.0, 1.0, 0.0, 0.8));
-            check(cleanR < 0.01 && drivenR > 0.08,
-                  "Drive adds harmonics to a pure 1 kHz sine (clean ~pure, driven not)");
-        }
-
-        // renderWithPlaybackKnobs applies the filter: a low-pass at ~500 Hz on a 200+8000 Hz
-        // mix drops the level (the 8 kHz half is removed); wide open is a passthrough.
+        // renderWithPlaybackKnobs applies the filter: a low-pass on a 200+8000 Hz mix drops the
+        // level (the 8 kHz half is removed); wide open is a passthrough.
         juce::AudioBuffer<float> mix(1, n);
         for (int i = 0; i < n; ++i)
             mix.setSample(0, i, tone200.getSample(0, i) + tone8k.getSample(0, i));
@@ -574,7 +540,7 @@ int main()
         checkNear((double) dry.getNumSamples(), (double) n, 1.0, "filter open -> render is a passthrough (length)");
 
         fdoc.filterBase.store(0.0);
-        fdoc.filterWidth.store(r3wrk::filterHzToPos(500.0));
+        fdoc.filterWidth.store(0.25);
         check(fdoc.playbackKnobsEngaged(), "filter on -> playbackKnobsEngaged() true even with stretch centred");
         auto filt = fdoc.renderWithPlaybackKnobs(fdoc.getBuffer());
         check((int64_t) filt.getNumSamples() == n, "filter render keeps the length");

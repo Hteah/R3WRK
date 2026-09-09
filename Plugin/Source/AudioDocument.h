@@ -247,30 +247,21 @@ public:
     std::atomic<double> playbackPitch   { 0.0 };
     std::atomic<double> playbackStretch { 1.0 };
 
-    // Octatrack-style Base/Width multimode filter on the playback stream (after the stretcher).
-    // Non-destructive; baked into Save/Export by renderWithPlaybackKnobs. See BiquadFilter.h
-    // (r3wrk::MultiModeFilter): a high-pass at Base, a low-pass at Base+Width (each 12 or
-    // 24 dB/oct per filterHpSlope24/filterLpSlope24), Q on both -- you dial the two edges of
-    // the passband instead of picking a mode.
-    //   filterBase      : 0..1, low edge (high-pass cutoff), log-mapped 20 Hz..20 kHz.
-    //                     0 = no high-pass. ("Base" knob.)
-    //   filterWidth     : 0..1, passband width above Base -> high edge (low-pass cutoff).
-    //                     1 = no low-pass. ("Width" knob.)
-    //   filterResonance : 0..1, mapped to Q at both edges by r3wrk::filterResonanceToQ.
-    //                     ("Q" knob.)
-    //   filterDrive     : 0..1, pre-filter tanh saturation (harmonics ahead of the poles) --
-    //                     R3WRK's Octatrack-DIST-style filter drive. ("Drive" knob.)
-    //   filterHpSlope24 : false = 12 dB/oct high-pass edge, true = 24 dB/oct (two cascaded
-    //                     stages). Matches the OT's independent HP slope switch. ("HP Slope" knob.)
-    //   filterLpSlope24 : same, for the low-pass edge. ("LP Slope" knob.)
-    // Base 0 + Width 1 + Drive 0 = wide open (no effect); that's the default / double-click.
-    // Slopes default to 12 dB (false) so existing sessions/state keep their original sound.
-    std::atomic<double> filterBase      { 0.0 };
-    std::atomic<double> filterWidth     { 1.0 };
-    std::atomic<double> filterResonance { 0.0 };
-    std::atomic<double> filterDrive     { 0.0 };
-    std::atomic<bool>   filterHpSlope24 { false };
-    std::atomic<bool>   filterLpSlope24 { false };
+    // Elektron Monomachine multimode filter on the playback stream (after the stretcher),
+    // modelled from measurements -- see BiquadFilter.h (r3wrk::MultiModeFilter) and
+    // MonomachineFilterModel.h. A 2-pole high-pass at the Base corner + a 2-pole low-pass at
+    // the Base+Width corner, in series, with independent resonance per edge. Non-destructive;
+    // baked into Save/Export by renderWithPlaybackKnobs.
+    //   filterBase  : 0..1, high-pass corner (MnM "Base"). 0 = no high-pass. ("Base" knob.)
+    //   filterWidth : 0..1, passband gap above Base -> low-pass corner (MnM "Width").
+    //                 1 = low-pass wide open. ("Width" knob.)
+    //   filterHpQ   : 0..1, resonance at the high-pass edge (MnM "HP Q"). ("HP Q" knob.)
+    //   filterLpQ   : 0..1, resonance at the low-pass edge (MnM "LP Q"). ("LP Q" knob.)
+    // Base 0 + Width 1 + HP Q 0 + LP Q 0 = wide open (no effect); that's the default.
+    std::atomic<double> filterBase  { 0.0 };
+    std::atomic<double> filterWidth { 1.0 };
+    std::atomic<double> filterHpQ   { 0.0 };
+    std::atomic<double> filterLpQ   { 0.0 };
 
     // Output "Gain" knob (Standalone only -- KnobRow adds the knob just in that build; the
     // atomic sits here for everyone but stays at 0). In dB, 0 = unity (default volume);

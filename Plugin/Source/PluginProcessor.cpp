@@ -5,7 +5,8 @@
 
 namespace
 {
-    constexpr int kStateMagic     = 0x52335741;   // 'R3WA' - adds filter HP/LP slope (12/24dB)
+    constexpr int kStateMagic     = 0x52335742;   // 'R3WB' - MnM filter: Base/Width/HP Q/LP Q
+    constexpr int kStateMagicR3WA = 0x52335741;   // 'R3WA' - OT filter + HP/LP slope (12/24dB)
     constexpr int kStateMagicR3W9 = 0x52335739;   // 'R3W9' - adds filterDrive
     constexpr int kStateMagicR3W8 = 0x52335738;   // 'R3W8' - filter is Base/Width, no drive
     constexpr int kStateMagicR3W7 = 0x52335737;   // 'R3W7' - mode/cutoff/res filter + playbackGainDb
@@ -64,10 +65,12 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 
     smoothedFilterBase.reset(sampleRate, 0.03);
     smoothedFilterWidth.reset(sampleRate, 0.03);
-    smoothedFilterDrive.reset(sampleRate, 0.03);
+    smoothedFilterHpQ.reset(sampleRate, 0.03);
+    smoothedFilterLpQ.reset(sampleRate, 0.03);
     smoothedFilterBase.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.filterBase.load()));
     smoothedFilterWidth.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.filterWidth.load()));
-    smoothedFilterDrive.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.filterDrive.load()));
+    smoothedFilterHpQ.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.filterHpQ.load()));
+    smoothedFilterLpQ.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.filterLpQ.load()));
     playbackFilter[0].reset();
     playbackFilter[1].reset();
     lastFilterEngaged = false;
@@ -458,8 +461,9 @@ void R3WRKAudioProcessor::applyPlaybackFilter(juce::AudioBuffer<float>& buffer, 
 {
     const double base01  = juce::jlimit(0.0, 1.0, document.filterBase.load(std::memory_order_relaxed));
     const double width01 = juce::jlimit(0.0, 1.0, document.filterWidth.load(std::memory_order_relaxed));
-    const double drive01 = juce::jlimit(0.0, 1.0, document.filterDrive.load(std::memory_order_relaxed));
-    const bool   engaged = r3wrk::filterEngaged(base01, width01, drive01);
+    const double hpQ01   = juce::jlimit(0.0, 1.0, document.filterHpQ.load(std::memory_order_relaxed));
+    const double lpQ01   = juce::jlimit(0.0, 1.0, document.filterLpQ.load(std::memory_order_relaxed));
+    const bool   engaged = r3wrk::filterEngaged(base01, width01, hpQ01, lpQ01);
 
     if (freshPlayPass || engaged != lastFilterEngaged)
     {
@@ -470,14 +474,16 @@ void R3WRKAudioProcessor::applyPlaybackFilter(juce::AudioBuffer<float>& buffer, 
         {
             smoothedFilterBase.setCurrentAndTargetValue(base01);
             smoothedFilterWidth.setCurrentAndTargetValue(width01);
-            smoothedFilterDrive.setCurrentAndTargetValue(drive01);
+            smoothedFilterHpQ.setCurrentAndTargetValue(hpQ01);
+            smoothedFilterLpQ.setCurrentAndTargetValue(lpQ01);
         }
         else if (engaged && ! lastFilterEngaged)
         {
-            // Switched on mid-playback: ramp in from "wide open, no drive" so it eases in.
+            // Switched on mid-playback: ramp in from "wide open, no resonance" so it eases in.
             smoothedFilterBase.setCurrentAndTargetValue(0.0);
             smoothedFilterWidth.setCurrentAndTargetValue(1.0);
-            smoothedFilterDrive.setCurrentAndTargetValue(0.0);
+            smoothedFilterHpQ.setCurrentAndTargetValue(0.0);
+            smoothedFilterLpQ.setCurrentAndTargetValue(0.0);
         }
     }
     lastFilterEngaged = engaged;
@@ -487,17 +493,16 @@ void R3WRKAudioProcessor::applyPlaybackFilter(juce::AudioBuffer<float>& buffer, 
 
     smoothedFilterBase.setTargetValue(base01);
     smoothedFilterWidth.setTargetValue(width01);
-    smoothedFilterDrive.setTargetValue(drive01);
+    smoothedFilterHpQ.setTargetValue(hpQ01);
+    smoothedFilterLpQ.setTargetValue(lpQ01);
     const double b = smoothedFilterBase.skip(numSamples);    // one coefficient set per block
     const double w = smoothedFilterWidth.skip(numSamples);
-    const double d = smoothedFilterDrive.skip(numSamples);
-    const double res = juce::jlimit(0.0, 1.0, document.filterResonance.load(std::memory_order_relaxed));
-    const bool hp24 = document.filterHpSlope24.load(std::memory_order_relaxed);
-    const bool lp24 = document.filterLpSlope24.load(std::memory_order_relaxed);
+    const double hq = smoothedFilterHpQ.skip(numSamples);
+    const double lq = smoothedFilterLpQ.skip(numSamples);
 
     for (int ch = 0; ch < juce::jmin(numCh, 2); ++ch)
     {
-        playbackFilter[ch].setParams(b, w, res, d, currentSampleRate, hp24, lp24);
+        playbackFilter[ch].setParams(b, w, hq, lq, currentSampleRate);
         playbackFilter[ch].processBlock(buffer.getWritePointer(ch), numSamples);
     }
 }
@@ -779,10 +784,8 @@ void R3WRKAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     out.writeDouble(document.autoRecordThresholdDb.load());
     out.writeDouble(document.filterBase.load());
     out.writeDouble(document.filterWidth.load());
-    out.writeDouble(document.filterResonance.load());
-    out.writeDouble(document.filterDrive.load());
-    out.writeBool(document.filterHpSlope24.load());
-    out.writeBool(document.filterLpSlope24.load());
+    out.writeDouble(document.filterHpQ.load());
+    out.writeDouble(document.filterLpQ.load());
     out.writeDouble(document.playbackGainDb.load());
 
     auto& buf = document.getBuffer();
@@ -799,16 +802,22 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     juce::MemoryInputStream in(data, (size_t) sizeInBytes, false);
     const int magic = in.readInt();
-    if (magic != kStateMagic && magic != kStateMagicR3W9 && magic != kStateMagicR3W8
-        && magic != kStateMagicR3W7 && magic != kStateMagicR3W6 && magic != kStateMagicR3W5)
+    if (magic != kStateMagic && magic != kStateMagicR3WA && magic != kStateMagicR3W9
+        && magic != kStateMagicR3W8 && magic != kStateMagicR3W7 && magic != kStateMagicR3W6
+        && magic != kStateMagicR3W5)
         return;
-    const bool hasBaseWidthFilter = (magic == kStateMagic || magic == kStateMagicR3W9
-                                     || magic == kStateMagicR3W8);                          // R3W8+
-    const bool hasDriveField      = (magic == kStateMagic || magic == kStateMagicR3W9);     // R3W9+
-    const bool hasSlopeField      = (magic == kStateMagic);                                 // R3WA+
+    // R3WB: filter is Base/Width/HP Q/LP Q (the MnM model). R3W8..R3WA: the old OT-style
+    // Base/Width filter with a single resonance (+ later Drive, + later 12/24 slope). R3W6/R3W7:
+    // the even older mode/cutoff filter. R3W5: no filter at all.
+    const bool hasMnmFilter       = (magic == kStateMagic);                                  // R3WB
+    const bool hasOldBaseWidth    = (magic == kStateMagicR3WA || magic == kStateMagicR3W9
+                                     || magic == kStateMagicR3W8);                            // R3W8..R3WA
+    const bool hasDriveField      = (magic == kStateMagicR3WA || magic == kStateMagicR3W9);   // R3W9/R3WA
+    const bool hasSlopeField      = (magic == kStateMagicR3WA);                               // R3WA
     const bool hasOldModeFilter   = (magic == kStateMagicR3W7 || magic == kStateMagicR3W6);
-    const bool hasGainField       = (magic == kStateMagic || magic == kStateMagicR3W9
-                                     || magic == kStateMagicR3W8 || magic == kStateMagicR3W7);
+    const bool hasGainField       = (magic == kStateMagic || magic == kStateMagicR3WA
+                                     || magic == kStateMagicR3W9 || magic == kStateMagicR3W8
+                                     || magic == kStateMagicR3W7);
 
     double sr = in.readDouble();
     int numCh = in.readInt();
@@ -823,31 +832,34 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     double str = in.readDouble();
     double thresh = in.readDouble();
 
-    double fBase = 0.0, fWidth = 1.0, fRes = 0.0, fDrive = 0.0, gDb = 0.0;
-    bool fHp24 = false, fLp24 = false;
-    if (hasBaseWidthFilter)
+    double fBase = 0.0, fWidth = 1.0, fHpQ = 0.0, fLpQ = 0.0, gDb = 0.0;
+    if (hasMnmFilter)
     {
         fBase  = in.readDouble();
         fWidth = in.readDouble();
-        fRes   = in.readDouble();
-        if (hasDriveField)
-            fDrive = in.readDouble();
-        if (hasSlopeField)
-        {
-            fHp24 = in.readBool();
-            fLp24 = in.readBool();
-        }
+        fHpQ   = in.readDouble();
+        fLpQ   = in.readDouble();
+    }
+    else if (hasOldBaseWidth)
+    {
+        // The old OT-style Base/Width filter: keep Base/Width (they mean the same thing), and
+        // fold its single resonance onto BOTH edges' Q. Drive and the 12/24 slope switch have
+        // no equivalent in the MnM model -- read past them, drop them.
+        fBase  = in.readDouble();
+        fWidth = in.readDouble();
+        const double oldRes = in.readDouble();
+        fHpQ = fLpQ = juce::jlimit(0.0, 1.0, oldRes);
+        if (hasDriveField) in.readDouble();          // old filterDrive -- dropped
+        if (hasSlopeField) { in.readBool(); in.readBool(); }  // old 12/24 slope -- dropped
     }
     else if (hasOldModeFilter)
     {
-        // Migrate the pre-R3W8 mode/cutoff filter onto Base/Width so a returning session
-        // keeps roughly the same sound. Notch (mode 4) has no Base/Width equivalent -> open.
-        // The old single-biquad resonance doesn't map onto the new two-edge Q, so it's
-        // dropped to 0 (still read, to keep the stream position for the gain field).
+        // Migrate the oldest mode/cutoff filter onto Base/Width so a returning session keeps
+        // roughly the same sound. Notch (mode 4) has no equivalent -> open. Old resonance is
+        // read but not carried (it doesn't map onto the two-edge Q sensibly).
         const int    oldMode = in.readInt();
         const double oldCut  = in.readDouble();
-        in.readDouble();          // old filterResonance -- consumed but not carried over
-        fRes = 0.0;
+        in.readDouble();          // old filterResonance -- consumed, not carried over
         const double pos = r3wrk::filterHzToPos(oldCut > 0.0 ? oldCut : 1000.0);
         switch (oldMode)
         {
@@ -888,10 +900,8 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     document.autoRecordThresholdDb.store(juce::jlimit(-60.0, 0.0, thresh));
     document.filterBase.store(juce::jlimit(0.0, 1.0, fBase));
     document.filterWidth.store(juce::jlimit(0.0, 1.0, fWidth));
-    document.filterResonance.store(juce::jlimit(0.0, 1.0, fRes));
-    document.filterDrive.store(juce::jlimit(0.0, 1.0, fDrive));
-    document.filterHpSlope24.store(fHp24);
-    document.filterLpSlope24.store(fLp24);
+    document.filterHpQ.store(juce::jlimit(0.0, 1.0, fHpQ));
+    document.filterLpQ.store(juce::jlimit(0.0, 1.0, fLpQ));
     document.playbackGainDb.store(juce::jlimit(AudioDocument::kMinGainDb, AudioDocument::kMaxGainDb, gDb));
 
     document.clearSliceMarkers();   // session-only; a restored document starts with no markers
