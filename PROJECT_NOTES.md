@@ -644,7 +644,8 @@ above it to the low-pass corner) but the cutoff curves, slope and resonance now 
 from real data. Drive and the slope switch are **gone**. Non-destructive, live on the
 knobs, baked into Save/Export like Speed/Pitch/Stretch.
 
-The model lives in a **separate project, `~/Documents/Claude/MNMFILTER`** (Python):
+The model lives in a **separate project, `~/Documents/Claude/MNMFILTER`** (Python;
+full technical writeup in its `MODEL_NOTES.md`):
 white noise through the MnM filter at ~1100 settings, PSD ÷ open-filter reference =
 `|H(f)|`, fitted. Findings: each edge is ~2-pole (**~11 dB/oct** measured); the
 corner is a clean exponential in the param; HP and LP edges are independent;
