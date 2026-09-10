@@ -468,7 +468,6 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     addAndMakeVisible(timeLabel);
     addAndMakeVisible(recordButton);
     addAndMakeVisible(toolsButton);
-    addAndMakeVisible(reverseButton);
     addAndMakeVisible(clearButton);
     addAndMakeVisible(autoRecordButton);
     if (standaloneApp)
@@ -493,7 +492,6 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
                            "to delete it (Tools has the export)");
     recordButton.setTooltip("Record");
     toolsButton.setTooltip("Tools");
-    reverseButton.setTooltip("Reverse the selection (or the whole clip, if nothing's selected)");
     clearButton.setTooltip("Clear -- empties the waveform and resets Pitch/Speed/Stretch/Start/End");
     autoRecordButton.setTooltip("Auto-Record -- arm it and recording starts on its own once the "
                                 "input crosses the threshold (set in Tools, Auto-Record Threshold)");
@@ -506,7 +504,7 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
 
     for (auto* b : { &playFromStartButton, &playButton,
                      static_cast<juce::TextButton*>(&loopButton), &scrubButton, &sliceButton,
-                     &recordButton, &toolsButton, &reverseButton, &clearButton,
+                     &recordButton, &toolsButton, &clearButton,
                      &autoRecordButton })
     {
         b->setLookAndFeel(&toolbarLnF);
@@ -590,7 +588,6 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
         }
         document.notifyChanged();
     };
-    reverseButton.onClick = [this] { EditActions::reverse(document); };
     clearButton.onClick = [this]
     {
         if (document.isPlaying.load())
@@ -627,7 +624,7 @@ EditorToolbar::~EditorToolbar()
 {
     for (auto* b : { &playFromStartButton, &playButton,
                      static_cast<juce::TextButton*>(&loopButton), &scrubButton, &sliceButton,
-                     &recordButton, &toolsButton, &reverseButton, &clearButton,
+                     &recordButton, &toolsButton, &clearButton,
                      &autoRecordButton })
         b->setLookAndFeel(nullptr);   // detach before toolbarLnF is destroyed
     desktopRecButton.setLookAndFeel(nullptr);
@@ -679,10 +676,6 @@ void EditorToolbar::applyTheme()
     toolsButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
     toolsButton.setColour(juce::TextButton::textColourOffId, pal.screenText);
 
-    // Reverse runs immediately (no on/off state of its own), same outlined treatment as
-    // Tools/Play-from-start.
-    reverseButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
-    reverseButton.setColour(juce::TextButton::textColourOffId, pal.screenText);
 
     // Clear discards audio, so its X is inked in the same red as the record button rather
     // than the neutral screenText every other outlined icon uses -- a quiet "careful, this
@@ -740,7 +733,7 @@ void EditorToolbar::paint(juce::Graphics& g)
     if (standaloneApp)
     {
         dotsBetween(autoRecordButton, desktopRecButton);
-        dotsBetween(captureOutButton, reverseButton);
+        dotsBetween(captureOutButton, scrubButton);
     }
     dotsBetween(sliceButton, toolsButton);
 }
@@ -1217,7 +1210,6 @@ void EditorToolbar::updateTransportButtonText()
     recordButton.setEnabled((! playing || micRec) && ! desktopRec);
     scrubButton.setEnabled(! rec);
     sliceButton.setEnabled(! rec);
-    reverseButton.setEnabled(! rec);
     clearButton.setEnabled(! rec);
     autoRecordButton.setEnabled(! rec);
 
@@ -1501,9 +1493,9 @@ void EditorToolbar::resized()
     auto add = [&](juce::Component& c, int rightMargin = 16) { addWide(c, 28, rightMargin); };
     // Order set by the user: transport (Play-from-start, Play, Loop) -> primary record
     // (Record, Auto-Record) -> secondary record (Record Desktop, Capture Output; standalone
-    // only) -> waveform tools (Reverse, Scrub, Slice) -> Tools menu -> Clear, with the time
-    // readout pinned right. All round icon buttons. paint() drops a divider dot in each
-    // widened (gap + dotGap) gap. (Follow-playhead moved to the header row -- see PluginEditor.)
+    // only) -> waveform tools (Scrub, Slice) -> Tools menu -> Clear, with the time readout
+    // pinned right. All round icon buttons. paint() drops a divider dot in each widened
+    // (gap + dotGap) gap. (Follow-playhead moved to the header row -- see PluginEditor.)
     add(playFromStartButton);
     add(playButton);
     add(loopButton);
@@ -1512,9 +1504,8 @@ void EditorToolbar::resized()
     if (standaloneApp)
     {
         add(desktopRecButton);
-        add(captureOutButton, gap + dotGap);                     // dot before Reverse
+        add(captureOutButton, gap + dotGap);                     // dot before Scrub
     }
-    add(reverseButton);
     add(scrubButton);
     add(sliceButton, gap + dotGap);                              // dot before Tools
     add(toolsButton);

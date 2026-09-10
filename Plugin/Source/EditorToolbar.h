@@ -173,8 +173,6 @@ private:
                                                                             // processed playback output to a
                                                                             // WAV in the output folder
     juce::TextButton toolsButton   { R3WRKLookAndFeel::iconTools };    // opens the Tools ▾ pop-up menu
-    juce::TextButton reverseButton { R3WRKLookAndFeel::iconReverse };  // runs immediately, like Tools ▾'s
-                                                                       // own Reverse item -- not a toggle
     juce::TextButton clearButton   { R3WRKLookAndFeel::iconClear };    // empties the waveform and resets
                                                                        // Pitch/Speed/Stretch/Start/End
 
