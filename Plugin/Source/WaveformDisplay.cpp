@@ -887,6 +887,76 @@ void WaveformDisplay::paintWholeClipGainPreview(juce::Graphics& g)
     }
 }
 
+// Loop crossfade: a raised-cosine fade wedge at each end of the loop region (selection,
+// else the loop points, else the whole clip) -- a visual echo of the envelope the playback
+// path applies (see gatherRegion / EditorToolbar's LoopCrossfadePanel). Repaints live as
+// the callout slider moves (its onValueChange calls document.notifyChanged()).
+void WaveformDisplay::paintLoopCrossfade(juce::Graphics& g)
+{
+    const double ms = document.loopCrossfadeMs.load();
+    if (ms <= 0.01)
+        return;
+
+    int64_t rs, re;
+    if (document.hasSelection())
+    {
+        rs = document.getSelectionStart();
+        re = document.getSelectionEnd();
+    }
+    else if (document.loopEnabled)
+    {
+        if (document.loopEnd > document.loopStart) { rs = document.loopStart; re = document.loopEnd; }
+        else                                       { rs = 0; re = document.getNumSamples(); }
+    }
+    else
+        return;
+
+    const int64_t regionLen = re - rs;
+    const double sr = document.getSampleRate();
+    if (regionLen <= 2 || sr <= 0.0)
+        return;
+
+    const int64_t fade = juce::jmin<int64_t>((int64_t) (ms * sr / 1000.0), regionLen / 2);
+    if (fade < 1)
+        return;
+
+    const float h = (float) getHeight();
+    const juce::Colour line  = theme->palette().accent;
+    const juce::Colour scrim = juce::Colours::black.withAlpha(0.30f);
+    constexpr int steps = 28;
+
+    auto drawWedge = [&](int64_t edgeSample, int64_t innerSample)
+    {
+        const float xe = sampleToX(edgeSample);    // region edge: gain 0 (bottom)
+        const float xi = sampleToX(innerSample);   // fade end: gain 1 (top)
+        if (juce::jmax(xe, xi) < -4.0f || juce::jmin(xe, xi) > (float) getWidth() + 4.0f)
+            return;
+
+        juce::Path curve;
+        for (int i = 0; i <= steps; ++i)
+        {
+            const double t = (double) i / steps;
+            const double s = std::sin(0.5 * juce::MathConstants<double>::pi * t);
+            const float x = xe + (xi - xe) * (float) t;
+            const float y = h * (float) (1.0 - s * s);
+            if (i == 0) curve.startNewSubPath(x, y);
+            else        curve.lineTo(x, y);
+        }
+
+        juce::Path fill = curve;
+        fill.lineTo(xe, 0.0f);
+        fill.closeSubPath();
+        g.setColour(scrim);
+        g.fillPath(fill);
+
+        g.setColour(line.withAlpha(0.9f));
+        g.strokePath(curve, juce::PathStrokeType(1.5f));
+    };
+
+    drawWedge(rs, rs + fade);   // fade in
+    drawWedge(re, re - fade);   // fade out
+}
+
 void WaveformDisplay::paint(juce::Graphics& g)
 {
     if (document.isRecording.load(std::memory_order_relaxed))
@@ -1001,6 +1071,8 @@ void WaveformDisplay::paint(juce::Graphics& g)
         g.drawVerticalLine((int) sampleToX(document.loopStart), 0.0f, (float) getHeight());
         g.drawVerticalLine((int) sampleToX(document.loopEnd), 0.0f, (float) getHeight());
     }
+
+    paintLoopCrossfade(g);
 
     // Slice markers (Slice tool): same 2px line + top/bottom handle pills as the selection
     // brackets, so they're the "similar size" the user asked for -- but in the loop-marker

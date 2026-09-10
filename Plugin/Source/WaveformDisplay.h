@@ -120,6 +120,7 @@ private:
     void paintRecordingScope(juce::Graphics&);
     void paintSelectionPreview(juce::Graphics&);        // live Amplify/Stretch preview over a selection
     void paintWholeClipGainPreview(juce::Graphics&);    // live Amplify preview when there's no selection
+    void paintLoopCrossfade(juce::Graphics&);           // fade wedges at the loop region's ends
     void beginSelectionDragExport();   // native file drag of the selection to Ableton / Finder
     int  sliceMarkerAtPixel(float x, float tolPx) const;   // nearest slice marker within tolPx of x, else -1
     void playSliceAt(int64_t sample);          // Slice tool: play the region containing `sample`
