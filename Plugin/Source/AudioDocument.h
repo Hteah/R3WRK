@@ -193,6 +193,9 @@ public:
     // region during playback (loop only), so the wrap doesn't click. 0 = off. Set by
     // right-clicking the loop button; persisted. Never touches the stored audio.
     std::atomic<double> loopCrossfadeMs { 0.0 };
+    // When true, Export Selection (and dragging a selection out) also bakes that same
+    // crossfade envelope into the exported file's ends. Persisted. Toggle in the same callout.
+    std::atomic<bool> bakeLoopCrossfadeOnExport { false };
 
     //==============================================================================
     // Scrub tool: drag across the waveform to play forward or backward at a rate matching

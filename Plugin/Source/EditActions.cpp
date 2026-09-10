@@ -275,8 +275,30 @@ bool exportSelection(const AudioDocument& doc, const juce::File& file, AudioSave
     // then write it through the very same path Save As uses -- so the export honours the
     // chosen format / sample rate / bit depth.
     auto region = extractRange(doc.getBuffer(), range.getStart(), range.getEnd());
-    return AudioDocument::writeAudioFile(doc.renderWithPlaybackKnobs(region), doc.getSampleRate(),
-                                        file, opts);
+    auto rendered = doc.renderWithPlaybackKnobs(region);
+
+    // Optionally bake the loop crossfade into the exported ends (armed in the loop-crossfade
+    // callout). Raised-cosine, same shape the playback path applies.
+    const double xfadeMs = doc.loopCrossfadeMs.load();
+    if (doc.bakeLoopCrossfadeOnExport.load() && xfadeMs > 0.01 && rendered.getNumSamples() > 2)
+    {
+        const int n = rendered.getNumSamples();
+        const int L = (int) juce::jmin<int64_t>((int64_t) (xfadeMs * doc.getSampleRate() / 1000.0),
+                                                (int64_t) (n / 2));
+        for (int ch = 0; ch < rendered.getNumChannels(); ++ch)
+        {
+            float* d = rendered.getWritePointer(ch);
+            for (int i = 0; i < L; ++i)
+            {
+                const double s = std::sin(0.5 * juce::MathConstants<double>::pi * (double) i / (double) L);
+                const float g = (float) (s * s);
+                d[i]         *= g;
+                d[n - 1 - i] *= g;
+            }
+        }
+    }
+
+    return AudioDocument::writeAudioFile(std::move(rendered), doc.getSampleRate(), file, opts);
 }
 
 int sliceToFolder(const AudioDocument& doc, const juce::File& folder, const juce::String& baseName)

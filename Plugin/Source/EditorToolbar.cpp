@@ -235,7 +235,7 @@ namespace
     //==============================================================================
     // Right-click the loop button. Live setting (no Apply): a raised-cosine volume envelope
     // over the first/last N ms of the loop region during playback, so the wrap doesn't click.
-    // Non-destructive -- it never touches the stored audio.
+    // Doesn't touch the stored audio; the "bake" toggle also writes it into exported selections.
     struct LoopCrossfadePanel : juce::Component
     {
         explicit LoopCrossfadePanel(AudioDocument& doc) : document(doc)
@@ -254,6 +254,14 @@ namespace
                 document.notifyChanged();   // mark dirty so Save keeps it
             };
 
+            bake.setButtonText("Bake into exported selections");
+            bake.setToggleState(document.bakeLoopCrossfadeOnExport.load(), juce::dontSendNotification);
+            bake.onClick = [this]
+            {
+                document.bakeLoopCrossfadeOnExport = bake.getToggleState();
+                document.notifyChanged();
+            };
+
             hint.setText("Fades the loop region's ends so the wrap doesn't click. 0 = off.",
                          juce::dontSendNotification);
             hint.setFont(juce::FontOptions(11.0f));
@@ -261,8 +269,9 @@ namespace
 
             addAndMakeVisible(title);
             addAndMakeVisible(amount);
+            addAndMakeVisible(bake);
             addAndMakeVisible(hint);
-            setSize(300, 78);
+            setSize(300, 104);
         }
         void resized() override
         {
@@ -271,11 +280,14 @@ namespace
             r.removeFromTop(6);
             amount.setBounds(r.removeFromTop(24));
             r.removeFromTop(4);
+            bake.setBounds(r.removeFromTop(20));
+            r.removeFromTop(4);
             hint.setBounds(r);
         }
         AudioDocument& document;
         juce::Label title, hint;
         juce::Slider amount;
+        juce::ToggleButton bake;
     };
 
     //==============================================================================

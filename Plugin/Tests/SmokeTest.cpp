@@ -271,6 +271,44 @@ int main()
         }
         st.deleteFile();
         doc.playbackStretch.store(1.0);
+
+        // Bake the loop crossfade into the export: armed + a non-zero amount -> the written
+        // file's ends are faded (first/last samples near silence); off -> untouched.
+        doc.loopCrossfadeMs.store(20.0);
+        doc.bakeLoopCrossfadeOnExport.store(false);
+        auto nofade = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("r3wrk_export_nofade.wav");
+        nofade.deleteFile();
+        check(EditActions::exportSelection(doc, nofade), "exportSelection (bake off) writes a file");
+        {
+            std::unique_ptr<juce::AudioFormatReader> rn(fm.createReaderFor(nofade));
+            juce::AudioBuffer<float> b(1, 64);
+            if (rn != nullptr) rn->read(&b, 0, 64, 0, true, false);
+            check(rn != nullptr && b.getMagnitude(0, 0, 64) > 0.2f, "bake off -> the export starts at full level");
+        }
+        nofade.deleteFile();
+
+        doc.bakeLoopCrossfadeOnExport.store(true);
+        auto faded = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("r3wrk_export_faded.wav");
+        faded.deleteFile();
+        check(EditActions::exportSelection(doc, faded), "exportSelection (bake on) writes a file");
+        {
+            std::unique_ptr<juce::AudioFormatReader> rf(fm.createReaderFor(faded));
+            if (rf != nullptr)
+            {
+                const int n = (int) rf->lengthInSamples;
+                juce::AudioBuffer<float> head(1, 16), tail(1, 16), mid(1, 64);
+                rf->read(&head, 0, 16, 0, true, false);
+                rf->read(&tail, 0, 16, n - 16, true, false);
+                rf->read(&mid, 0, 64, n / 2, true, false);
+                check(head.getSample(0, 0) == 0.0f, "bake on -> exported file starts at exactly silence");
+                check(head.getMagnitude(0, 0, 16) < mid.getMagnitude(0, 0, 64), "bake on -> the head is faded down");
+                check(tail.getMagnitude(0, 0, 16) < mid.getMagnitude(0, 0, 64), "bake on -> the tail is faded down");
+            }
+            else check(false, "faded export re-opens");
+        }
+        faded.deleteFile();
+        doc.loopCrossfadeMs.store(0.0);
+        doc.bakeLoopCrossfadeOnExport.store(false);
     }
 
     // --- slice markers + slice/Octatrack export ----------------------------

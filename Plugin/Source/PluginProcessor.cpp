@@ -6,7 +6,8 @@
 
 namespace
 {
-    constexpr int kStateMagic     = 0x52335745;   // 'R3WE' - adds loopCrossfadeMs
+    constexpr int kStateMagic     = 0x52335746;   // 'R3WF' - adds bakeLoopCrossfadeOnExport
+    constexpr int kStateMagicR3WE = 0x52335745;   // 'R3WE' - adds loopCrossfadeMs
     constexpr int kStateMagicR3WD = 0x52335744;   // 'R3WD' - adds filterModel (MnM / Octatrack)
     constexpr int kStateMagicR3WC = 0x52335743;   // 'R3WC' - adds loopPingPong
     constexpr int kStateMagicR3WB = 0x52335742;   // 'R3WB' - MnM filter: Base/Width/HP Q/LP Q
@@ -882,6 +883,7 @@ void R3WRKAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     out.writeDouble(document.playbackGainDb.load());
     out.writeInt(document.filterModel.load());
     out.writeDouble(document.loopCrossfadeMs.load());
+    out.writeBool(document.bakeLoopCrossfadeOnExport.load());
 
     auto& buf = document.getBuffer();
     for (int ch = 0; ch < buf.getNumChannels(); ++ch)
@@ -897,31 +899,36 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     juce::MemoryInputStream in(data, (size_t) sizeInBytes, false);
     const int magic = in.readInt();
-    if (magic != kStateMagic && magic != kStateMagicR3WD && magic != kStateMagicR3WC
-        && magic != kStateMagicR3WB && magic != kStateMagicR3WA && magic != kStateMagicR3W9
-        && magic != kStateMagicR3W8 && magic != kStateMagicR3W7 && magic != kStateMagicR3W6
-        && magic != kStateMagicR3W5)
+    if (magic != kStateMagic && magic != kStateMagicR3WE && magic != kStateMagicR3WD
+        && magic != kStateMagicR3WC && magic != kStateMagicR3WB && magic != kStateMagicR3WA
+        && magic != kStateMagicR3W9 && magic != kStateMagicR3W8 && magic != kStateMagicR3W7
+        && magic != kStateMagicR3W6 && magic != kStateMagicR3W5)
         return;
-    // R3WE: adds loopCrossfadeMs after filterModel. R3WD: adds filterModel (MnM / Octatrack)
-    // after playbackGainDb. R3WC: adds the loopPingPong flag after loopEnabled. R3WB: filter
-    // is Base/Width/HP Q/LP Q (the MnM model). R3W8..R3WA: the old OT-style Base/Width filter
-    // with a single resonance (+ later Drive, + later 12/24 slope). R3W6/R3W7: the even older
-    // mode/cutoff filter. R3W5: none.
-    const bool hasLoopXfade       = (magic == kStateMagic);                                  // R3WE
-    const bool hasFilterModel     = (magic == kStateMagic || magic == kStateMagicR3WD);      // R3WD+
-    const bool hasPingPong        = (magic == kStateMagic || magic == kStateMagicR3WD
-                                     || magic == kStateMagicR3WC);                            // R3WC+
-    const bool hasMnmFilter       = (magic == kStateMagic || magic == kStateMagicR3WD
-                                     || magic == kStateMagicR3WC || magic == kStateMagicR3WB); // R3WB+
+    // R3WF: adds bakeLoopCrossfadeOnExport after loopCrossfadeMs. R3WE: adds loopCrossfadeMs
+    // after filterModel. R3WD: adds filterModel (MnM / Octatrack) after playbackGainDb. R3WC:
+    // adds the loopPingPong flag after loopEnabled. R3WB: filter is Base/Width/HP Q/LP Q (the
+    // MnM model). R3W8..R3WA: the old OT-style Base/Width filter with a single resonance
+    // (+ later Drive, + later 12/24 slope). R3W6/R3W7: the even older mode/cutoff filter.
+    // R3W5: none.
+    const bool hasLoopXfadeBake   = (magic == kStateMagic);                                  // R3WF
+    const bool hasLoopXfade       = (magic == kStateMagic || magic == kStateMagicR3WE);      // R3WE+
+    const bool hasFilterModel     = (magic == kStateMagic || magic == kStateMagicR3WE
+                                     || magic == kStateMagicR3WD);                            // R3WD+
+    const bool hasPingPong        = (magic == kStateMagic || magic == kStateMagicR3WE
+                                     || magic == kStateMagicR3WD || magic == kStateMagicR3WC); // R3WC+
+    const bool hasMnmFilter       = (magic == kStateMagic || magic == kStateMagicR3WE
+                                     || magic == kStateMagicR3WD || magic == kStateMagicR3WC
+                                     || magic == kStateMagicR3WB);                            // R3WB+
     const bool hasOldBaseWidth    = (magic == kStateMagicR3WA || magic == kStateMagicR3W9
                                      || magic == kStateMagicR3W8);                            // R3W8..R3WA
     const bool hasDriveField      = (magic == kStateMagicR3WA || magic == kStateMagicR3W9);   // R3W9/R3WA
     const bool hasSlopeField      = (magic == kStateMagicR3WA);                               // R3WA
     const bool hasOldModeFilter   = (magic == kStateMagicR3W7 || magic == kStateMagicR3W6);
-    const bool hasGainField       = (magic == kStateMagic || magic == kStateMagicR3WD
-                                     || magic == kStateMagicR3WC || magic == kStateMagicR3WB
-                                     || magic == kStateMagicR3WA || magic == kStateMagicR3W9
-                                     || magic == kStateMagicR3W8 || magic == kStateMagicR3W7);
+    const bool hasGainField       = (magic == kStateMagic || magic == kStateMagicR3WE
+                                     || magic == kStateMagicR3WD || magic == kStateMagicR3WC
+                                     || magic == kStateMagicR3WB || magic == kStateMagicR3WA
+                                     || magic == kStateMagicR3W9 || magic == kStateMagicR3W8
+                                     || magic == kStateMagicR3W7);
 
     double sr = in.readDouble();
     int numCh = in.readInt();
@@ -978,6 +985,7 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
         gDb = in.readDouble();
     const int fModel = hasFilterModel ? in.readInt() : 0;
     const double loopXfadeMs = hasLoopXfade ? in.readDouble() : 0.0;
+    const bool loopXfadeBake = hasLoopXfadeBake ? in.readBool() : false;
 
     if (numCh <= 0 || numCh > kMaxStateChannels || numSamples < 0 || numSamples > 0x7fffffff)
         return;
@@ -1013,6 +1021,7 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     document.playbackGainDb.store(juce::jlimit(AudioDocument::kMinGainDb, AudioDocument::kMaxGainDb, gDb));
     document.filterModel.store(juce::jlimit(0, 1, fModel));
     document.loopCrossfadeMs.store(juce::jlimit(0.0, 200.0, loopXfadeMs));
+    document.bakeLoopCrossfadeOnExport.store(loopXfadeBake);
 
     document.clearSliceMarkers();   // session-only; a restored document starts with no markers
 
