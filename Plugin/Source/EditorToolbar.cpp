@@ -262,27 +262,28 @@ namespace
                 document.notifyChanged();
             };
 
-            hint.setText("Fades the loop region's ends so the wrap doesn't click. 0 = off.",
+            hint.setText("Fades the loop ends so the wrap doesn't click. 0 = off.",
                          juce::dontSendNotification);
             hint.setFont(juce::FontOptions(11.0f));
             hint.setColour(juce::Label::textColourId, juce::Colours::grey);
+            hint.setMinimumHorizontalScale(1.0f);
 
             addAndMakeVisible(title);
             addAndMakeVisible(amount);
             addAndMakeVisible(bake);
             addAndMakeVisible(hint);
-            setSize(300, 104);
+            setSize(360, 130);
         }
         void resized() override
         {
-            auto r = getLocalBounds().reduced(10);
-            title.setBounds(r.removeFromTop(18));
+            auto r = getLocalBounds().reduced(12);
+            title.setBounds(r.removeFromTop(20));
+            r.removeFromTop(8);
+            amount.setBounds(r.removeFromTop(26));
+            r.removeFromTop(8);
+            bake.setBounds(r.removeFromTop(22));
             r.removeFromTop(6);
-            amount.setBounds(r.removeFromTop(24));
-            r.removeFromTop(4);
-            bake.setBounds(r.removeFromTop(20));
-            r.removeFromTop(4);
-            hint.setBounds(r);
+            hint.setBounds(r.removeFromTop(16));
         }
         AudioDocument& document;
         juce::Label title, hint;
