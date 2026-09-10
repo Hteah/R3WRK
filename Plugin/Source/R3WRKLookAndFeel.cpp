@@ -299,7 +299,9 @@ namespace
     // chevrons are the follow cue; ported loosely from Sieve's FollowPlayheadIcon.
     void drawFollowIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
     {
-        auto a = bounds.reduced (bounds.getHeight() * 0.22f);
+        // Tighter inset than the other icons: keeps the glyph detail large on the small
+        // corner button.
+        auto a = bounds.reduced (bounds.getHeight() * 0.15f);
         const float w = a.getWidth(), h = a.getHeight();
         const float cx = a.getCentreX();
         const float lineW = juce::jmax (1.4f, h * 0.085f);
@@ -360,7 +362,7 @@ namespace
     {
         // Window rect, ~1.32:1. The corner box sticks ~0.30*winW right and ~0.32*winH below,
         // so lay the whole composite out and centre it in `bounds`.
-        const float winH = juce::jmin (bounds.getHeight() * 0.66f, bounds.getWidth() * 0.52f);
+        const float winH = juce::jmin (bounds.getHeight() * 0.76f, bounds.getWidth() * 0.60f);
         const float winW = winH * 1.32f;
         const float outR = winW * 0.30f;
         const float outB = winH * 0.32f;

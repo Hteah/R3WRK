@@ -234,10 +234,10 @@ void R3WRKAudioProcessorEditor::resized()
         // (standalone only); Follow-playhead sits just left of it.
         if (standaloneWindow)
         {
-            floatOnTopButton.setBounds(headerRow.removeFromRight(42).withSizeKeepingCentre(40, 26));
+            floatOnTopButton.setBounds(headerRow.removeFromRight(36).withSizeKeepingCentre(34, 22));
             headerRow.removeFromRight(6);
         }
-        followButton.setBounds(headerRow.removeFromRight(42).withSizeKeepingCentre(40, 26));
+        followButton.setBounds(headerRow.removeFromRight(36).withSizeKeepingCentre(34, 22));
         headerRow.removeFromRight(6);
         header.setBounds(headerRow);
     }
