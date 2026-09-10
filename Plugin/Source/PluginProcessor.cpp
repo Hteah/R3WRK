@@ -6,7 +6,8 @@
 
 namespace
 {
-    constexpr int kStateMagic     = 0x52335743;   // 'R3WC' - adds loopPingPong
+    constexpr int kStateMagic     = 0x52335744;   // 'R3WD' - adds filterModel (MnM / Octatrack)
+    constexpr int kStateMagicR3WC = 0x52335743;   // 'R3WC' - adds loopPingPong
     constexpr int kStateMagicR3WB = 0x52335742;   // 'R3WB' - MnM filter: Base/Width/HP Q/LP Q
     constexpr int kStateMagicR3WA = 0x52335741;   // 'R3WA' - OT filter + HP/LP slope (12/24dB)
     constexpr int kStateMagicR3W9 = 0x52335739;   // 'R3W9' - adds filterDrive
@@ -507,7 +508,8 @@ void R3WRKAudioProcessor::applyPlaybackFilter(juce::AudioBuffer<float>& buffer, 
     const double width01 = juce::jlimit(0.0, 1.0, document.filterWidth.load(std::memory_order_relaxed));
     const double hpQ01   = juce::jlimit(0.0, 1.0, document.filterHpQ.load(std::memory_order_relaxed));
     const double lpQ01   = juce::jlimit(0.0, 1.0, document.filterLpQ.load(std::memory_order_relaxed));
-    const bool   engaged = r3wrk::filterEngaged(base01, width01, hpQ01, lpQ01);
+    const auto   fm      = (r3wrk::FilterModel) juce::jlimit(0, 1, document.filterModel.load(std::memory_order_relaxed));
+    const bool   engaged = r3wrk::filterEngaged(fm, base01, width01, hpQ01, lpQ01);
 
     if (freshPlayPass || engaged != lastFilterEngaged)
     {
@@ -546,6 +548,7 @@ void R3WRKAudioProcessor::applyPlaybackFilter(juce::AudioBuffer<float>& buffer, 
 
     for (int ch = 0; ch < juce::jmin(numCh, 2); ++ch)
     {
+        playbackFilter[ch].model = fm;
         playbackFilter[ch].setParams(b, w, hq, lq, currentSampleRate);
         playbackFilter[ch].processBlock(buffer.getWritePointer(ch), numSamples);
     }
@@ -832,6 +835,7 @@ void R3WRKAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     out.writeDouble(document.filterHpQ.load());
     out.writeDouble(document.filterLpQ.load());
     out.writeDouble(document.playbackGainDb.load());
+    out.writeInt(document.filterModel.load());
 
     auto& buf = document.getBuffer();
     for (int ch = 0; ch < buf.getNumChannels(); ++ch)
@@ -847,24 +851,27 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     juce::MemoryInputStream in(data, (size_t) sizeInBytes, false);
     const int magic = in.readInt();
-    if (magic != kStateMagic && magic != kStateMagicR3WB && magic != kStateMagicR3WA
-        && magic != kStateMagicR3W9 && magic != kStateMagicR3W8 && magic != kStateMagicR3W7
-        && magic != kStateMagicR3W6 && magic != kStateMagicR3W5)
+    if (magic != kStateMagic && magic != kStateMagicR3WC && magic != kStateMagicR3WB
+        && magic != kStateMagicR3WA && magic != kStateMagicR3W9 && magic != kStateMagicR3W8
+        && magic != kStateMagicR3W7 && magic != kStateMagicR3W6 && magic != kStateMagicR3W5)
         return;
-    // R3WC: adds the loopPingPong flag after loopEnabled. R3WB: filter is Base/Width/HP Q/LP Q
-    // (the MnM model). R3W8..R3WA: the old OT-style Base/Width filter with a single resonance
-    // (+ later Drive, + later 12/24 slope). R3W6/R3W7: the even older mode/cutoff filter.
-    // R3W5: no filter at all.
-    const bool hasPingPong        = (magic == kStateMagic);                                  // R3WC
-    const bool hasMnmFilter       = (magic == kStateMagic || magic == kStateMagicR3WB);      // R3WB+
+    // R3WD: adds filterModel (MnM / Octatrack) after playbackGainDb. R3WC: adds the
+    // loopPingPong flag after loopEnabled. R3WB: filter is Base/Width/HP Q/LP Q (the MnM
+    // model). R3W8..R3WA: the old OT-style Base/Width filter with a single resonance (+ later
+    // Drive, + later 12/24 slope). R3W6/R3W7: the even older mode/cutoff filter. R3W5: none.
+    const bool hasFilterModel     = (magic == kStateMagic);                                  // R3WD
+    const bool hasPingPong        = (magic == kStateMagic || magic == kStateMagicR3WC);      // R3WC+
+    const bool hasMnmFilter       = (magic == kStateMagic || magic == kStateMagicR3WC
+                                     || magic == kStateMagicR3WB);                            // R3WB+
     const bool hasOldBaseWidth    = (magic == kStateMagicR3WA || magic == kStateMagicR3W9
                                      || magic == kStateMagicR3W8);                            // R3W8..R3WA
     const bool hasDriveField      = (magic == kStateMagicR3WA || magic == kStateMagicR3W9);   // R3W9/R3WA
     const bool hasSlopeField      = (magic == kStateMagicR3WA);                               // R3WA
     const bool hasOldModeFilter   = (magic == kStateMagicR3W7 || magic == kStateMagicR3W6);
-    const bool hasGainField       = (magic == kStateMagic || magic == kStateMagicR3WB
-                                     || magic == kStateMagicR3WA || magic == kStateMagicR3W9
-                                     || magic == kStateMagicR3W8 || magic == kStateMagicR3W7);
+    const bool hasGainField       = (magic == kStateMagic || magic == kStateMagicR3WC
+                                     || magic == kStateMagicR3WB || magic == kStateMagicR3WA
+                                     || magic == kStateMagicR3W9 || magic == kStateMagicR3W8
+                                     || magic == kStateMagicR3W7);
 
     double sr = in.readDouble();
     int numCh = in.readInt();
@@ -919,6 +926,7 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     }
     if (hasGainField)
         gDb = in.readDouble();
+    const int fModel = hasFilterModel ? in.readInt() : 0;
 
     if (numCh <= 0 || numCh > kMaxStateChannels || numSamples < 0 || numSamples > 0x7fffffff)
         return;
@@ -952,6 +960,7 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     document.filterHpQ.store(juce::jlimit(0.0, 1.0, fHpQ));
     document.filterLpQ.store(juce::jlimit(0.0, 1.0, fLpQ));
     document.playbackGainDb.store(juce::jlimit(AudioDocument::kMinGainDb, AudioDocument::kMaxGainDb, gDb));
+    document.filterModel.store(juce::jlimit(0, 1, fModel));
 
     document.clearSliceMarkers();   // session-only; a restored document starts with no markers
 

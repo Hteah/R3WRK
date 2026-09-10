@@ -71,7 +71,10 @@ KnobRow::KnobRow(AudioDocument& doc, bool standalone)
         k.slider.setRange(0.0, 1.0, 0.0);
         k.slider.setSkewFactorFromMidPoint(0.35);   // ~log Hz feel: fine control down low
         k.slider.setDoubleClickReturnValue(true, 0.0);   // 0 = no high-pass
-        k.slider.textFromValueFunction = [](double v) { return filterHzText(r3wrk::mnm::hpCutoffHz(v)); };
+        k.slider.textFromValueFunction = [this](double v) {
+            return filterHzText(r3wrk::modelHpCutoffHz(
+                (r3wrk::FilterModel) document.filterModel.load(), v));
+        };
         k.slider.setValue(document.filterBase.load(), juce::dontSendNotification);
         k.slider.updateText();
         k.apply = [this](double v) { document.filterBase.store(v); };
@@ -84,7 +87,8 @@ KnobRow::KnobRow(AudioDocument& doc, bool standalone)
         k.slider.setRange(0.0, 1.0, 0.0);
         k.slider.setDoubleClickReturnValue(true, 1.0);   // 1 = no low-pass (filter wide open)
         k.slider.textFromValueFunction = [this](double v) {
-            return filterHzText(r3wrk::mnm::lpCutoffHz(document.filterBase.load(), v));
+            return filterHzText(r3wrk::modelLpCutoffHz(
+                (r3wrk::FilterModel) document.filterModel.load(), document.filterBase.load(), v));
         };
         k.slider.setValue(document.filterWidth.load(), juce::dontSendNotification);
         k.slider.updateText();
@@ -197,7 +201,16 @@ KnobRow::KnobRow(AudioDocument& doc, bool standalone)
         k.pull  = [this] { return document.playbackGainDb.load(); };
     }
 
+    addAndMakeVisible(modelBadge);
+    modelBadge.onClick = [this]
+    {
+        document.filterModel.store((document.filterModel.load() + 1) % 2);
+        syncModelBadge();
+        for (auto* k : knobs) k->slider.updateText();   // Base/Width Hz readouts follow the model
+    };
+
     applyTheme();
+    syncModelBadge();
     theme->addChangeListener(this);
     startTimerHz(15);
 }
@@ -221,6 +234,37 @@ void KnobRow::applyTheme()
         k->caption.repaint();
         k->slider.repaint();
     }
+    modelBadge.fill   = pal.accent;
+    modelBadge.ink    = pal.windowBg;
+    modelBadge.border = pal.textDim;
+    modelBadge.repaint();
+}
+
+void KnobRow::syncModelBadge()
+{
+    const bool ot = document.filterModel.load() == 1;
+    if (modelBadge.active == ot)
+        return;
+    modelBadge.active = ot;
+    modelBadge.text   = ot ? "OT" : "MNM";
+    modelBadge.repaint();
+    for (auto* k : knobs) k->slider.updateText();   // Base/Width readouts follow a model change from elsewhere
+}
+
+void KnobRow::ModelBadge::paint(juce::Graphics& g)
+{
+    auto r = getLocalBounds().toFloat().reduced(0.5f);
+    constexpr float rad = 3.0f;
+    if (active)
+        g.setColour(fill);
+    else
+        g.setColour(fill.withAlpha(hovered ? 0.22f : 0.0f));
+    g.fillRoundedRectangle(r, rad);
+    g.setColour(border.withAlpha(active || hovered ? 0.95f : 0.55f));
+    g.drawRoundedRectangle(r, rad, 1.0f);
+    g.setColour(active ? ink : border);
+    g.setFont(juce::FontOptions(9.0f, juce::Font::bold));
+    g.drawText(text, getLocalBounds(), juce::Justification::centred);
 }
 
 void KnobRow::changeListenerCallback(juce::ChangeBroadcaster*)
@@ -258,6 +302,7 @@ juce::String KnobRow::timeString(double seconds) const
 
 void KnobRow::timerCallback()
 {
+    syncModelBadge();   // pick up model changes from undo / state load
     for (auto* k : knobs)
     {
         if (! k->pull || k->slider.isMouseButtonDown())
@@ -277,8 +322,9 @@ void KnobRow::timerCallback()
 void KnobRow::resized()
 {
     auto r = getLocalBounds().reduced(4, 2);
-    const int gap    = 2;
-    const int dotGap = 16;   // the wider gap at a section-divider dot (before knob 3 / 7 / 9)
+    const int gap      = 2;
+    const int dotGap   = 16;   // the wider gap at a section-divider dot (before knob 7 / 9)
+    const int badgeGap = 30;   // wider still before knob 3 -- the filter-model badge sits here
     const int n = juce::jmax(1, knobs.size());
 
     // Auto-fit: prefer a fairly tight column, but shrink further so every knob still shows at
@@ -297,10 +343,24 @@ void KnobRow::resized()
         k->caption.setBounds(col.removeFromTop(14));
         k->slider.setBounds(col);
 
-        // A wide gap where a section-divider dot sits (before knob 3 / 7 / 9, i.e. after
-        // knob 2 / 6 / 8 -- see paint()), so the groups read as distinct blocks.
-        const bool beforeDot = (i == 2 || i == 6 || i == 8);
-        r.removeFromLeft(beforeDot ? dotGap : gap);
+        // A wide gap at each section boundary (after knob 2 / 6 / 8 -- see paint()): the
+        // filter-model badge before knob 3, plain divider dots before 7 / 9.
+        const bool beforeBadge = (i == 2);
+        const bool beforeDot   = (i == 6 || i == 8);
+        r.removeFromLeft(beforeBadge ? badgeGap : (beforeDot ? dotGap : gap));
+    }
+
+    if (knobs.size() > 3)
+    {
+        const auto l  = knobs[2]->slider.getBounds();
+        const auto rr = knobs[3]->slider.getBounds();
+        if (rr.getX() > l.getRight())
+        {
+            const int bw = juce::jlimit(18, 28, rr.getX() - l.getRight() - 4);
+            const int bh = 13;
+            modelBadge.setBounds((l.getRight() + rr.getX()) / 2 - bw / 2,
+                                 getHeight() / 2 - bh / 2, bw, bh);
+        }
     }
     repaint();   // reposition the section dividers for the new knob width
 }
@@ -321,6 +381,8 @@ void KnobRow::paint(juce::Graphics& g)
     {
         if (idx <= 0 || idx >= knobs.size())
             continue;
+        if (idx == 3)
+            continue;   // the filter-model badge occupies this boundary instead of dots
         const auto left  = knobs[idx - 1]->slider.getBounds();
         const auto right = knobs[idx]->slider.getBounds();
         if (right.getX() <= left.getRight())

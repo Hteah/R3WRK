@@ -266,6 +266,9 @@ public:
     std::atomic<double> filterWidth { 1.0 };
     std::atomic<double> filterHpQ   { 0.0 };
     std::atomic<double> filterLpQ   { 0.0 };
+    // Which empirical model the Base/Width/HP Q/LP Q knobs drive: r3wrk::FilterModel as an
+    // int (0 = Monomachine, 1 = Octatrack). Switched by the KnobRow badge; persisted.
+    std::atomic<int> filterModel { 0 };
 
     // Output "Gain" knob (Standalone only -- KnobRow adds the knob just in that build; the
     // atomic sits here for everyone but stays at 0). In dB, 0 = unity (default volume);

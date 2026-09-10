@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include <cmath>
 #include "MonomachineFilterModel.h"   // generated: r3wrk::mnm::{hpCutoffHz,lpCutoffHz,resonanceToQ,engaged}
+#include "OctatrackFilterModel.h"     // generated: r3wrk::ot::{hpCutoffHz,lpCutoffHz,resonanceToQ,engaged}
 
 /**
     A tiny hand-rolled RBJ biquad (transposed direct-form II), plus r3wrk::MultiModeFilter --
@@ -19,6 +20,34 @@ namespace r3wrk
 {
     enum FilterMode { filterOff = 0, filterLP = 1, filterHP = 2, filterBP = 3, filterNotch = 4 };
 
+    // Which empirically-modelled hardware filter the Base/Width/HP Q/LP Q knobs drive.
+    // The knob layout is identical; only the 0..1 -> Hz/Q mapping differs. Persisted as an
+    // int on AudioDocument; the switch is the badge in KnobRow.
+    enum class FilterModel { monomachine = 0, octatrack = 1 };
+
+    // Dispatch the four model functions. Both r3wrk::mnm and r3wrk::ot expose the same
+    // surface; ot::engaged takes a single Q, so fold HP/LP together for it.
+    inline double modelHpCutoffHz (FilterModel m, double base01) noexcept
+    {
+        return m == FilterModel::octatrack ? ot::hpCutoffHz (base01) : mnm::hpCutoffHz (base01);
+    }
+    inline double modelLpCutoffHz (FilterModel m, double base01, double width01) noexcept
+    {
+        return m == FilterModel::octatrack ? ot::lpCutoffHz (base01, width01)
+                                           : mnm::lpCutoffHz (base01, width01);
+    }
+    inline double modelResonanceToQ (FilterModel m, double q01) noexcept
+    {
+        return m == FilterModel::octatrack ? ot::resonanceToQ (q01) : mnm::resonanceToQ (q01);
+    }
+    inline bool modelEngaged (FilterModel m, double base01, double width01,
+                              double hpQ01, double lpQ01) noexcept
+    {
+        return m == FilterModel::octatrack
+                   ? ot::engaged (base01, width01, juce::jmax (hpQ01, lpQ01))
+                   : mnm::engaged (base01, width01, hpQ01, lpQ01);
+    }
+
     // Frequency (20 Hz .. 20 kHz) -> a 0..1 edge position on a plain log scale. Only used to
     // migrate the oldest (pre-Base/Width) saved sessions' mode/cutoff filter onto a Base or
     // Width knob value; the live filter uses the Monomachine model (MonomachineFilterModel.h).
@@ -27,21 +56,23 @@ namespace r3wrk
         return juce::jlimit (0.0, 1.0, std::log (juce::jmax (20.0, hz) / 20.0) / std::log (1000.0));
     }
 
-    // The two edge frequencies for a Base/Width pair, from the Monomachine model: Base sets
-    // the high-pass corner, Base+Width the low-pass corner. Used for the knob readouts.
-    inline void filterEdges (double base01, double width01, double& fLowEdge, double& fHighEdge)
+    // The two edge frequencies for a Base/Width pair, from the selected model: Base sets the
+    // high-pass corner, Base+Width the low-pass corner. Used for the knob readouts.
+    inline void filterEdges (FilterModel model, double base01, double width01,
+                             double& fLowEdge, double& fHighEdge)
     {
-        fLowEdge  = mnm::hpCutoffHz (base01);
-        fHighEdge = mnm::lpCutoffHz (base01, width01);
+        fLowEdge  = modelHpCutoffHz (model, base01);
+        fHighEdge = modelLpCutoffHz (model, base01, width01);
     }
 
     // "Engaged" == the filter would change the sound (Base ~0 => no high-pass; Base+Width ~1
     // => no low-pass; either Q up => a resonant bump even with the edge open). Otherwise
     // callers skip it and don't count it as a playback knob that forces the slow RubberBand /
     // offline render path.
-    inline bool filterEngaged (double base01, double width01, double hpQ01 = 0.0, double lpQ01 = 0.0)
+    inline bool filterEngaged (FilterModel model, double base01, double width01,
+                               double hpQ01 = 0.0, double lpQ01 = 0.0)
     {
-        return mnm::engaged (base01, width01, hpQ01, lpQ01);
+        return modelEngaged (model, base01, width01, hpQ01, lpQ01);
     }
 
     struct Biquad
@@ -138,6 +169,7 @@ namespace r3wrk
         Biquad hp, lp;
         bool  hpOn = false, lpOn = false;
         float outTrim = 1.0f;
+        FilterModel model = FilterModel::monomachine;   // which empirical model the knobs drive
 
         void reset() noexcept { hp.reset(); lp.reset(); }
 
@@ -149,18 +181,18 @@ namespace r3wrk
             hpQ01   = juce::jlimit (0.0, 1.0, hpQ01);
             lpQ01   = juce::jlimit (0.0, 1.0, lpQ01);
 
-            const double fLow  = mnm::hpCutoffHz (base01);
-            const double fHigh = mnm::lpCutoffHz (base01, width01);
+            const double fLow  = modelHpCutoffHz (model, base01);
+            const double fHigh = modelLpCutoffHz (model, base01, width01);
             const double nyq   = juce::jmax (1.0, fs) * 0.49;
 
             hpOn = fLow > 20.0 || hpQ01 > 0.02;
             lpOn = fHigh < nyq || lpQ01 > 0.02;
 
             if (hpOn)
-                hp.setCoeffs (filterHP, juce::jmax (20.0, fLow), mnm::resonanceToQ (hpQ01), fs);
+                hp.setCoeffs (filterHP, juce::jmax (20.0, fLow), modelResonanceToQ (model, hpQ01), fs);
             if (lpOn)
                 lp.setCoeffs (filterLP, juce::jlimit (juce::jmax (30.0, fLow * 1.02), nyq, fHigh),
-                              mnm::resonanceToQ (lpQ01), fs);
+                              modelResonanceToQ (model, lpQ01), fs);
 
             // A narrow, heavily-resonant band can stack both peaks and scream. Trim back
             // toward unity as the band narrows with Q up; unity by ~half Width or low Q.

@@ -47,8 +47,28 @@ private:
         double lastPulled = std::numeric_limits<double>::quiet_NaN();
     };
 
+    // The filter-model switch: a small clickable pill sitting where the knob row's
+    // filter-section divider dots would be (before the "Base" knob). Shows "MNM" / "OT".
+    struct ModelBadge : juce::Component
+    {
+        juce::String text { "MNM" };
+        bool active = false;                       // non-default model -> accent fill
+        juce::Colour fill, ink, border;
+        std::function<void()> onClick;
+
+        void paint(juce::Graphics&) override;
+        void mouseUp(const juce::MouseEvent& e) override
+        {
+            if (onClick && getLocalBounds().toFloat().contains(e.position)) onClick();
+        }
+        void mouseEnter(const juce::MouseEvent&) override { hovered = true;  repaint(); }
+        void mouseExit (const juce::MouseEvent&) override { hovered = false; repaint(); }
+        bool hovered = false;
+    };
+
     Knob& addKnob(const juce::String& name);
     juce::String timeString(double seconds) const;
+    void syncModelBadge();   // text/colour/tooltip from document.filterModel
 
     AudioDocument& document;
     juce::SharedResourcePointer<ThemeManager> theme;
@@ -57,6 +77,7 @@ private:
     juce::OwnedArray<Knob> knobs;
     Knob* startKnob = nullptr;
     Knob* endKnob   = nullptr;
+    ModelBadge modelBadge;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(KnobRow)
 };

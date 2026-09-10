@@ -152,7 +152,8 @@ bool AudioDocument::timePitchKnobsEngaged() const
 bool AudioDocument::playbackKnobsEngaged() const
 {
     return timePitchKnobsEngaged()
-        || r3wrk::filterEngaged(filterBase.load(std::memory_order_relaxed),
+        || r3wrk::filterEngaged((r3wrk::FilterModel) filterModel.load(std::memory_order_relaxed),
+                                filterBase.load(std::memory_order_relaxed),
                                 filterWidth.load(std::memory_order_relaxed),
                                 filterHpQ.load(std::memory_order_relaxed),
                                 filterLpQ.load(std::memory_order_relaxed))
@@ -186,17 +187,19 @@ juce::AudioBuffer<float> AudioDocument::renderWithPlaybackKnobs(const juce::Audi
         // else: engine failure -- keep the un-stretched audio rather than nothing
     }
 
-    // 2. Filter -- the same modelled Monomachine Base/Width/HP Q/LP Q filter the real-time
-    //    path uses, run over the stretched buffer.
+    // 2. Filter -- the same modelled Base/Width/HP Q/LP Q filter the real-time path uses
+    //    (Monomachine or Octatrack model, per filterModel), run over the stretched buffer.
     const double fBase  = filterBase.load(std::memory_order_relaxed);
     const double fWidth = filterWidth.load(std::memory_order_relaxed);
     const double fHpQ   = filterHpQ.load(std::memory_order_relaxed);
     const double fLpQ   = filterLpQ.load(std::memory_order_relaxed);
-    if (r3wrk::filterEngaged(fBase, fWidth, fHpQ, fLpQ) && out.getNumSamples() > 0)
+    const auto   fm     = (r3wrk::FilterModel) filterModel.load(std::memory_order_relaxed);
+    if (r3wrk::filterEngaged(fm, fBase, fWidth, fHpQ, fLpQ) && out.getNumSamples() > 0)
     {
         for (int ch = 0; ch < out.getNumChannels(); ++ch)
         {
             r3wrk::MultiModeFilter mmf;
+            mmf.model = fm;
             mmf.setParams(fBase, fWidth, fHpQ, fLpQ, sampleRate);
             mmf.processBlock(out.getWritePointer(ch), out.getNumSamples());
         }

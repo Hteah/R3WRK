@@ -500,14 +500,17 @@ int main()
         // Base 0 + narrow Width is a low-pass (kills the 8 kHz tone); Base up + Width 1 is a
         // high-pass (kills the 200 Hz tone); HP Q gives a resonant boost at the corner.
         auto runMMF = [&](juce::AudioBuffer<float> buf, double base01, double width01,
-                          double hpQ01, double lpQ01)
+                          double hpQ01, double lpQ01,
+                          r3wrk::FilterModel model = r3wrk::FilterModel::monomachine)
         {
-            r3wrk::MultiModeFilter mmf; mmf.setParams(base01, width01, hpQ01, lpQ01, sr);
+            r3wrk::MultiModeFilter mmf; mmf.model = model;
+            mmf.setParams(base01, width01, hpQ01, lpQ01, sr);
             mmf.processBlock(buf.getWritePointer(0), buf.getNumSamples());
             return buf;
         };
-        check(! r3wrk::filterEngaged(0.0, 1.0, 0.0, 0.0), "Base 0 + Width 1 reads as not engaged");
-        check(  r3wrk::filterEngaged(0.0, 1.0, 0.5, 0.0), "HP Q alone reads as engaged");
+        const auto mnmModel = r3wrk::FilterModel::monomachine;
+        check(! r3wrk::filterEngaged(mnmModel, 0.0, 1.0, 0.0, 0.0), "Base 0 + Width 1 reads as not engaged");
+        check(  r3wrk::filterEngaged(mnmModel, 0.0, 1.0, 0.5, 0.0), "HP Q alone reads as engaged");
         checkNear(rms(runMMF(makeSineBuffer(1, n, sr, 1000.0, 0.5f), 0.0, 1.0, 0.0, 0.0), 0),
                   rms(makeSineBuffer(1, n, sr, 1000.0, 0.5f), 0), 0.01,
                   "Base 0 + Width 1 passes a 1 kHz tone untouched");
@@ -524,6 +527,26 @@ int main()
             const double dryQ  = rms(runMMF(juce::AudioBuffer<float>(toneAtFc), 0.0, 0.35, 0.0, 0.0), 0);
             const double resoQ = rms(runMMF(juce::AudioBuffer<float>(toneAtFc), 0.0, 0.35, 0.0, 0.7), 0);
             check(resoQ > dryQ * 1.5, "LP Q boosts a tone at the low-pass corner");
+        }
+
+        // Octatrack filter model: same knob layout, different empirical curves.
+        {
+            using namespace r3wrk;
+            check(ot::hpCutoffHz(0.0) == 0.0, "OT: Base 0 => high-pass disengaged");
+            check(ot::hpCutoffHz(0.5) < ot::hpCutoffHz(0.9), "OT: HP corner rises with Base");
+            check(ot::lpCutoffHz(0.0, 1.0) > ot::lpCutoffHz(0.0, 0.2), "OT: LP corner rises with Width");
+            check(ot::resonanceToQ(1.0) > ot::resonanceToQ(0.0), "OT: Q rises with the knob");
+            check(! ot::engaged(0.0, 1.0, 0.0), "OT: wide open reads as not engaged");
+            check(  ot::engaged(0.4, 1.0, 0.0), "OT: Base up reads as engaged");
+            check(! filterEngaged(FilterModel::octatrack, 0.0, 1.0, 0.0, 0.0), "OT: filterEngaged agrees when open");
+
+            auto ot8k = runMMF(makeSineBuffer(1, n, sr, 8000.0, 0.5f),
+                               0.0, 0.25, 0.0, 0.0, FilterModel::octatrack);
+            check(rms(ot8k, 0) < rms(tone8k, 0) * 0.5, "OT: Base 0 + low Width low-passes an 8 kHz tone");
+            auto otPass = runMMF(makeSineBuffer(1, n, sr, 1000.0, 0.5f),
+                                 0.0, 1.0, 0.0, 0.0, FilterModel::octatrack);
+            checkNear(rms(otPass, 0), rms(makeSineBuffer(1, n, sr, 1000.0, 0.5f), 0), 0.02,
+                      "OT: wide open passes a 1 kHz tone untouched");
         }
 
         // renderWithPlaybackKnobs applies the filter: a low-pass on a 200+8000 Hz mix drops the
