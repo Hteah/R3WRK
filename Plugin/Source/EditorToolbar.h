@@ -89,6 +89,7 @@ private:
     void timerCallback() override;
     void applyTheme();
     void updateTransportButtonText();
+    void refreshLoopButton();   // icon + fill + tooltip for the off/loop/ping-pong cycle
     void openFile();
     void saveAs();             // native "Save As" dialog, extension from the current Save format
     void showSaveOptionsCallout();   // Tools: pick file type / sample rate / bit depth (persisted)
@@ -128,8 +129,9 @@ private:
     // "record" on its own; a stop square appears on it once recording.
     juce::TextButton playFromStartButton { R3WRKLookAndFeel::iconPlayFromStart };
     juce::TextButton playButton   { R3WRKLookAndFeel::iconPlay };
-    juce::TextButton loopButton   { R3WRKLookAndFeel::iconLoop };   // setClickingTogglesState(true)
-                                                                    // -- a toggling pill, not a checkbox
+    juce::TextButton loopButton   { R3WRKLookAndFeel::iconLoop };   // cycles off -> loop -> ping-pong
+                                                                    // (see refreshLoopButton); the icon
+                                                                    // becomes iconInfinity in ping-pong
     juce::TextButton scrubButton  { R3WRKLookAndFeel::iconScrub };  // setClickingTogglesState(true)
                                                                     // -- toggles the scrub *tool*;
                                                                     // WaveformDisplay does the actual

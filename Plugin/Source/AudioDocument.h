@@ -185,6 +185,10 @@ public:
     std::atomic<int64_t> loopStart { 0 };
     std::atomic<int64_t> loopEnd { 0 };
     std::atomic<bool> loopEnabled { false };
+    // loopEnabled && loopPingPong => the region plays forward, then backward, then forward...
+    // (bouncing at both ends) instead of wrapping head-to-tail. The Loop button cycles
+    // off -> loop -> ping-pong.
+    std::atomic<bool> loopPingPong { false };
 
     //==============================================================================
     // Scrub tool: drag across the waveform to play forward or backward at a rate matching

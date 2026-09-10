@@ -433,7 +433,6 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
 
     timeLabel.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::plain));
     timeLabel.setJustificationType(juce::Justification::centredRight);
-    loopButton.setClickingTogglesState(true);
     scrubButton.setClickingTogglesState(true);
     sliceButton.setClickingTogglesState(true);
     autoRecordButton.setClickingTogglesState(true);
@@ -496,7 +495,16 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     recordButton.onClick        = [this] { toggleTransport(); };
     playButton.onClick          = [this] { togglePlay(); };
     playFromStartButton.onClick = [this] { playFromStart(); };
-    loopButton.onClick          = [this] { document.loopEnabled = loopButton.getToggleState(); };
+    loopButton.onClick          = [this]
+    {
+        // One button, three states: off -> loop -> ping-pong -> off.
+        const bool on = document.loopEnabled.load();
+        const bool pp = document.loopPingPong.load();
+        if      (! on) { document.loopEnabled = true;  document.loopPingPong = false; }
+        else if (! pp) {                                document.loopPingPong = true;  }
+        else           { document.loopEnabled = false; document.loopPingPong = false; }
+        refreshLoopButton();
+    };
     toolsButton.onClick         = [this] { showToolsMenu(); };
     scrubButton.onClick         = [this]
     {
@@ -1148,7 +1156,7 @@ void EditorToolbar::updateTransportButtonText()
     const bool playing = document.isPlaying.load();
     recordButton.setButtonText(micRec ? R3WRKLookAndFeel::iconStop : juce::String());
     playButton.setButtonText(playing ? R3WRKLookAndFeel::iconStop : R3WRKLookAndFeel::iconPlay);
-    loopButton.setToggleState(document.loopEnabled.load(), juce::dontSendNotification);
+    refreshLoopButton();
     scrubButton.setToggleState(document.scrubModeEnabled, juce::dontSendNotification);
     sliceButton.setToggleState(document.sliceModeEnabled, juce::dontSendNotification);
     recordButton.setEnabled((! playing || micRec) && ! desktopRec);
@@ -1170,6 +1178,17 @@ void EditorToolbar::updateTransportButtonText()
                                                  : R3WRKLookAndFeel::iconCaptureOut);
         captureOutButton.setEnabled(capturing || ! rec);   // don't run alongside a mic/desktop take
     }
+}
+
+void EditorToolbar::refreshLoopButton()
+{
+    const bool on = document.loopEnabled.load();
+    const bool pp = on && document.loopPingPong.load();
+    loopButton.setToggleState(on, juce::dontSendNotification);   // drives the accent fill (applyTheme)
+    loopButton.setButtonText(pp ? R3WRKLookAndFeel::iconInfinity : R3WRKLookAndFeel::iconLoop);
+    loopButton.setTooltip(pp ? "Ping-pong loop -- plays forward, then backward (click to turn off)"
+                             : on ? "Loop (click for ping-pong)"
+                                  : "Loop");
 }
 
 void EditorToolbar::timerCallback()
@@ -1219,7 +1238,7 @@ void EditorToolbar::changeListenerCallback(juce::ChangeBroadcaster* source)
         applyTheme();
         return;
     }
-    loopButton.setToggleState(document.loopEnabled.load(), juce::dontSendNotification);
+    refreshLoopButton();
 }
 
 //==============================================================================

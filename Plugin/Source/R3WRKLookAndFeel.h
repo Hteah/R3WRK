@@ -36,6 +36,7 @@ public:
     static constexpr const char* iconPlay          = "icon:play";
     static constexpr const char* iconStop          = "icon:stop";
     static constexpr const char* iconLoop          = "icon:loop";
+    static constexpr const char* iconInfinity      = "icon:infinity";      // ping-pong loop (a figure-eight)
     static constexpr const char* iconPlayFromStart = "icon:playFromStart";   // a bar + the play triangle
     static constexpr const char* iconTools         = "icon:tools";          // a gear/cog
     static constexpr const char* iconScrub         = "icon:scrub";          // a notched reel hub

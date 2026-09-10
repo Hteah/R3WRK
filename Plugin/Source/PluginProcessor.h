@@ -108,6 +108,8 @@ private:
     bool wasPlaying = false;        // edge-detect play start -> reset the stretcher
     bool stretcherPrimed = false;   // stretcher holds state from the current play pass
     bool rtFinished = false;        // final block sent; only drain from here on
+    int  playbackDir = 1;           // +1 forward, -1 backward (ping-pong loop only); reset to
+                                    // +1 at the start of every play pass
 
     // Turning a knob during playback used to feed RubberBand a hard staircase of time-ratio /
     // pitch-scale steps (one per block), which it renders as zipper noise / pops. Ramp both
@@ -143,10 +145,12 @@ private:
     // value stored back into document.playhead).
     void renderPlaybackDirect (juce::AudioBuffer<float>& out, int numCh, int numSamples,
                                const juce::AudioBuffer<float>& docBuf,
-                               int64_t& pos, int64_t regionStart, int64_t regionEnd, bool loop);
+                               int64_t& pos, int& dir, int64_t regionStart, int64_t regionEnd,
+                               bool loop, bool pingPong);
     void renderPlaybackStretched (juce::AudioBuffer<float>& out, int numCh, int numSamples,
                                   const juce::AudioBuffer<float>& docBuf,
-                                  int64_t& pos, int64_t regionStart, int64_t regionEnd, bool loop,
+                                  int64_t& pos, int& dir, int64_t regionStart, int64_t regionEnd,
+                                  bool loop, bool pingPong,
                                   double speed, double pitch, double stretch);
 
     // Scrub tool: a plain variable-rate (and reversible) read of the stored audio, driven by

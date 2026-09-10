@@ -1,11 +1,13 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include <rubberband/RubberBandStretcher.h>
+#include <algorithm>
 #include <cmath>
 
 namespace
 {
-    constexpr int kStateMagic     = 0x52335742;   // 'R3WB' - MnM filter: Base/Width/HP Q/LP Q
+    constexpr int kStateMagic     = 0x52335743;   // 'R3WC' - adds loopPingPong
+    constexpr int kStateMagicR3WB = 0x52335742;   // 'R3WB' - MnM filter: Base/Width/HP Q/LP Q
     constexpr int kStateMagicR3WA = 0x52335741;   // 'R3WA' - OT filter + HP/LP slope (12/24dB)
     constexpr int kStateMagicR3W9 = 0x52335739;   // 'R3W9' - adds filterDrive
     constexpr int kStateMagicR3W8 = 0x52335738;   // 'R3W8' - filter is Base/Width, no drive
@@ -116,31 +118,76 @@ void R3WRKAudioProcessor::ensureRecordingCapacity(int numChannels, int64_t addit
 }
 
 //==============================================================================
+// Walks [regionStart, regionEnd) from `pos` in direction `dir` (+1 forward, -1 backward),
+// copying up to `count` frames into dst[dstOffset..]. `loop` wraps head-to-tail; `pingPong`
+// bounces at both ends instead -- `dir` flips, and neither endpoint is repeated, so the cycle
+// is 0,1,..,L-1,L-2,..,1 with period 2L-2 (the same shape as the Sieve editor's ping-pong).
+// `dir` only ever goes -1 when `pingPong` is true. Returns frames written; a short return
+// means a non-looping region ran out.
+static int gatherRegion(juce::AudioBuffer<float>& dst, int dstOffset, int count, int dstChannels,
+                        const juce::AudioBuffer<float>& docBuf,
+                        int64_t& pos, int& dir,
+                        int64_t regionStart, int64_t regionEnd, bool loop, bool pingPong)
+{
+    const int srcChans = docBuf.getNumChannels();
+    if (srcChans <= 0 || regionEnd <= regionStart)
+        return 0;
+
+    int written = 0;
+    while (written < count)
+    {
+        if (dir > 0)
+        {
+            if (pos >= regionEnd)
+            {
+                if (pingPong)  { dir = -1; pos = regionEnd - 2; continue; }   // reflect at the top
+                if (loop)      { pos = regionStart; continue; }
+                break;
+            }
+            const int chunk = (int) juce::jmin((int64_t) (count - written), regionEnd - pos);
+            for (int ch = 0; ch < dstChannels; ++ch)
+                dst.copyFrom(ch, dstOffset + written, docBuf,
+                             juce::jmin(ch, srcChans - 1), (int) pos, chunk);
+            pos     += chunk;
+            written += chunk;
+        }
+        else   // backward: the ping-pong return leg, stopping one frame short of regionStart
+        {
+            if (pos <= regionStart)
+            {
+                dir = 1;
+                pos = regionStart;             // the next frame forward plays
+                continue;
+            }
+            const int chunk = (int) juce::jmin((int64_t) (count - written), pos - regionStart);
+            const int64_t from = pos - chunk;  // copy [from+1 .. pos] forward, then reverse it
+            for (int ch = 0; ch < dstChannels; ++ch)
+            {
+                dst.copyFrom(ch, dstOffset + written, docBuf,
+                             juce::jmin(ch, srcChans - 1), (int) (from + 1), chunk);
+                float* w = dst.getWritePointer(ch, dstOffset + written);
+                std::reverse(w, w + chunk);
+            }
+            pos     -= chunk;
+            written += chunk;
+        }
+    }
+    return written;
+}
+
 void R3WRKAudioProcessor::renderPlaybackDirect(juce::AudioBuffer<float>& out, int numCh, int numSamples,
                                                const juce::AudioBuffer<float>& docBuf,
-                                               int64_t& pos, int64_t regionStart, int64_t regionEnd, bool loop)
+                                               int64_t& pos, int& dir, int64_t regionStart, int64_t regionEnd,
+                                               bool loop, bool pingPong)
 {
-    int written = 0;
-    while (written < numSamples && docBuf.getNumChannels() > 0)
-    {
-        if (pos >= regionEnd)
-        {
-            if (loop && regionEnd > regionStart) { pos = regionStart; continue; }
-            break;
-        }
+    if (docBuf.getNumChannels() <= 0)
+        return;
 
-        int chunk = (int) juce::jmin((int64_t) (numSamples - written), regionEnd - pos);
-        for (int ch = 0; ch < numCh; ++ch)
-        {
-            int srcCh = juce::jmin(ch, docBuf.getNumChannels() - 1);
-            out.copyFrom(ch, written, docBuf, srcCh, (int) pos, chunk);
-        }
-        pos += chunk;
-        written += chunk;
-    }
+    const int written = gatherRegion(out, 0, numSamples, numCh, docBuf,
+                                     pos, dir, regionStart, regionEnd, loop, pingPong);
 
     document.playhead.store(pos, std::memory_order_relaxed);
-    if (! loop && pos >= regionEnd)
+    if (! loop && written < numSamples)
         document.isPlaying.store(false, std::memory_order_relaxed);
 }
 
@@ -150,8 +197,8 @@ void R3WRKAudioProcessor::renderPlaybackDirect(juce::AudioBuffer<float>& out, in
 //                                        stretch does NOT touch pitch)
 void R3WRKAudioProcessor::renderPlaybackStretched(juce::AudioBuffer<float>& out, int numCh, int numSamples,
                                                   const juce::AudioBuffer<float>& docBuf,
-                                                  int64_t& pos, int64_t regionStart, int64_t regionEnd,
-                                                  bool loop, double speed, double pitch, double stretch)
+                                                  int64_t& pos, int& dir, int64_t regionStart, int64_t regionEnd,
+                                                  bool loop, bool pingPong, double speed, double pitch, double stretch)
 {
     if (rtStretcher == nullptr || docBuf.getNumChannels() <= 0 || regionEnd <= regionStart)
         return;
@@ -220,24 +267,9 @@ void R3WRKAudioProcessor::renderPlaybackStretched(juce::AudioBuffer<float>& out,
         int req = (int) rtStretcher->getSamplesRequired();
         req = juce::jlimit(1, inCap, req > 0 ? req : 256);
 
-        int gathered = 0;
-        bool regionEnded = false;
-        while (gathered < req)
-        {
-            if (pos >= regionEnd)
-            {
-                if (loop) { pos = regionStart; }
-                else      { regionEnded = true; break; }
-            }
-            int chunk = (int) juce::jmin((int64_t) (req - gathered), regionEnd - pos);
-            for (int ch = 0; ch < rc; ++ch)
-            {
-                int srcCh = juce::jmin(ch, docBuf.getNumChannels() - 1);
-                rtScratchIn.copyFrom(ch, gathered, docBuf, srcCh, (int) pos, chunk);
-            }
-            pos += chunk;
-            gathered += chunk;
-        }
+        const int gathered = gatherRegion(rtScratchIn, 0, req, rc, docBuf,
+                                          pos, dir, regionStart, regionEnd, loop, pingPong);
+        const bool regionEnded = (gathered < req);
         for (int ch = 0; ch < rc; ++ch)
             if (gathered < req)
                 rtScratchIn.clear(ch, gathered, req - gathered);
@@ -366,6 +398,9 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     {
         buffer.clear();
 
+        if (! wasPlaying)
+            playbackDir = 1;   // every fresh play pass starts forward
+
         const double speed   = document.playbackSpeed.load(std::memory_order_relaxed);
         const double pitch   = document.playbackPitch.load(std::memory_order_relaxed);
         const double stretch = document.playbackStretch.load(std::memory_order_relaxed);
@@ -376,7 +411,8 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         {
             auto& docBuf = document.getBuffer();
             const int64_t docLen = document.getNumSamples();
-            const bool loop = document.loopEnabled.load(std::memory_order_relaxed);
+            const bool loop       = document.loopEnabled.load(std::memory_order_relaxed);
+            const bool pingPongOn = document.loopPingPong.load(std::memory_order_relaxed);
 
             // Playback region: the selection if there is one (so Play plays the selected
             // range), otherwise the loop points, otherwise the whole clip. Loop loops it.
@@ -392,9 +428,16 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             if (selE > selS)                              { regionStart = selS;       regionEnd = selE; }
             else if (loop && loopEndS > loopStartS)       { regionStart = loopStartS; regionEnd = loopEndS; }
 
+            // Ping-pong needs at least 3 frames to have a distinct return leg; below that it
+            // just plays as a plain loop.
+            const bool pingPong = loop && pingPongOn && (regionEnd - regionStart) >= 3;
+
             int64_t pos = document.playhead.load(std::memory_order_relaxed);
             if (pos < regionStart || pos >= regionEnd)
+            {
                 pos = regionStart;                       // snap a stray playhead into the region
+                playbackDir = 1;
+            }
 
             // Reset the stretcher at the start of a play pass, or when the knobs cross the
             // bypass/engaged line, so no stale tail leaks in.
@@ -408,14 +451,15 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                     stretchRatioNeedsSnap = true;   // start at the current ratio, no 120ms slide in
                 }
                 renderPlaybackStretched(buffer, numCh, numSamples, docBuf, pos,
-                                        regionStart, regionEnd, loop, speed, pitch, stretch);
+                                        playbackDir, regionStart, regionEnd, loop, pingPong,
+                                        speed, pitch, stretch);
             }
             else
             {
                 stretcherPrimed = false;
                 rtFinished = false;
                 renderPlaybackDirect(buffer, numCh, numSamples, docBuf, pos,
-                                     regionStart, regionEnd, loop);
+                                     playbackDir, regionStart, regionEnd, loop, pingPong);
             }
         }
 
@@ -776,6 +820,7 @@ void R3WRKAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     out.writeInt64(document.loopStart.load());
     out.writeInt64(document.loopEnd.load());
     out.writeBool(document.loopEnabled.load());
+    out.writeBool(document.loopPingPong.load());
     out.writeInt64(document.getSelectionStart());
     out.writeInt64(document.getSelectionEnd());
     out.writeDouble(document.playbackSpeed.load());
@@ -802,22 +847,24 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     juce::MemoryInputStream in(data, (size_t) sizeInBytes, false);
     const int magic = in.readInt();
-    if (magic != kStateMagic && magic != kStateMagicR3WA && magic != kStateMagicR3W9
-        && magic != kStateMagicR3W8 && magic != kStateMagicR3W7 && magic != kStateMagicR3W6
-        && magic != kStateMagicR3W5)
+    if (magic != kStateMagic && magic != kStateMagicR3WB && magic != kStateMagicR3WA
+        && magic != kStateMagicR3W9 && magic != kStateMagicR3W8 && magic != kStateMagicR3W7
+        && magic != kStateMagicR3W6 && magic != kStateMagicR3W5)
         return;
-    // R3WB: filter is Base/Width/HP Q/LP Q (the MnM model). R3W8..R3WA: the old OT-style
-    // Base/Width filter with a single resonance (+ later Drive, + later 12/24 slope). R3W6/R3W7:
-    // the even older mode/cutoff filter. R3W5: no filter at all.
-    const bool hasMnmFilter       = (magic == kStateMagic);                                  // R3WB
+    // R3WC: adds the loopPingPong flag after loopEnabled. R3WB: filter is Base/Width/HP Q/LP Q
+    // (the MnM model). R3W8..R3WA: the old OT-style Base/Width filter with a single resonance
+    // (+ later Drive, + later 12/24 slope). R3W6/R3W7: the even older mode/cutoff filter.
+    // R3W5: no filter at all.
+    const bool hasPingPong        = (magic == kStateMagic);                                  // R3WC
+    const bool hasMnmFilter       = (magic == kStateMagic || magic == kStateMagicR3WB);      // R3WB+
     const bool hasOldBaseWidth    = (magic == kStateMagicR3WA || magic == kStateMagicR3W9
                                      || magic == kStateMagicR3W8);                            // R3W8..R3WA
     const bool hasDriveField      = (magic == kStateMagicR3WA || magic == kStateMagicR3W9);   // R3W9/R3WA
     const bool hasSlopeField      = (magic == kStateMagicR3WA);                               // R3WA
     const bool hasOldModeFilter   = (magic == kStateMagicR3W7 || magic == kStateMagicR3W6);
-    const bool hasGainField       = (magic == kStateMagic || magic == kStateMagicR3WA
-                                     || magic == kStateMagicR3W9 || magic == kStateMagicR3W8
-                                     || magic == kStateMagicR3W7);
+    const bool hasGainField       = (magic == kStateMagic || magic == kStateMagicR3WB
+                                     || magic == kStateMagicR3WA || magic == kStateMagicR3W9
+                                     || magic == kStateMagicR3W8 || magic == kStateMagicR3W7);
 
     double sr = in.readDouble();
     int numCh = in.readInt();
@@ -825,6 +872,7 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     int64_t lStart = in.readInt64();
     int64_t lEnd = in.readInt64();
     bool lEnabled = in.readBool();
+    bool lPingPong = hasPingPong ? in.readBool() : false;
     int64_t selStartS = in.readInt64();
     int64_t selEndS = in.readInt64();
     double spd = in.readDouble();
@@ -892,6 +940,7 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     document.loopStart = lStart;
     document.loopEnd = lEnd;
     document.loopEnabled = lEnabled;
+    document.loopPingPong = lPingPong;
     document.setSelection(selStartS, selEndS);   // clamps to the loaded length
 
     document.playbackSpeed.store(juce::jlimit(AudioDocument::kMinSpeed, AudioDocument::kMaxSpeed, spd > 0.0 ? spd : 1.0));

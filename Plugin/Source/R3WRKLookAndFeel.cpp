@@ -41,6 +41,27 @@ namespace
         g.fillPath(heads);
     }
 
+    // A continuous figure-eight (lemniscate) -- the "ping-pong loop" glyph. One stroke that
+    // crosses itself at the centre, a right lobe then a left lobe, each traced with two cubics.
+    void drawInfinityIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
+    {
+        auto area = bounds.reduced(bounds.getHeight() * 0.30f);
+        const auto c = area.getCentre();
+        const float lobe = juce::jmin(area.getWidth() * 0.25f, area.getHeight() * 0.5f);
+        const float thickness = juce::jmax(1.4f, lobe * 0.5f);
+
+        juce::Path p;
+        p.startNewSubPath(c.x, c.y);
+        p.cubicTo(c.x + lobe * 0.55f, c.y - lobe, c.x + 2.0f * lobe, c.y - lobe, c.x + 2.0f * lobe, c.y);
+        p.cubicTo(c.x + 2.0f * lobe, c.y + lobe, c.x + lobe * 0.55f, c.y + lobe, c.x, c.y);
+        p.cubicTo(c.x - lobe * 0.55f, c.y - lobe, c.x - 2.0f * lobe, c.y - lobe, c.x - 2.0f * lobe, c.y);
+        p.cubicTo(c.x - 2.0f * lobe, c.y + lobe, c.x - lobe * 0.55f, c.y + lobe, c.x, c.y);
+
+        g.setColour(ink);
+        g.strokePath(p, juce::PathStrokeType(thickness, juce::PathStrokeType::curved,
+                                             juce::PathStrokeType::rounded));
+    }
+
     // Tools: a plain 6-tooth gear, traced from a reference icon the user supplied
     // rather than approximated by formula. kOuterR/kInnerR are radius ratios
     // (of the tooth-tip radius) sampled directly from that image via radial
@@ -492,7 +513,7 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
                                       bool isMouseOverButton, bool isButtonDown)
 {
     const auto text = button.getButtonText();
-    if (text != iconPlay && text != iconStop && text != iconLoop
+    if (text != iconPlay && text != iconStop && text != iconLoop && text != iconInfinity
         && text != iconPlayFromStart && text != iconTools && text != iconScrub
         && text != iconReverse && text != iconClear && text != iconAutoRecord
         && text != iconSlice && text != iconFollow && text != iconDesktopRec
@@ -511,6 +532,11 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     if (text == iconLoop)
     {
         drawLoopIcon(g, bounds, ink);
+        return;
+    }
+    if (text == iconInfinity)
+    {
+        drawInfinityIcon(g, bounds, ink);
         return;
     }
     if (text == iconTools)
