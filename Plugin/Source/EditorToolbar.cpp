@@ -233,6 +233,52 @@ namespace
     };
 
     //==============================================================================
+    // Right-click the loop button. Live setting (no Apply): a raised-cosine volume envelope
+    // over the first/last N ms of the loop region during playback, so the wrap doesn't click.
+    // Non-destructive -- it never touches the stored audio.
+    struct LoopCrossfadePanel : juce::Component
+    {
+        explicit LoopCrossfadePanel(AudioDocument& doc) : document(doc)
+        {
+            title.setText("Loop Crossfade", juce::dontSendNotification);
+            title.setFont(juce::FontOptions(14.0f, juce::Font::bold));
+
+            amount.setRange(0.0, 50.0, 0.5);
+            amount.setValue(document.loopCrossfadeMs.load(), juce::dontSendNotification);
+            amount.setTextValueSuffix(" ms");
+            amount.setSliderStyle(juce::Slider::LinearHorizontal);
+            amount.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 22);
+            amount.onValueChange = [this]
+            {
+                document.loopCrossfadeMs = amount.getValue();
+                document.notifyChanged();   // mark dirty so Save keeps it
+            };
+
+            hint.setText("Fades the loop region's ends so the wrap doesn't click. 0 = off.",
+                         juce::dontSendNotification);
+            hint.setFont(juce::FontOptions(11.0f));
+            hint.setColour(juce::Label::textColourId, juce::Colours::grey);
+
+            addAndMakeVisible(title);
+            addAndMakeVisible(amount);
+            addAndMakeVisible(hint);
+            setSize(300, 78);
+        }
+        void resized() override
+        {
+            auto r = getLocalBounds().reduced(10);
+            title.setBounds(r.removeFromTop(18));
+            r.removeFromTop(6);
+            amount.setBounds(r.removeFromTop(24));
+            r.removeFromTop(4);
+            hint.setBounds(r);
+        }
+        AudioDocument& document;
+        juce::Label title, hint;
+        juce::Slider amount;
+    };
+
+    //==============================================================================
     // Splices a block of silence into the clip at the playhead (or the selection start), one
     // undo step (EditActions::insertSilence). The duration is remembered in OutputSettings.
     struct InsertSilencePanel : juce::Component
@@ -458,7 +504,8 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
                                 "filter, gain -- everything you hear) to a new file in the output "
                                 "folder. Press to start, press again to stop.");
 
-    for (auto* b : { &playFromStartButton, &playButton, &loopButton, &scrubButton, &sliceButton,
+    for (auto* b : { &playFromStartButton, &playButton,
+                     static_cast<juce::TextButton*>(&loopButton), &scrubButton, &sliceButton,
                      &recordButton, &toolsButton, &reverseButton, &clearButton,
                      &autoRecordButton })
     {
@@ -505,6 +552,7 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
         else           { document.loopEnabled = false; document.loopPingPong = false; }
         refreshLoopButton();
     };
+    loopButton.onSecondaryClick = [this] { showLoopCrossfadeCallout(); };
     toolsButton.onClick         = [this] { showToolsMenu(); };
     scrubButton.onClick         = [this]
     {
@@ -577,7 +625,8 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
 
 EditorToolbar::~EditorToolbar()
 {
-    for (auto* b : { &playFromStartButton, &playButton, &loopButton, &scrubButton, &sliceButton,
+    for (auto* b : { &playFromStartButton, &playButton,
+                     static_cast<juce::TextButton*>(&loopButton), &scrubButton, &sliceButton,
                      &recordButton, &toolsButton, &reverseButton, &clearButton,
                      &autoRecordButton })
         b->setLookAndFeel(nullptr);   // detach before toolbarLnF is destroyed
@@ -1072,6 +1121,12 @@ void EditorToolbar::performToolsItem(int r)
     }
 }
 
+void EditorToolbar::showLoopCrossfadeCallout()
+{
+    juce::CallOutBox::launchAsynchronously(std::make_unique<LoopCrossfadePanel>(document),
+                                           loopButton.getScreenBounds(), nullptr);
+}
+
 void EditorToolbar::showAmplifyCallout(juce::Rectangle<int> screenTargetArea)
 {
     juce::CallOutBox::launchAsynchronously(std::make_unique<AmplifyPanel>(document),
@@ -1186,9 +1241,10 @@ void EditorToolbar::refreshLoopButton()
     const bool pp = on && document.loopPingPong.load();
     loopButton.setToggleState(on, juce::dontSendNotification);   // drives the accent fill (applyTheme)
     loopButton.setButtonText(pp ? R3WRKLookAndFeel::iconInfinity : R3WRKLookAndFeel::iconLoop);
-    loopButton.setTooltip(pp ? "Ping-pong loop -- plays forward, then backward (click to turn off)"
-                             : on ? "Loop (click for ping-pong)"
-                                  : "Loop");
+    loopButton.setTooltip(juce::String(pp ? "Ping-pong loop -- plays forward, then backward (click to turn off)"
+                                          : on ? "Loop (click for ping-pong)"
+                                               : "Loop")
+                          + ".  Right-click: loop crossfade");
 }
 
 void EditorToolbar::timerCallback()

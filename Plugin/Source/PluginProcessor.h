@@ -146,11 +146,11 @@ private:
     void renderPlaybackDirect (juce::AudioBuffer<float>& out, int numCh, int numSamples,
                                const juce::AudioBuffer<float>& docBuf,
                                int64_t& pos, int& dir, int64_t regionStart, int64_t regionEnd,
-                               bool loop, bool pingPong);
+                               bool loop, bool pingPong, int loopFadeLen);
     void renderPlaybackStretched (juce::AudioBuffer<float>& out, int numCh, int numSamples,
                                   const juce::AudioBuffer<float>& docBuf,
                                   int64_t& pos, int& dir, int64_t regionStart, int64_t regionEnd,
-                                  bool loop, bool pingPong,
+                                  bool loop, bool pingPong, int loopFadeLen,
                                   double speed, double pitch, double stretch);
 
     // Scrub tool: a plain variable-rate (and reversible) read of the stored audio, driven by

@@ -189,6 +189,10 @@ public:
     // (bouncing at both ends) instead of wrapping head-to-tail. The Loop button cycles
     // off -> loop -> ping-pong.
     std::atomic<bool> loopPingPong { false };
+    // Loop crossfade: a raised-cosine volume envelope over the first/last N ms of the loop
+    // region during playback (loop only), so the wrap doesn't click. 0 = off. Set by
+    // right-clicking the loop button; persisted. Never touches the stored audio.
+    std::atomic<double> loopCrossfadeMs { 0.0 };
 
     //==============================================================================
     // Scrub tool: drag across the waveform to play forward or backward at a rate matching

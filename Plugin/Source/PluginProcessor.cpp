@@ -6,7 +6,8 @@
 
 namespace
 {
-    constexpr int kStateMagic     = 0x52335744;   // 'R3WD' - adds filterModel (MnM / Octatrack)
+    constexpr int kStateMagic     = 0x52335745;   // 'R3WE' - adds loopCrossfadeMs
+    constexpr int kStateMagicR3WD = 0x52335744;   // 'R3WD' - adds filterModel (MnM / Octatrack)
     constexpr int kStateMagicR3WC = 0x52335743;   // 'R3WC' - adds loopPingPong
     constexpr int kStateMagicR3WB = 0x52335742;   // 'R3WB' - MnM filter: Base/Width/HP Q/LP Q
     constexpr int kStateMagicR3WA = 0x52335741;   // 'R3WA' - OT filter + HP/LP slope (12/24dB)
@@ -119,20 +120,53 @@ void R3WRKAudioProcessor::ensureRecordingCapacity(int numChannels, int64_t addit
 }
 
 //==============================================================================
+// Loop-crossfade envelope: raised-cosine (equal-power) gain for region-relative frame `rp`
+// -- ramps 0->1 over the first `fadeLen` frames of the region and 1->0 over the last
+// `fadeLen`, else 1. `fadeLen` is pre-clamped to regionLen/2 by the caller.
+static inline double loopFadeGain(int64_t rp, int64_t regionLen, int fadeLen) noexcept
+{
+    if (fadeLen <= 0) return 1.0;
+    double x;
+    if (rp < fadeLen)                        x = (double) rp / (double) fadeLen;
+    else if (rp >= regionLen - fadeLen)      x = (double) (regionLen - 1 - rp) / (double) fadeLen;
+    else                                     return 1.0;
+    x = juce::jlimit(0.0, 1.0, x);
+    const double s = std::sin(0.5 * juce::MathConstants<double>::pi * x);
+    return s * s;
+}
+
 // Walks [regionStart, regionEnd) from `pos` in direction `dir` (+1 forward, -1 backward),
 // copying up to `count` frames into dst[dstOffset..]. `loop` wraps head-to-tail; `pingPong`
 // bounces at both ends instead -- `dir` flips, and neither endpoint is repeated, so the cycle
 // is 0,1,..,L-1,L-2,..,1 with period 2L-2 (the same shape as the Sieve editor's ping-pong).
-// `dir` only ever goes -1 when `pingPong` is true. Returns frames written; a short return
-// means a non-looping region ran out.
+// `dir` only ever goes -1 when `pingPong` is true. `fadeLen` > 0 applies the loop-crossfade
+// envelope to the copied audio by its region position. Returns frames written; a short
+// return means a non-looping region ran out.
 static int gatherRegion(juce::AudioBuffer<float>& dst, int dstOffset, int count, int dstChannels,
                         const juce::AudioBuffer<float>& docBuf,
                         int64_t& pos, int& dir,
-                        int64_t regionStart, int64_t regionEnd, bool loop, bool pingPong)
+                        int64_t regionStart, int64_t regionEnd, bool loop, bool pingPong,
+                        int fadeLen)
 {
     const int srcChans = docBuf.getNumChannels();
     if (srcChans <= 0 || regionEnd <= regionStart)
         return 0;
+    const int64_t regionLen = regionEnd - regionStart;
+
+    auto applyFade = [&](int atFrame, int chunk, int64_t rp0, int step)
+    {
+        if (fadeLen <= 0) return;
+        float* wp[8];
+        const int nw = juce::jmin(dstChannels, 8);
+        for (int ch = 0; ch < nw; ++ch) wp[ch] = dst.getWritePointer(ch, dstOffset + atFrame);
+        for (int j = 0; j < chunk; ++j)
+        {
+            const double g = loopFadeGain(rp0 + (int64_t) step * j, regionLen, fadeLen);
+            if (g < 1.0)
+                for (int ch = 0; ch < nw; ++ch)
+                    wp[ch][j] *= (float) g;
+        }
+    };
 
     int written = 0;
     while (written < count)
@@ -149,6 +183,7 @@ static int gatherRegion(juce::AudioBuffer<float>& dst, int dstOffset, int count,
             for (int ch = 0; ch < dstChannels; ++ch)
                 dst.copyFrom(ch, dstOffset + written, docBuf,
                              juce::jmin(ch, srcChans - 1), (int) pos, chunk);
+            applyFade(written, chunk, pos - regionStart, +1);
             pos     += chunk;
             written += chunk;
         }
@@ -169,6 +204,7 @@ static int gatherRegion(juce::AudioBuffer<float>& dst, int dstOffset, int count,
                 float* w = dst.getWritePointer(ch, dstOffset + written);
                 std::reverse(w, w + chunk);
             }
+            applyFade(written, chunk, pos - regionStart, -1);   // dst frame 0 == region pos `pos`
             pos     -= chunk;
             written += chunk;
         }
@@ -179,13 +215,13 @@ static int gatherRegion(juce::AudioBuffer<float>& dst, int dstOffset, int count,
 void R3WRKAudioProcessor::renderPlaybackDirect(juce::AudioBuffer<float>& out, int numCh, int numSamples,
                                                const juce::AudioBuffer<float>& docBuf,
                                                int64_t& pos, int& dir, int64_t regionStart, int64_t regionEnd,
-                                               bool loop, bool pingPong)
+                                               bool loop, bool pingPong, int loopFadeLen)
 {
     if (docBuf.getNumChannels() <= 0)
         return;
 
     const int written = gatherRegion(out, 0, numSamples, numCh, docBuf,
-                                     pos, dir, regionStart, regionEnd, loop, pingPong);
+                                     pos, dir, regionStart, regionEnd, loop, pingPong, loopFadeLen);
 
     document.playhead.store(pos, std::memory_order_relaxed);
     if (! loop && written < numSamples)
@@ -199,7 +235,8 @@ void R3WRKAudioProcessor::renderPlaybackDirect(juce::AudioBuffer<float>& out, in
 void R3WRKAudioProcessor::renderPlaybackStretched(juce::AudioBuffer<float>& out, int numCh, int numSamples,
                                                   const juce::AudioBuffer<float>& docBuf,
                                                   int64_t& pos, int& dir, int64_t regionStart, int64_t regionEnd,
-                                                  bool loop, bool pingPong, double speed, double pitch, double stretch)
+                                                  bool loop, bool pingPong, int loopFadeLen,
+                                                  double speed, double pitch, double stretch)
 {
     if (rtStretcher == nullptr || docBuf.getNumChannels() <= 0 || regionEnd <= regionStart)
         return;
@@ -269,7 +306,7 @@ void R3WRKAudioProcessor::renderPlaybackStretched(juce::AudioBuffer<float>& out,
         req = juce::jlimit(1, inCap, req > 0 ? req : 256);
 
         const int gathered = gatherRegion(rtScratchIn, 0, req, rc, docBuf,
-                                          pos, dir, regionStart, regionEnd, loop, pingPong);
+                                          pos, dir, regionStart, regionEnd, loop, pingPong, loopFadeLen);
         const bool regionEnded = (gathered < req);
         for (int ch = 0; ch < rc; ++ch)
             if (gathered < req)
@@ -433,6 +470,14 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             // just plays as a plain loop.
             const bool pingPong = loop && pingPongOn && (regionEnd - regionStart) >= 3;
 
+            // Loop crossfade: raised-cosine volume envelope over the first/last N ms of the
+            // loop region so the wrap doesn't click. Loop only; clamped to half the region.
+            const double xfadeMs = document.loopCrossfadeMs.load(std::memory_order_relaxed);
+            const int loopFadeLen = (loop && xfadeMs > 0.01)
+                ? (int) juce::jmin<int64_t>((int64_t) (xfadeMs * currentSampleRate / 1000.0),
+                                            (regionEnd - regionStart) / 2)
+                : 0;
+
             int64_t pos = document.playhead.load(std::memory_order_relaxed);
             if (pos < regionStart || pos >= regionEnd)
             {
@@ -452,7 +497,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                     stretchRatioNeedsSnap = true;   // start at the current ratio, no 120ms slide in
                 }
                 renderPlaybackStretched(buffer, numCh, numSamples, docBuf, pos,
-                                        playbackDir, regionStart, regionEnd, loop, pingPong,
+                                        playbackDir, regionStart, regionEnd, loop, pingPong, loopFadeLen,
                                         speed, pitch, stretch);
             }
             else
@@ -460,7 +505,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                 stretcherPrimed = false;
                 rtFinished = false;
                 renderPlaybackDirect(buffer, numCh, numSamples, docBuf, pos,
-                                     playbackDir, regionStart, regionEnd, loop, pingPong);
+                                     playbackDir, regionStart, regionEnd, loop, pingPong, loopFadeLen);
             }
         }
 
@@ -836,6 +881,7 @@ void R3WRKAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     out.writeDouble(document.filterLpQ.load());
     out.writeDouble(document.playbackGainDb.load());
     out.writeInt(document.filterModel.load());
+    out.writeDouble(document.loopCrossfadeMs.load());
 
     auto& buf = document.getBuffer();
     for (int ch = 0; ch < buf.getNumChannels(); ++ch)
@@ -851,27 +897,31 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     juce::MemoryInputStream in(data, (size_t) sizeInBytes, false);
     const int magic = in.readInt();
-    if (magic != kStateMagic && magic != kStateMagicR3WC && magic != kStateMagicR3WB
-        && magic != kStateMagicR3WA && magic != kStateMagicR3W9 && magic != kStateMagicR3W8
-        && magic != kStateMagicR3W7 && magic != kStateMagicR3W6 && magic != kStateMagicR3W5)
+    if (magic != kStateMagic && magic != kStateMagicR3WD && magic != kStateMagicR3WC
+        && magic != kStateMagicR3WB && magic != kStateMagicR3WA && magic != kStateMagicR3W9
+        && magic != kStateMagicR3W8 && magic != kStateMagicR3W7 && magic != kStateMagicR3W6
+        && magic != kStateMagicR3W5)
         return;
-    // R3WD: adds filterModel (MnM / Octatrack) after playbackGainDb. R3WC: adds the
-    // loopPingPong flag after loopEnabled. R3WB: filter is Base/Width/HP Q/LP Q (the MnM
-    // model). R3W8..R3WA: the old OT-style Base/Width filter with a single resonance (+ later
-    // Drive, + later 12/24 slope). R3W6/R3W7: the even older mode/cutoff filter. R3W5: none.
-    const bool hasFilterModel     = (magic == kStateMagic);                                  // R3WD
-    const bool hasPingPong        = (magic == kStateMagic || magic == kStateMagicR3WC);      // R3WC+
-    const bool hasMnmFilter       = (magic == kStateMagic || magic == kStateMagicR3WC
-                                     || magic == kStateMagicR3WB);                            // R3WB+
+    // R3WE: adds loopCrossfadeMs after filterModel. R3WD: adds filterModel (MnM / Octatrack)
+    // after playbackGainDb. R3WC: adds the loopPingPong flag after loopEnabled. R3WB: filter
+    // is Base/Width/HP Q/LP Q (the MnM model). R3W8..R3WA: the old OT-style Base/Width filter
+    // with a single resonance (+ later Drive, + later 12/24 slope). R3W6/R3W7: the even older
+    // mode/cutoff filter. R3W5: none.
+    const bool hasLoopXfade       = (magic == kStateMagic);                                  // R3WE
+    const bool hasFilterModel     = (magic == kStateMagic || magic == kStateMagicR3WD);      // R3WD+
+    const bool hasPingPong        = (magic == kStateMagic || magic == kStateMagicR3WD
+                                     || magic == kStateMagicR3WC);                            // R3WC+
+    const bool hasMnmFilter       = (magic == kStateMagic || magic == kStateMagicR3WD
+                                     || magic == kStateMagicR3WC || magic == kStateMagicR3WB); // R3WB+
     const bool hasOldBaseWidth    = (magic == kStateMagicR3WA || magic == kStateMagicR3W9
                                      || magic == kStateMagicR3W8);                            // R3W8..R3WA
     const bool hasDriveField      = (magic == kStateMagicR3WA || magic == kStateMagicR3W9);   // R3W9/R3WA
     const bool hasSlopeField      = (magic == kStateMagicR3WA);                               // R3WA
     const bool hasOldModeFilter   = (magic == kStateMagicR3W7 || magic == kStateMagicR3W6);
-    const bool hasGainField       = (magic == kStateMagic || magic == kStateMagicR3WC
-                                     || magic == kStateMagicR3WB || magic == kStateMagicR3WA
-                                     || magic == kStateMagicR3W9 || magic == kStateMagicR3W8
-                                     || magic == kStateMagicR3W7);
+    const bool hasGainField       = (magic == kStateMagic || magic == kStateMagicR3WD
+                                     || magic == kStateMagicR3WC || magic == kStateMagicR3WB
+                                     || magic == kStateMagicR3WA || magic == kStateMagicR3W9
+                                     || magic == kStateMagicR3W8 || magic == kStateMagicR3W7);
 
     double sr = in.readDouble();
     int numCh = in.readInt();
@@ -927,6 +977,7 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     if (hasGainField)
         gDb = in.readDouble();
     const int fModel = hasFilterModel ? in.readInt() : 0;
+    const double loopXfadeMs = hasLoopXfade ? in.readDouble() : 0.0;
 
     if (numCh <= 0 || numCh > kMaxStateChannels || numSamples < 0 || numSamples > 0x7fffffff)
         return;
@@ -961,6 +1012,7 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     document.filterLpQ.store(juce::jlimit(0.0, 1.0, fLpQ));
     document.playbackGainDb.store(juce::jlimit(AudioDocument::kMinGainDb, AudioDocument::kMaxGainDb, gDb));
     document.filterModel.store(juce::jlimit(0, 1, fModel));
+    document.loopCrossfadeMs.store(juce::jlimit(0.0, 200.0, loopXfadeMs));
 
     document.clearSliceMarkers();   // session-only; a restored document starts with no markers
 

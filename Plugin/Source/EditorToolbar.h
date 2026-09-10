@@ -16,6 +16,21 @@
     export selection, undo/redo — lives in the "Tools" pop-up menu.
     Owns the clipboard and talks to the AudioDocument / processor directly.
 */
+// A TextButton that reports a right-click / ctrl-click separately (JUCE's Button has no
+// secondary-click hook). Used for the loop button's "right-click -> loop crossfade" slider.
+struct SecondaryClickButton : juce::TextButton
+{
+    using juce::TextButton::TextButton;
+    std::function<void()> onSecondaryClick;
+    void mouseDown(const juce::MouseEvent& e) override
+    {
+        if (onSecondaryClick && e.mods.isPopupMenu())
+            onSecondaryClick();
+        else
+            juce::TextButton::mouseDown(e);
+    }
+};
+
 class EditorToolbar : public juce::Component,
                       public juce::ChangeListener,
                       private juce::Timer
@@ -96,6 +111,7 @@ private:
     void writeDocumentTo(const juce::File& file);   // shared: saveToFile + header/status bookkeeping
     void revertToOriginal();   // Tools menu's "Revert to Original" -- see AudioDocument::revertToOriginal()
     void showToolsMenu();
+    void showLoopCrossfadeCallout();   // right-click the loop button -> a ms slider
     void showAmplifyCallout(juce::Rectangle<int> screenTargetArea);
     void showStretchCallout(juce::Rectangle<int> screenTargetArea);
     void showInsertSilenceCallout(juce::Rectangle<int> screenTargetArea);   // duration slider -> insert at playhead
@@ -129,9 +145,9 @@ private:
     // "record" on its own; a stop square appears on it once recording.
     juce::TextButton playFromStartButton { R3WRKLookAndFeel::iconPlayFromStart };
     juce::TextButton playButton   { R3WRKLookAndFeel::iconPlay };
-    juce::TextButton loopButton   { R3WRKLookAndFeel::iconLoop };   // cycles off -> loop -> ping-pong
-                                                                    // (see refreshLoopButton); the icon
-                                                                    // becomes iconInfinity in ping-pong
+    SecondaryClickButton loopButton { R3WRKLookAndFeel::iconLoop };  // cycles off -> loop -> ping-pong
+                                                                     // (see refreshLoopButton); right-click
+                                                                     // opens the loop-crossfade slider
     juce::TextButton scrubButton  { R3WRKLookAndFeel::iconScrub };  // setClickingTogglesState(true)
                                                                     // -- toggles the scrub *tool*;
                                                                     // WaveformDisplay does the actual
