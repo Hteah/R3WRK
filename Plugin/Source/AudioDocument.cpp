@@ -403,6 +403,16 @@ void AudioDocument::commitChange(juce::AudioBuffer<float> newBuffer, const juce:
 void AudioDocument::markAsOriginal()
 {
     originalBuffer.makeCopyOf(buffer);
+
+    // This take/load/session is the new floor: nothing before it should be reachable by
+    // undoing, whether via "Revert to Original" or just holding Cmd+Z. loadFromFile() and
+    // newEmptyDocument() already clear undo history themselves (there's nothing to walk back
+    // through anyway), but stopRecording() / finalizeDesktopRecording() / setStateInformation's
+    // "Load State" commit their result as one more ordinary SnapshotAction *on top of* that --
+    // so without this, holding Undo walked straight past the recording/restore and emptied the
+    // document. Clearing here (the one place all of those funnel through) makes it impossible
+    // regardless of call site.
+    undoManager.clearUndoHistory();
 }
 
 void AudioDocument::revertToOriginal()

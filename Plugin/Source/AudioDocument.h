@@ -366,7 +366,9 @@ public:
     // establishes a genuinely new starting point; revertToOriginal() restores it the same way
     // any other edit commits (an ordinary, undoable/redoable SnapshotAction), so it can never
     // reach back further than the original take, and reverting is itself undoable if it wasn't
-    // what you meant to do.
+    // what you meant to do. markAsOriginal() also clears the undo *history* at that point (see
+    // its definition), so this floor holds for plain Undo too, not just Revert to Original --
+    // holding Cmd+Z can empty the selection/an edit back to the original take, never past it.
     void markAsOriginal();
     void revertToOriginal();
 
