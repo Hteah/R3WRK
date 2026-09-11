@@ -5,7 +5,8 @@
 
 /**
     The strip above the waveform: an "unsaved" dot + the source file name and the
-    "44100 Hz · 2 ch · 12.345 s" readout. Modelled on Sieve's audio-editor header.
+    "24-bit · 44100 Hz · 2 ch · 12.345 s" readout (bit depth omitted when unknown).
+    Modelled on Sieve's audio-editor header.
 */
 class HeaderBar : public juce::Component,
                   private juce::Timer,

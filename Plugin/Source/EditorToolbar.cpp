@@ -911,6 +911,8 @@ void EditorToolbar::showToolsMenu()
     m.addItem(tmiSaveOptions, juce::String::fromUTF8("Save Options\xE2\x80\xA6  (")
                                  + outputSettings->saveOptions().shortSummary() + ")");
     m.addSeparator();
+    m.addItem(tmiExportSel, "Export Selection to Folder", sel);
+    m.addSeparator();
     m.addItem(keyed("Cut",   tmiCut,   sel,  cmd + "X"));
     m.addItem(keyed("Copy",  tmiCopy,  sel,  cmd + "C"));
     m.addItem(keyed("Paste", tmiPaste, clip, cmd + "V"));
@@ -919,10 +921,12 @@ void EditorToolbar::showToolsMenu()
     m.addItem(tmiDelete,  "Delete Selection",  sel);
     m.addItem(tmiSilence, "Silence Selection", ! empty);
     m.addItem(tmiInsertSilence, juce::String::fromUTF8("Insert Silence\xE2\x80\xA6"), ! empty);
-    m.addSeparator();
+    if (! standaloneApp)
     {
         // Channels: pick which side of a stereo clip the gain-shaped processors below work
         // on, and a one-shot level match for when one side just came in quieter.
+        // Standalone: this lives only in the menu-bar Tools menu.
+        m.addSeparator();
         const bool chanOK = stereoDoc && ! empty;
         auto focusItem = [&](const juce::String& t, int id, CF f)
         {
@@ -942,29 +946,43 @@ void EditorToolbar::showToolsMenu()
         m.addSubMenu("Work on Channel", chanMenu, chanOK);
         m.addSubMenu(juce::String::fromUTF8("Match Channels\xE2\x80\xA6"), matchMenu, chanOK);
     }
-    m.addSeparator();
-    m.addItem(tmiToMono,   "Convert to Mono",   ! empty && stereoDoc);
-    m.addItem(tmiToStereo, "Convert to Stereo", ! empty && ! stereoDoc);
+    if (! standaloneApp)
+    {
+        // Standalone: mono/stereo conversion lives only in the menu-bar Tools menu.
+        m.addSeparator();
+        m.addItem(tmiToMono,   "Convert to Mono",   ! empty && stereoDoc);
+        m.addItem(tmiToStereo, "Convert to Stereo", ! empty && ! stereoDoc);
+    }
     m.addSeparator();
     m.addItem(tmiNormalize, "Normalize",  ! empty);
     m.addItem(tmiAmplify,   juce::String::fromUTF8("Amplify\xE2\x80\xA6"), ! empty);
     m.addItem(tmiFadeIn,    "Fade In",    ! empty);
     m.addItem(tmiFadeOut,   "Fade Out",   ! empty);
     m.addItem(tmiReverse,   "Reverse",    ! empty);
+    if (! standaloneApp)
+    {
+        // Standalone offers these only from the menu-bar menus (and, for Stretch, the
+        // selection right-click menu). Stretch is the offline/destructive stretch, distinct
+        // from the live Pitch/Speed knobs, and the label confuses the two in this list.
+        m.addSeparator();
+        m.addItem(tmiStretch, juce::String::fromUTF8("Stretch / Pitch\xE2\x80\xA6"), ! empty);
+        m.addSeparator();
+        m.addItem(tmiSliceToFolder, juce::String::fromUTF8("Export Slices\xE2\x80\xA6"), ! empty && hasSlices);
+        m.addItem(tmiExportOt,      juce::String::fromUTF8("Export Octatrack Chain (.wav + .ot)\xE2\x80\xA6"), ! empty);
+        m.addItem(tmiClearSlices,   "Clear Slice Markers", hasSlices);
+    }
     m.addSeparator();
-    m.addItem(tmiStretch,   juce::String::fromUTF8("Stretch / Pitch\xE2\x80\xA6"), ! empty);
-    m.addItem(tmiExportSel, "Export Selection to Folder", sel);
-    m.addSeparator();
-    m.addItem(tmiSliceToFolder, juce::String::fromUTF8("Export Slices\xE2\x80\xA6"), ! empty && hasSlices);
-    m.addItem(tmiExportOt,      juce::String::fromUTF8("Export Octatrack Chain (.wav + .ot)\xE2\x80\xA6"), ! empty);
-    m.addItem(tmiClearSlices,   "Clear Slice Markers", hasSlices);
-    m.addSeparator();
-    m.addItem(tmiOutputFolder, juce::String::fromUTF8("Output Folder\xE2\x80\xA6"));
-    if (standaloneApp)
-        m.addItem(tmiAudioSettings, juce::String::fromUTF8("Audio Settings\xE2\x80\xA6"));
-    m.addItem(tmiTheme,        juce::String::fromUTF8("Theme\xE2\x80\xA6"));
-    m.addItem(tmiAutoRecordThreshold, juce::String::fromUTF8("Auto-Record Threshold\xE2\x80\xA6"));
-    m.addSeparator();
+    if (! standaloneApp)
+    {
+        // Standalone keeps these in the macOS application ("R3WRK") menu (Output Folder /
+        // Theme) or the menu-bar Tools menu (Auto-Record Threshold) instead -- see
+        // StandaloneMenuBar / buildMenuBarMenu(). Audio Settings is Standalone-only to begin
+        // with, so it simply isn't offered here.
+        m.addItem(tmiOutputFolder, juce::String::fromUTF8("Output Folder\xE2\x80\xA6"));
+        m.addItem(tmiTheme,        juce::String::fromUTF8("Theme\xE2\x80\xA6"));
+        m.addItem(tmiAutoRecordThreshold, juce::String::fromUTF8("Auto-Record Threshold\xE2\x80\xA6"));
+        m.addSeparator();
+    }
     m.addItem(keyed("Undo", tmiUndo, canUndo, cmd + "Z"));
     m.addItem(keyed("Redo", tmiRedo, canRedo, shift + cmd + "Z"));
     m.addItem(tmiRevert, "Revert to Original", ! empty);
@@ -1002,12 +1020,7 @@ void EditorToolbar::buildMenuBarMenu(juce::PopupMenu& m, ToolsMenuGroup group)
                                           + outputSettings->saveOptions().shortSummary() + ")");
             m.addSeparator();
             m.addItem(tmiExportSel, "Export Selection to Folder", sel);
-            m.addItem(tmiSliceToFolder, juce::String::fromUTF8("Export Slices\xE2\x80\xA6"),
-                      ! empty && hasSlices);
-            m.addItem(tmiExportOt, juce::String::fromUTF8("Export Octatrack Chain (.wav + .ot)\xE2\x80\xA6"),
-                      ! empty);
             m.addSeparator();
-            m.addItem(tmiOutputFolder, juce::String::fromUTF8("Output Folder\xE2\x80\xA6"));
             m.addItem(tmiRevert, "Revert to Original", ! empty);
             break;
 
@@ -1055,14 +1068,29 @@ void EditorToolbar::buildMenuBarMenu(juce::PopupMenu& m, ToolsMenuGroup group)
             m.addItem(tmiReverse,   "Reverse",  ! empty);
             m.addSeparator();
             m.addItem(tmiStretch, juce::String::fromUTF8("Stretch / Pitch\xE2\x80\xA6"), ! empty);
-            m.addItem(tmiClearSlices, "Clear Slice Markers", hasSlices);
-            m.addSeparator();
-            if (standaloneApp)
-                m.addItem(tmiAudioSettings, juce::String::fromUTF8("Audio Settings\xE2\x80\xA6"));
-            m.addItem(tmiTheme, juce::String::fromUTF8("Theme\xE2\x80\xA6"));
-            m.addItem(tmiAutoRecordThreshold, juce::String::fromUTF8("Auto-Record Threshold\xE2\x80\xA6"));
             break;
         }
+
+        case ToolsMenuGroup::slice:
+            // Every slice-marker action in one menu. Markers themselves are placed/moved with
+            // the Slice tool on the transport strip (mouse only -- no menu item for that).
+            m.addItem(tmiSliceToFolder, juce::String::fromUTF8("Export Slices\xE2\x80\xA6"),
+                      ! empty && hasSlices);
+            m.addItem(tmiExportOt, juce::String::fromUTF8("Export Octatrack Chain (.wav + .ot)\xE2\x80\xA6"),
+                      ! empty);
+            m.addSeparator();
+            m.addItem(tmiClearSlices, "Clear Slice Markers", hasSlices);
+            break;
+
+        case ToolsMenuGroup::appMenu:
+            // Standalone only -- these are the macOS application menu's extra items (see
+            // StandaloneMenuBar). Always enabled; selections dispatch through performToolsItem()
+            // like every other menu-bar item.
+            m.addItem(tmiAudioSettings, juce::String::fromUTF8("Audio Settings\xE2\x80\xA6"));
+            m.addItem(tmiAutoRecordThreshold, juce::String::fromUTF8("Auto-Record Threshold\xE2\x80\xA6"));
+            m.addItem(tmiOutputFolder,  juce::String::fromUTF8("Output Folder\xE2\x80\xA6"));
+            m.addItem(tmiTheme,         juce::String::fromUTF8("Theme\xE2\x80\xA6"));
+            break;
     }
 }
 

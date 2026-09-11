@@ -71,3 +71,25 @@ VST3/AU — those are hosted inside a DAW's own window. In one file:
 
 If JUCE is ever upgraded to a newer tag, re-check this still applies — `git apply --check`
 reports without touching anything.
+
+## `juce-standalone-menu-live-update.patch`
+
+One-line fix for a stock JUCE bug that froze every Standalone menu-bar item's enable/tick
+state at whatever it happened to be a few milliseconds after launch, forever -- discovered
+while wiring up R3WRK's File/Edit/Tools/Slice menus and app-menu extras.
+
+`MenuBarModel::setMacMainMenu()` builds the menu bar once synchronously, then unconditionally
+calls `newMenuBarModel->menuItemsChanged()`, which lands asynchronously (next event-loop turn)
+back in `JuceMainMenuHandler::menuBarItemsChanged()`. By then the menu bar already has all its
+top-level items, so that call takes the "update in place" branch --
+`updateTopLevelMenu(NSMenuItem*, ...)` -- which replaces every top-level submenu with a
+brand-new `NSMenu` **without a delegate**. Only a delegated `NSMenu` gets `menuNeedsUpdate:`
+(the callback that rebuilds a menu's contents each time it's opened, per
+`updateTopLevelMenu(NSMenu*)` below it), so from that point on every top-level menu is frozen:
+whatever was enabled/ticked/labelled at that one moment is what the user sees for the rest of
+the app's life, no matter what changes afterwards (loading a file, adding slice markers, etc.).
+The initial build (`addTopLevelMenu`, used only when the menu bar is still empty) does set the
+delegate, which is why this was easy to miss -- the menu bar *looks* right at first glance.
+
+Fix: `updateTopLevelMenu(NSMenuItem*, ...)` now sets the same delegate on its replacement menu
+that `addTopLevelMenu` sets on the original, so `menuNeedsUpdate:` keeps firing on every open.

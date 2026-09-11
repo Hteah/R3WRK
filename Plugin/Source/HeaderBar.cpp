@@ -64,6 +64,9 @@ juce::String HeaderBar::buildReadout() const
     const juce::String sep = juce::String::fromUTF8(" \xc2\xb7 ");   // " · "
 
     juce::String s;
+    const juce::String bits = document.sourceBitDepthText();
+    if (bits.isNotEmpty())
+        s << bits << sep;
     s << juce::String((int) sr) << " Hz" << sep << ch << " ch" << sep
       << juce::String(dur, 3) << " s";
 

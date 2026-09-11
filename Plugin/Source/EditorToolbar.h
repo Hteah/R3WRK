@@ -90,7 +90,13 @@ public:
         tmiUndo, tmiRedo
     };
 
-    enum class ToolsMenuGroup { file, edit, tools };
+    // `appMenu` is the macOS application ("R3WRK") menu -- Standalone only, wired up by
+    // StandaloneMenuBar as setMacMainMenu()'s extraAppleMenuItems. Holds the config actions
+    // (Audio Settings / Auto-Record Threshold / Output Folder / Theme) that used to sit in
+    // File / Tools / the in-window Tools ▾; those surfaces drop them when running Standalone.
+    // `slice` is the Standalone menu bar's "Slice" menu -- every slice-marker action in one
+    // place (Export Slices / Export Octatrack Chain / Clear Slice Markers).
+    enum class ToolsMenuGroup { file, edit, tools, slice, appMenu };
 
     // Append one menu-bar group's items (with live enable / tick state) to `menu`. Used only
     // by the Standalone menu bar; the in-window Tools ▾ button lays its own single list out

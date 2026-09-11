@@ -110,6 +110,20 @@ public:
     double getSampleRate() const { return sampleRate; }
     void setSampleRate(double sr) { sampleRate = sr; }
 
+    // The source file's bit depth, shown in the header readout. 0 = unknown / in-memory only
+    // (a blank document). loadFromFile() sets it from the file; a recording is 32-bit float.
+    // Preserved across edits -- it describes where the audio came from, not the live buffer
+    // (which is always float).
+    int  getSourceBitDepth() const { return sourceBitDepth; }
+    bool sourceBitDepthIsFloat() const { return sourceBitDepthFloat; }
+    void setSourceBitDepth(int bits, bool isFloat) { sourceBitDepth = bits; sourceBitDepthFloat = isFloat; }
+    juce::String sourceBitDepthText() const   // "" when unknown
+    {
+        if (sourceBitDepth <= 0) return {};
+        if (sourceBitDepthFloat) return "32-bit float";
+        return juce::String (sourceBitDepth) + "-bit";
+    }
+
     int64_t getNumSamples() const { return (int64_t) buffer.getNumSamples(); }
     int getNumChannels() const { return buffer.getNumChannels(); }
     bool isEmpty() const { return buffer.getNumSamples() == 0; }
@@ -383,6 +397,8 @@ private:
     mutable juce::CriticalSection bufferLock;
     juce::AudioBuffer<float> buffer;
     double sampleRate = 44100.0;
+    int  sourceBitDepth = 0;            // see getSourceBitDepth()
+    bool sourceBitDepthFloat = false;
     std::atomic<uint64_t> selPacked { 0 };   // (uint32 start << 32) | uint32 end -- see getSelection()
     int bufferVersion = 0;
 

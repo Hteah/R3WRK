@@ -694,6 +694,7 @@ void R3WRKAudioProcessor::stopRecording()
 
     document.beginChange();
     document.setSampleRate(currentSampleRate);
+    document.setSourceBitDepth(32, true);   // captured as 32-bit float
     document.commitChange(std::move(finalBuffer), "Record");
     document.loopStart = 0;
     document.loopEnd = document.getNumSamples();
@@ -819,6 +820,7 @@ void R3WRKAudioProcessor::finalizeDesktopRecording()
 
     document.beginChange();
     document.setSampleRate(rate);
+    document.setSourceBitDepth(32, true);   // captured as 32-bit float
     document.commitChange(std::move(finalBuf), "Record Desktop");
     document.loopStart = 0;
     document.loopEnd = document.getNumSamples();

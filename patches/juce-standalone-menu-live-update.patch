@@ -1,0 +1,19 @@
+diff --git a/modules/juce_gui_basics/native/juce_MainMenu_mac.mm b/modules/juce_gui_basics/native/juce_MainMenu_mac.mm
+index d2e3780..6f2216d 100644
+--- a/modules/juce_gui_basics/native/juce_MainMenu_mac.mm
++++ b/modules/juce_gui_basics/native/juce_MainMenu_mac.mm
+@@ -137,6 +137,14 @@ void updateTopLevelMenu (NSMenuItem* parentItem, const PopupMenu& menuToCopy, co
+         // a new menu and replacing the old one with it, that problem seems to be avoided..
+         NSMenu* menu = [[NSMenu alloc] initWithTitle: juceStringToNS (name)];
+ 
++        // R3WRK fix: setMacMainMenu() calls newMenuBarModel->menuItemsChanged() right after the
++        // initial synchronous build (see setMacMainMenu() below), which lands here -- the "menu
++        // bar already has all its top-level items" branch of menuBarItemsChanged() -- on the very
++        // next event-loop turn. Without a delegate, this replacement menu never gets
++        // menuNeedsUpdate: again, so every top-level menu (File/Edit/Tools/...) freezes at
++        // whatever enable/tick state it had at that moment, for the rest of the app's life.
++        [menu setDelegate: (id<NSMenuDelegate>) callback];
++
+         for (PopupMenu::MenuItemIterator iter (menuToCopy); iter.next();)
+             addMenuItem (iter, menu, menuId, topLevelIndex);
+ 

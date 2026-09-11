@@ -67,6 +67,8 @@ void AudioDocument::newEmptyDocument(int numChannels, double sr)
         buffer.setSize(numChannels, 0);
     }
     sampleRate = sr;
+    sourceBitDepth = 0;
+    sourceBitDepthFloat = false;
     selPacked.store(0, std::memory_order_relaxed);
     playhead = 0;
     loopStart = loopEnd = 0;
@@ -95,6 +97,9 @@ bool AudioDocument::loadFromFile(const juce::File& file, double resampleToRate)
     if (reader == nullptr)
         return false;
 
+    const int  srcBits  = (int) reader->bitsPerSample;
+    const bool srcFloat = reader->usesFloatingPointData;
+
     juce::AudioBuffer<float> newBuffer((int) reader->numChannels, (int) reader->lengthInSamples);
     reader->read(&newBuffer, 0, (int) reader->lengthInSamples, 0, true, true);
 
@@ -122,6 +127,8 @@ bool AudioDocument::loadFromFile(const juce::File& file, double resampleToRate)
         buffer = std::move(newBuffer);
     }
     sampleRate = finalRate;
+    sourceBitDepth = srcBits;
+    sourceBitDepthFloat = srcFloat;
     selPacked.store(0, std::memory_order_relaxed);
     playhead = 0;
     loopStart = 0;

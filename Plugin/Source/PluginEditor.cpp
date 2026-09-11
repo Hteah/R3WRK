@@ -99,7 +99,8 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
     if (standaloneWindow)
     {
         macMenuBar = std::make_unique<StandaloneMenuBar>(toolbar);
-        juce::MenuBarModel::setMacMainMenu(macMenuBar.get());
+        const auto appleMenuItems = macMenuBar->getAppleMenuItems();   // JUCE copies this
+        juce::MenuBarModel::setMacMainMenu(macMenuBar.get(), &appleMenuItems);
     }
    #endif
 
