@@ -49,6 +49,13 @@ namespace EditActions
     void replaceRangeWith(AudioDocument& doc, juce::Range<int64_t> range, const juce::AudioBuffer<float>& newRegion,
                            const juce::String& actionName);
 
+    // Replaces `dest`'s entire content with `src`'s effective range (the selection, or the
+    // whole clip if none) as one ordinary undo step in `dest` -- unlike a fresh recording/load
+    // (AudioDocument::loadFromBuffer/loadFromFile), this does NOT call markAsOriginal(), so
+    // Undo in `dest` can walk back past it to whatever was open before. Used by the Black Box
+    // popup's "Load into Editor".
+    void loadFromDocument(AudioDocument& dest, const AudioDocument& src, const juce::String& actionName);
+
     // Writes the current effective range (the selection, or the whole clip if none) to `file`
     // in the container / rate / bit depth from `opts` (defaults: WAV / keep rate / 24-bit),
     // with the Speed/Pitch/Stretch knobs baked into the audio (see

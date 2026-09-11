@@ -1,6 +1,7 @@
 #include "EditorToolbar.h"
 #include "TimeStretchEngine.h"
 #include "ThemeEditor.h"
+#include "WaveformDisplay.h"
 
 #if JUCE_MAC
 // Opens JUCE's Audio/MIDI settings dialog. The real implementation lives in the patched
@@ -230,6 +231,71 @@ namespace
         AudioDocument& document;
         juce::Label title, hint;
         juce::Slider threshold;
+    };
+
+    //==============================================================================
+    // Black Box's ring-buffer length: a straight either/or (see R3WRKAudioProcessor::
+    // kBlackBoxDurationShort/Long), so a two-way radio pair reads more directly than a combo
+    // box would for just one choice. Writes straight through on click, like the threshold
+    // panel above -- both this track (immediately, via the processor) and the persisted
+    // default (via OutputSettings) for instances loaded from here on.
+    struct BlackBoxDurationPanel : juce::Component
+    {
+        BlackBoxDurationPanel(R3WRKAudioProcessor& proc, OutputSettings& os) : processor(proc), settings(os)
+        {
+            title.setText("Black Box Length", juce::dontSendNotification);
+            title.setFont(juce::FontOptions(14.0f, juce::Font::bold));
+
+            constexpr int radioGroupId = 9001;
+            shortButton.setRadioGroupId(radioGroupId);
+            longButton.setRadioGroupId(radioGroupId);
+            shortButton.setClickingTogglesState(true);
+            longButton.setClickingTogglesState(true);
+
+            const bool isShort = processor.getBlackBoxDurationSecs() < 195.0;
+            shortButton.setToggleState(isShort, juce::dontSendNotification);
+            longButton.setToggleState(! isShort, juce::dontSendNotification);
+
+            shortButton.onClick = [this] { apply(R3WRKAudioProcessor::kBlackBoxDurationShort); };
+            longButton.onClick  = [this] { apply(R3WRKAudioProcessor::kBlackBoxDurationLong); };
+
+            hint.setText("How far back Black Box keeps rolling. Applies to this track right "
+                        "away; new instances pick it up as their default from here on.",
+                        juce::dontSendNotification);
+            hint.setFont(juce::FontOptions(11.0f));
+            hint.setColour(juce::Label::textColourId, juce::Colours::grey);
+
+            addAndMakeVisible(title);
+            addAndMakeVisible(shortButton);
+            addAndMakeVisible(longButton);
+            addAndMakeVisible(hint);
+            setSize(300, 100);
+        }
+
+        void apply(double secs)
+        {
+            processor.setBlackBoxDurationSecs(secs);
+            settings.setBlackBoxDurationSecs(secs);
+        }
+
+        void resized() override
+        {
+            auto r = getLocalBounds().reduced(10);
+            title.setBounds(r.removeFromTop(18));
+            r.removeFromTop(6);
+            auto row = r.removeFromTop(26);
+            shortButton.setBounds(row.removeFromLeft(90));
+            row.removeFromLeft(8);
+            longButton.setBounds(row.removeFromLeft(90));
+            r.removeFromTop(6);
+            hint.setBounds(r);
+        }
+
+        R3WRKAudioProcessor& processor;
+        OutputSettings& settings;
+        juce::Label title, hint;
+        juce::TextButton shortButton { "90 sec" };
+        juce::TextButton longButton  { "5 min" };
     };
 
     //==============================================================================
@@ -465,13 +531,197 @@ namespace
         juce::Label title, formatLabel, rateLabel, depthLabel, hint;
         juce::ComboBox formatCombo, rateCombo, depthCombo;
     };
+
+    //==============================================================================
+    // Black Box: a live view onto the always-on ring buffer (PluginProcessor::
+    // getBlackBoxSnapshot), shown in its own throwaway AudioDocument so it gets a real
+    // WaveformDisplay for free -- drag-select to trim, drag the selection body out to Ableton
+    // or Finder, double-click to select all. applySnapshot() re-pulls from the ring every ~1s
+    // while idle (no selection), so the waveform keeps reading as "still recording" rather than
+    // a one-off freeze-frame; it stops re-pulling the moment a selection exists (mid-drag or
+    // committed/looping) so it can't yank the buffer out from under what you're doing with it.
+    struct BlackBoxPanel : juce::Component, private juce::Timer, private juce::ChangeListener
+    {
+        BlackBoxPanel(R3WRKAudioProcessor& proc, AudioDocument& targetDoc, OutputSettings& os,
+                     std::function<void()> loaded, std::function<void(juce::String)> status)
+            : processor(proc), targetDocument(targetDoc), settings(os),
+              onLoaded(std::move(loaded)), onStatusMessage(std::move(status))
+        {
+            title.setText("Black Box", juce::dontSendNotification);
+            title.setFont(juce::FontOptions(14.0f, juce::Font::bold));
+            caption.setFont(juce::FontOptions(11.0f));
+            caption.setColour(juce::Label::textColourId, juce::Colours::grey);
+            applySnapshot();
+
+            // Auditioning is automatic, not a button: any selection that commits (a real drag,
+            // an edge-resize, or double-click select-all -- see WaveformDisplay::
+            // onSelectionCommitted) starts looping that range; clearing the selection (a plain
+            // click) stops it -- caught via the document's change broadcast, since
+            // onSelectionCommitted deliberately doesn't fire for that (see its own comment).
+            waveform.onSelectionCommitted = [this] { startLoopFromSelection(); };
+            captureDoc.changeBroadcaster.addChangeListener(this);
+
+            loadButton.onClick = [this]
+            {
+                processor.stopBlackBoxPreview();
+                EditActions::loadFromDocument(targetDocument, captureDoc, "Load Black Box Capture");
+                if (onLoaded) onLoaded();
+                dismissEnclosingCallout(*this);
+            };
+            saveButton.onClick = [this] { saveAs(); };
+
+            addAndMakeVisible(title);
+            addAndMakeVisible(caption);
+            addAndMakeVisible(waveform);
+            addAndMakeVisible(loadButton);
+            addAndMakeVisible(saveButton);
+            setSize(520, 240);
+            startTimerHz(15);
+        }
+
+        ~BlackBoxPanel() override
+        {
+            captureDoc.changeBroadcaster.removeChangeListener(this);
+            processor.stopBlackBoxPreview();
+        }
+
+        // Pulls a fresh snapshot from the ring buffer into captureDoc and syncs the caption /
+        // Load / Save state to it. Called once up front, then again every ~1s by timerCallback()
+        // while idle, so the popup reads as "still recording" rather than a one-off freeze-
+        // frame -- see the class comment on why that stops the moment a selection exists.
+        void applySnapshot()
+        {
+            double sr = captureDoc.getSampleRate() > 0 ? captureDoc.getSampleRate() : 44100.0;
+            auto snapshot = processor.getBlackBoxSnapshot(sr);
+            const bool empty = snapshot.getNumSamples() <= 0;
+            captureDoc.loadFromBuffer(std::move(snapshot), sr);
+            if (! empty)
+                waveform.zoomToFit();   // keep showing the whole rolling window as it grows/shifts
+
+            caption.setText(empty ? "Nothing captured yet -- give it a few seconds of input"
+                                  : "Drag to select a piece to loop it (double-click for all); "
+                                    "click away to stop.",
+                           juce::dontSendNotification);
+            loadButton.setEnabled(! empty);
+            saveButton.setEnabled(! empty);
+        }
+
+        // Loops the effective range (the trim selection, or the whole ring from double-click
+        // select-all) straight out this track's output -- see PluginProcessor::
+        // startBlackBoxPreview()'s header comment on why that mutes anything else on the track
+        // for as long as it's looping. Re-selecting (a fresh drag or an edge-resize) restarts
+        // the loop from the new range; changeListenerCallback() below stops it once the
+        // selection is cleared.
+        void startLoopFromSelection()
+        {
+            const auto range = captureDoc.getEffectiveRange();
+            if (range.getLength() <= 0)
+                return;
+
+            juce::AudioBuffer<float> region(captureDoc.getNumChannels(), (int) range.getLength());
+            for (int ch = 0; ch < region.getNumChannels(); ++ch)
+                region.copyFrom(ch, 0, captureDoc.getBuffer(), ch, (int) range.getStart(), (int) range.getLength());
+
+            previewRangeStart = range.getStart();
+            captureDoc.isPlaying = true;
+            captureDoc.playhead = previewRangeStart;
+            processor.startBlackBoxPreview(std::move(region), captureDoc.getSampleRate());
+        }
+
+        void changeListenerCallback(juce::ChangeBroadcaster*) override
+        {
+            if (! captureDoc.hasSelection())
+                processor.stopBlackBoxPreview();
+        }
+
+        void timerCallback() override
+        {
+            const bool playing = processor.isBlackBoxPreviewPlaying();
+            captureDoc.isPlaying = playing;
+            if (playing)
+            {
+                captureDoc.playhead = previewRangeStart + processor.getBlackBoxPreviewPosition();
+                return;
+            }
+
+            if (captureDoc.hasSelection())
+                return;   // mid-drag (not yet committed) -- don't yank the buffer out from under it
+
+            // Idle: refresh from the ring buffer every ~1s (15 ticks at our 15Hz rate) rather
+            // than every tick -- a full document reload (undo history, view, etc.) is heavier
+            // than this needs to be to still read as "live".
+            if (++idleRefreshTicks >= 15)
+            {
+                idleRefreshTicks = 0;
+                applySnapshot();
+            }
+        }
+
+        void saveAs()
+        {
+            const auto opts = settings.saveOptions();
+            const auto name = juce::Time::getCurrentTime().formatted("Black Box %Y-%m-%d %H.%M.%S")
+                                + opts.extension();
+            const auto suggested = settings.folder().getChildFile(name).getNonexistentSibling();
+
+            fileChooser = std::make_unique<juce::FileChooser>("Save Black Box capture as " + opts.formatName(),
+                                                              suggested, "*" + opts.extension());
+            auto flags = juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
+                       | juce::FileBrowserComponent::warnAboutOverwriting;
+            fileChooser->launchAsync(flags, [this, opts](const juce::FileChooser& fc)
+            {
+                auto file = fc.getResult();
+                if (file == juce::File())
+                    return;
+                if (EditActions::exportSelection(captureDoc, file, opts))
+                {
+                    juce::Timer::callAfterDelay(200, [file] { file.revealToUser(); });
+                    if (onStatusMessage) onStatusMessage("Saved " + file.getFileName());
+                }
+                else if (onStatusMessage) onStatusMessage("Nothing to save");
+            });
+        }
+
+        void resized() override
+        {
+            auto r = getLocalBounds().reduced(10);
+            title.setBounds(r.removeFromTop(18));
+            r.removeFromTop(4);
+            caption.setBounds(r.removeFromTop(16));
+            r.removeFromTop(6);
+            auto buttons = r.removeFromBottom(26);
+            loadButton.setBounds(buttons.removeFromLeft(150));
+            buttons.removeFromLeft(8);
+            saveButton.setBounds(buttons.removeFromLeft(100));
+            r.removeFromBottom(8);
+            waveform.setBounds(r);
+        }
+
+        R3WRKAudioProcessor& processor;
+        AudioDocument& targetDocument;
+        OutputSettings& settings;
+        std::function<void()> onLoaded;
+        std::function<void(juce::String)> onStatusMessage;
+        int64_t previewRangeStart = 0;   // effective-range start the current/last preview played from
+        int idleRefreshTicks = 0;        // counts 15Hz ticks toward the next idle applySnapshot()
+
+        AudioDocument captureDoc;
+        WaveformDisplay waveform { captureDoc };
+        juce::Label title, caption;
+        juce::TextButton loadButton { "Load into Editor" };
+        juce::TextButton saveButton { "Save As..." };
+        std::unique_ptr<juce::FileChooser> fileChooser;
+
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(BlackBoxPanel)
+    };
 }
 
 //==============================================================================
 EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     : processor(proc), document(doc),
       standaloneApp(proc.wrapperType == juce::AudioProcessor::wrapperType_Standalone
-                    && R3WRKAudioProcessor::isDesktopCaptureSupported())
+                    && R3WRKAudioProcessor::isDesktopCaptureSupported()),
+      isPluginBuild(proc.wrapperType != juce::AudioProcessor::wrapperType_Standalone)
 {
     addAndMakeVisible(playFromStartButton);
     addAndMakeVisible(playButton);
@@ -488,6 +738,8 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
         addAndMakeVisible(desktopRecButton);
         addAndMakeVisible(captureOutButton);
     }
+    if (isPluginBuild)
+        addAndMakeVisible(blackBoxButton);
 
     timeLabel.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::plain));
     timeLabel.setJustificationType(juce::Justification::centredRight);
@@ -514,6 +766,14 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     captureOutButton.setTooltip("Capture Output -- records R3WRK's own output (stretch, pitch, "
                                 "filter, gain -- everything you hear) to a new file in the output "
                                 "folder. Press to start, press again to stop.");
+    // Duration wording is read once, here, from the processor's current setting -- stays
+    // accurate for a session where it's never changed (the common case); changing it via Tools
+    // "Black Box Length..." only refreshes the tooltip on the next editor open, not live.
+    blackBoxButton.setTooltip(
+        "Black Box -- always recording the last "
+        + juce::String(processor.getBlackBoxDurationSecs() < 195.0 ? "90 seconds" : "5 minutes")
+        + " of this track's input in the background, no arming needed. Click to review, trim, "
+          "and load, save, or drag out a take you forgot to hit Record for.");
 
     for (auto* b : { &playFromStartButton, &playButton,
                      static_cast<juce::TextButton*>(&loopButton), &scrubButton, &sliceButton,
@@ -548,6 +808,13 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
             if (onStatusMessage) onStatusMessage(m);
             updateTransportButtonText();
         };
+    }
+
+    if (isPluginBuild)
+    {
+        blackBoxButton.setLookAndFeel(&toolbarLnF);
+        blackBoxButton.setWantsKeyboardFocus(false);
+        blackBoxButton.onClick = [this] { showBlackBoxPopup(); };
     }
 
     recordButton.onClick        = [this] { toggleTransport(); };
@@ -642,6 +909,10 @@ EditorToolbar::~EditorToolbar()
         b->setLookAndFeel(nullptr);   // detach before toolbarLnF is destroyed
     desktopRecButton.setLookAndFeel(nullptr);
     captureOutButton.setLookAndFeel(nullptr);
+    blackBoxButton.setLookAndFeel(nullptr);
+    // The Black Box popup outlives this toolbar otherwise -- see blackBoxCallout's comment.
+    if (blackBoxCallout != nullptr)
+        blackBoxCallout->dismiss();
     processor.onDesktopStatus = nullptr;
     theme->removeChangeListener(this);
     document.changeBroadcaster.removeChangeListener(this);
@@ -713,6 +984,11 @@ void EditorToolbar::applyTheme()
     captureOutButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
     captureOutButton.setColour(juce::TextButton::textColourOffId, pal.recordButton);
 
+    // Black Box is passive and always running, not an urgent record action -- neutral outline
+    // like Tools, not the record red the explicit capture buttons use.
+    blackBoxButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+    blackBoxButton.setColour(juce::TextButton::textColourOffId, pal.screenText);
+
     // timeLabel's colour flips to pal.playhead while recording -- see timerCallback().
     timeLabel.setColour(juce::Label::textColourId, pal.screenTextDim);
     repaint();
@@ -727,8 +1003,9 @@ void EditorToolbar::paint(juce::Graphics& g)
 
     // A small vertical run of three dots, centred in the (widened, see resized()) gap between
     // two buttons, at each group boundary: [standalone] around the secondary recording group
-    // -- after Record/Auto-Record and before Reverse -- and, in every build, between the
-    // waveform tools (Slice) and the Tools menu. Matches the KnobRow section-divider mark.
+    // -- after Record/Auto-Record and before Reverse -- [plugin] around Black Box in the same
+    // spot -- and, in every build, between the waveform tools (Slice) and the Tools menu.
+    // Matches the KnobRow section-divider mark.
     g.setColour(theme->palette().screenText.withAlpha(0.45f));
     auto dotsBetween = [&](const juce::Component& left, const juce::Component& right)
     {
@@ -747,6 +1024,11 @@ void EditorToolbar::paint(juce::Graphics& g)
     {
         dotsBetween(autoRecordButton, desktopRecButton);
         dotsBetween(captureOutButton, scrubButton);
+    }
+    if (isPluginBuild)
+    {
+        dotsBetween(autoRecordButton, blackBoxButton);
+        dotsBetween(blackBoxButton, scrubButton);
     }
     dotsBetween(sliceButton, toolsButton);
 }
@@ -822,6 +1104,34 @@ void EditorToolbar::toggleOutputCapture()
         if (onStatusMessage) onStatusMessage("Capturing output\xE2\x80\xA6");   // "Capturing output…"
     }
     updateTransportButtonText();
+}
+
+void EditorToolbar::showBlackBoxPopup()
+{
+    if (! processor.isBlackBoxAvailable())
+    {
+        if (onStatusMessage) onStatusMessage("Black Box isn't available in this build");
+        return;
+    }
+
+    if (blackBoxCallout != nullptr)   // already open -- bring it to front instead of stacking a second one
+    {
+        blackBoxCallout->toFront(true);
+        return;
+    }
+
+    auto& callout = juce::CallOutBox::launchAsynchronously(
+        std::make_unique<BlackBoxPanel>(processor, document, *outputSettings,
+            [this]
+            {
+                currentFile = juce::File();
+                document.channelFocus = AudioDocument::ChannelFocus::stereo;
+                if (onSourceNameChanged) onSourceNameChanged({});
+                if (onStatusMessage) onStatusMessage("Loaded Black Box capture");
+            },
+            [this](juce::String m) { if (onStatusMessage) onStatusMessage(m); }),
+        blackBoxButton.getScreenBounds(), nullptr);
+    blackBoxCallout = &callout;
 }
 
 void EditorToolbar::togglePlay()
@@ -981,6 +1291,8 @@ void EditorToolbar::showToolsMenu()
         m.addItem(tmiOutputFolder, juce::String::fromUTF8("Output Folder\xE2\x80\xA6"));
         m.addItem(tmiTheme,        juce::String::fromUTF8("Theme\xE2\x80\xA6"));
         m.addItem(tmiAutoRecordThreshold, juce::String::fromUTF8("Auto-Record Threshold\xE2\x80\xA6"));
+        if (processor.isBlackBoxAvailable())
+            m.addItem(tmiBlackBoxDuration, juce::String::fromUTF8("Black Box Length\xE2\x80\xA6"));
         m.addSeparator();
     }
     m.addItem(keyed("Undo", tmiUndo, canUndo, cmd + "Z"));
@@ -1149,6 +1461,7 @@ void EditorToolbar::performToolsItem(int r)
             break;
         case tmiTheme:        showThemeCallout();        break;
         case tmiAutoRecordThreshold: showAutoRecordThresholdCallout(); break;
+        case tmiBlackBoxDuration: showBlackBoxDurationCallout(); break;
         case tmiUndo:      doUndo(); break;
         case tmiRedo:      doRedo(); break;
         default: break;
@@ -1233,6 +1546,12 @@ void EditorToolbar::showThemeCallout()
 void EditorToolbar::showAutoRecordThresholdCallout()
 {
     juce::CallOutBox::launchAsynchronously(std::make_unique<AutoRecordThresholdPanel>(document),
+                                           toolsButton.getScreenBounds(), nullptr);
+}
+
+void EditorToolbar::showBlackBoxDurationCallout()
+{
+    juce::CallOutBox::launchAsynchronously(std::make_unique<BlackBoxDurationPanel>(processor, *outputSettings),
                                            toolsButton.getScreenBounds(), nullptr);
 }
 
@@ -1534,19 +1853,22 @@ void EditorToolbar::resized()
     auto add = [&](juce::Component& c, int rightMargin = 16) { addWide(c, 28, rightMargin); };
     // Order set by the user: transport (Play-from-start, Play, Loop) -> primary record
     // (Record, Auto-Record) -> secondary record (Record Desktop, Capture Output; standalone
-    // only) -> waveform tools (Scrub, Slice) -> Tools menu -> Clear, with the time readout
-    // pinned right. All round icon buttons. paint() drops a divider dot in each widened
-    // (gap + dotGap) gap. (Follow-playhead moved to the header row -- see PluginEditor.)
+    // only -- or Black Box; plugin only) -> waveform tools (Scrub, Slice) -> Tools menu ->
+    // Clear, with the time readout pinned right. All round icon buttons. paint() drops a
+    // divider dot in each widened (gap + dotGap) gap. (Follow-playhead moved to the header
+    // row -- see PluginEditor.)
     add(playFromStartButton);
     add(playButton);
     add(loopButton);
     add(recordButton);
-    add(autoRecordButton, standaloneApp ? gap + dotGap : gap);   // dot before Record Desktop
+    add(autoRecordButton, (standaloneApp || isPluginBuild) ? gap + dotGap : gap);   // dot before the next section
     if (standaloneApp)
     {
         add(desktopRecButton);
         add(captureOutButton, gap + dotGap);                     // dot before Scrub
     }
+    if (isPluginBuild)
+        add(blackBoxButton, gap + dotGap);                       // dot before Scrub
     add(scrubButton);
     add(sliceButton, gap + dotGap);                              // dot before Tools
     add(toolsButton);

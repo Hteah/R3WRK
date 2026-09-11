@@ -81,6 +81,12 @@ public:
     // resampled on load so it plays back at the correct pitch/speed in the host.
     bool loadFromFile(const juce::File& file, double resampleToRate = 0.0);
 
+    // Loads `newBuffer` directly as a fresh document -- same bookkeeping as loadFromFile()
+    // (resets playhead/loop/knobs, clears undo history, marks this as the new "Revert to
+    // Original" floor) but skips the file I/O. Used to seed a throwaway AudioDocument from
+    // in-memory audio, e.g. the Black Box popup's ring-buffer snapshot.
+    void loadFromBuffer(juce::AudioBuffer<float> newBuffer, double sr, int bitDepth = 32, bool isFloat = true);
+
     // Writes the stored audio to `file`. The Speed/Pitch/Stretch knobs are always baked into
     // the written audio (renderWithPlaybackKnobs -- a no-op copy when they're centred), so the
     // file matches what you hear; the in-memory document and the knobs are left untouched.

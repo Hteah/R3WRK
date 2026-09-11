@@ -10,7 +10,7 @@
 /**
     A single control strip below the waveform:
 
-        ⏮ Play · Loop · Record · Auto-Record · Tools · Scrub · Reverse · Clear    ···    time
+        ⏮ Play · Loop · Record · Auto-Record  ···  Black Box · Tools · Scrub · Reverse · Clear    ···    time
 
     Everything else — file ops, clipboard, region processing, stretch/pitch,
     export selection, undo/redo — lives in the "Tools" pop-up menu.
@@ -58,6 +58,7 @@ public:
     void toggleTransport();   // Record button: record if idle, else stop
     void toggleDesktopRecording();   // Standalone-only "Record Desktop" button: system-audio capture on/off
     void toggleOutputCapture();      // Standalone-only "Capture Output" button: tap the playback output to a WAV
+    void showBlackBoxPopup();        // Plugin-only "Black Box" button: review/trim the rolling 90s background capture
     void togglePlay();        // Space: play if idle, else stop
     void playFromStart();     // restarts playback at sample 0 (region-snapped, see processBlock)
 
@@ -86,7 +87,7 @@ public:
         tmiNormalize, tmiAmplify, tmiFadeIn, tmiFadeOut, tmiReverse,
         tmiStretch, tmiExportSel,
         tmiSliceToFolder, tmiExportOt, tmiClearSlices,
-        tmiOutputFolder, tmiTheme, tmiAutoRecordThreshold, tmiAudioSettings,
+        tmiOutputFolder, tmiTheme, tmiAutoRecordThreshold, tmiAudioSettings, tmiBlackBoxDuration,
         tmiUndo, tmiRedo
     };
 
@@ -123,6 +124,7 @@ private:
     void showInsertSilenceCallout(juce::Rectangle<int> screenTargetArea);   // duration slider -> insert at playhead
     void showThemeCallout();
     void showAutoRecordThresholdCallout();
+    void showBlackBoxDurationCallout();   // Tools (plugin builds only): pick 90 sec / 5 min for the Black Box ring buffer
     void chooseOutputFolder();
     void exportSelectionToFolder();
     void sliceToFolder();          // Tools: write each region between slice markers as its own WAV
@@ -138,6 +140,12 @@ private:
 
     // "Record Desktop" / "Capture Output" only exist in the Standalone app. Set once in the ctor.
     const bool standaloneApp;
+
+    // "Black Box" only exists in the plugin (VST/AU/etc.) wrapper -- Standalone already has
+    // Record Desktop / Capture Output as its own explicit safety nets. Deliberately not just
+    // `! standaloneApp`: that flag is ANDed with desktop-capture support, so it would
+    // (incorrectly) show Black Box in a Standalone build on a machine without ScreenCaptureKit.
+    const bool isPluginBuild;
     double captureStartMs = 0.0;   // wall-clock start of the current output capture, for the "● CAP m:ss" readout
 
     // The file the document is currently backed by (last opened / last Save As / last
@@ -178,11 +186,23 @@ private:
     juce::TextButton captureOutButton { R3WRKLookAndFeel::iconCaptureOut };  // Standalone only -- taps the
                                                                             // processed playback output to a
                                                                             // WAV in the output folder
+    juce::TextButton blackBoxButton { R3WRKLookAndFeel::iconBlackBox };  // Plugin only -- opens a popup onto
+                                                                         // the always-on rolling 90s background
+                                                                         // capture (see showBlackBoxPopup)
     juce::TextButton toolsButton   { R3WRKLookAndFeel::iconTools };    // opens the Tools ▾ pop-up menu
     juce::TextButton clearButton   { R3WRKLookAndFeel::iconClear };    // empties the waveform and resets
                                                                        // Pitch/Speed/Stretch/Start/End
 
     std::unique_ptr<juce::FileChooser> fileChooser;
+
+    // The Black Box popup is a CallOutBox launched with no parent component (like every other
+    // popup here), so it's a top-level desktop window -- closing the plugin editor doesn't
+    // touch it on its own. Unlike the others, it's meant to be left open while you keep
+    // playing, so it's the one actually likely to still be open when that happens. This tracks
+    // it (a SafePointer -- it self-deletes on dismiss/click-away, so a raw pointer would dangle)
+    // so showBlackBoxPopup() can bring an already-open one to front instead of stacking a
+    // second, and the destructor can dismiss it rather than leave it orphaned.
+    juce::Component::SafePointer<juce::CallOutBox> blackBoxCallout;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(EditorToolbar)
 };

@@ -8,6 +8,7 @@ namespace
     const juce::String kSaveDepthKey   = "saveBitDepth";
     const juce::String kFloatOnTopKey  = "floatOnTop";
     const juce::String kInsertSilenceKey = "insertSilenceSecs";
+    const juce::String kBlackBoxDurationKey = "blackBoxDurationSecs";
 
     juce::File defaultFolder()
     {
@@ -96,5 +97,18 @@ double OutputSettings::insertSilenceSecs()
 void OutputSettings::setInsertSilenceSecs(double secs)
 {
     props().setValue(kInsertSilenceKey, juce::jlimit(0.01, 60.0, secs));
+    props().saveIfNeeded();
+}
+
+double OutputSettings::blackBoxDurationSecs()
+{
+    // Snap to the nearest of the two offered choices (90 / 300) rather than trust a raw
+    // stored value -- defends against a hand-edited or otherwise stray prefs value.
+    return props().getDoubleValue(kBlackBoxDurationKey, 300.0) < 195.0 ? 90.0 : 300.0;
+}
+
+void OutputSettings::setBlackBoxDurationSecs(double secs)
+{
+    props().setValue(kBlackBoxDurationKey, secs < 195.0 ? 90.0 : 300.0);
     props().saveIfNeeded();
 }

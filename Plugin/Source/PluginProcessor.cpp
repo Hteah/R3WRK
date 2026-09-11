@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "OutputSettings.h"
 #include <rubberband/RubberBandStretcher.h>
 #include <algorithm>
 #include <cmath>
@@ -26,6 +27,10 @@ R3WRKAudioProcessor::R3WRKAudioProcessor()
                           .withOutput("Output", juce::AudioChannelSet::stereo(), true))
 {
     document.newEmptyDocument(2, 44100.0);
+
+    // Seed this instance's Black Box duration from the persisted preference -- see
+    // setBlackBoxDurationSecs()'s header comment on why that's not kept live across instances.
+    blackBoxDurationSecs = juce::SharedResourcePointer<OutputSettings>()->blackBoxDurationSecs();
 }
 
 R3WRKAudioProcessor::~R3WRKAudioProcessor() = default;
@@ -42,6 +47,8 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     currentSampleRate = sampleRate;
     if (document.isEmpty())
         document.setSampleRate(sampleRate);
+
+    reallocateBlackBoxBuffer();
 
     rtChannels = juce::jlimit(1, 2, juce::jmax(1, getMainBusNumOutputChannels()));
 
@@ -373,6 +380,21 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     const int numSamples = buffer.getNumSamples();
     const int numCh = buffer.getNumChannels();
 
+    // Black Box: taps the raw input exactly as it arrives, before anything below (recording,
+    // playback, the desktop-capture bypass) touches `buffer` -- a passive capture of whatever's
+    // coming into this track, independent of what R3WRK itself is doing with it.
+    if (blackBoxCapacity > 0)
+        appendToBlackBox(buffer, numCh, numSamples);
+
+    // Black Box preview (Play in the popup): takes over the output entirely, same as the
+    // desktop-recording bypass just below -- see startBlackBoxPreview()'s header comment.
+    if (blackBoxPreviewPlaying.load(std::memory_order_relaxed))
+    {
+        renderBlackBoxPreview(buffer, numCh, numSamples);
+        wasPlaying = false;
+        return;
+    }
+
     if (desktopRecording.load(std::memory_order_relaxed))
     {
         // ScreenCaptureKit is doing the capture on its own queue (appendDesktopSamples) --
@@ -635,6 +657,145 @@ void R3WRKAudioProcessor::captureOutput(const juce::AudioBuffer<float>& out, int
     for (int c = 0; c < ch; ++c)
         outputCaptureBuffer.copyFrom(c, (int) outputCaptureWritePos, out, juce::jmin(c, numCh - 1), 0, numSamples);
     outputCaptureWritePos += numSamples;
+}
+
+// Black Box: VST/AU only (see the header comment on isBlackBoxAvailable()). Reallocating
+// always drops whatever the ring currently holds -- same trade-off a sample-rate change
+// already made before duration became adjustable, and losing the last take's-worth of
+// history on a rare mid-session change (or a duration switch) is an acceptable cost for not
+// carrying resampling/splicing machinery just for this.
+void R3WRKAudioProcessor::reallocateBlackBoxBuffer()
+{
+    if (wrapperType == wrapperType_Standalone)
+        return;
+
+    const int chans = juce::jmax(1, getTotalNumInputChannels());
+    const int capacity = (int) (blackBoxDurationSecs * currentSampleRate);
+    const juce::ScopedLock sl(blackBoxLock);
+    blackBoxBuffer.setSize(chans, capacity, false, true, true);
+    blackBoxBuffer.clear();
+    blackBoxCapacity = capacity;
+    blackBoxWritePos.store(0, std::memory_order_relaxed);
+}
+
+void R3WRKAudioProcessor::setBlackBoxDurationSecs(double secs)
+{
+    blackBoxDurationSecs = secs < 195.0 ? kBlackBoxDurationShort : kBlackBoxDurationLong;   // snap to a valid choice
+    reallocateBlackBoxBuffer();
+}
+
+void R3WRKAudioProcessor::appendToBlackBox(const juce::AudioBuffer<float>& buffer, int numCh, int numSamples)
+{
+    if (numSamples <= 0 || numCh <= 0)
+        return;
+    if (! blackBoxLock.tryEnter())   // the UI is mid-snapshot -- drop this block, never block here
+        return;
+
+    const int chans = juce::jmin(numCh, blackBoxBuffer.getNumChannels());
+    const int64_t pos = blackBoxWritePos.load(std::memory_order_relaxed);
+
+    for (int ch = 0; ch < chans; ++ch)
+    {
+        const float* src = buffer.getReadPointer(ch);
+        int done = 0;
+        while (done < numSamples)
+        {
+            const int writeIdx = (int) ((pos + done) % blackBoxCapacity);
+            const int chunk = juce::jmin(numSamples - done, blackBoxCapacity - writeIdx);
+            blackBoxBuffer.copyFrom(ch, writeIdx, src + done, chunk);
+            done += chunk;
+        }
+    }
+    blackBoxWritePos.store(pos + numSamples, std::memory_order_relaxed);
+    blackBoxLock.exit();
+}
+
+juce::AudioBuffer<float> R3WRKAudioProcessor::getBlackBoxSnapshot(double& sampleRateOut) const
+{
+    const juce::ScopedLock sl(blackBoxLock);
+    sampleRateOut = currentSampleRate;
+
+    if (blackBoxCapacity <= 0)
+        return {};
+
+    const int64_t pos = blackBoxWritePos.load(std::memory_order_relaxed);
+    const int filled = (int) juce::jmin<int64_t>(pos, blackBoxCapacity);
+    juce::AudioBuffer<float> out(blackBoxBuffer.getNumChannels(), filled);
+    if (filled == 0)
+        return out;
+
+    if (pos <= blackBoxCapacity)
+    {
+        // Hasn't wrapped yet -- everything written so far is already in chronological order
+        // starting at 0.
+        for (int ch = 0; ch < out.getNumChannels(); ++ch)
+            out.copyFrom(ch, 0, blackBoxBuffer, ch, 0, filled);
+    }
+    else
+    {
+        // Wrapped at least once: the oldest surviving sample sits right where the next write
+        // will land. Unwrap into chronological order: [startIdx..end) then [0..startIdx).
+        const int startIdx = (int) (pos % blackBoxCapacity);
+        const int tail = blackBoxCapacity - startIdx;
+        for (int ch = 0; ch < out.getNumChannels(); ++ch)
+        {
+            out.copyFrom(ch, 0,    blackBoxBuffer, ch, startIdx, tail);
+            out.copyFrom(ch, tail, blackBoxBuffer, ch, 0,        startIdx);
+        }
+    }
+    return out;
+}
+
+void R3WRKAudioProcessor::startBlackBoxPreview(juce::AudioBuffer<float> audio, double sourceRate)
+{
+    const juce::ScopedLock sl(blackBoxLock);
+    blackBoxPreviewPlaying.store(false, std::memory_order_relaxed);   // stop any current preview first
+    blackBoxPreviewBuffer = (sourceRate > 0.0 && std::abs(sourceRate - currentSampleRate) > 0.5)
+                           ? AudioDocument::resampled(audio, sourceRate, currentSampleRate)
+                           : std::move(audio);
+    blackBoxPreviewPos.store(0, std::memory_order_relaxed);
+    blackBoxPreviewPlaying.store(blackBoxPreviewBuffer.getNumSamples() > 0, std::memory_order_relaxed);
+}
+
+void R3WRKAudioProcessor::stopBlackBoxPreview()
+{
+    blackBoxPreviewPlaying.store(false, std::memory_order_relaxed);
+}
+
+void R3WRKAudioProcessor::renderBlackBoxPreview(juce::AudioBuffer<float>& out, int numCh, int numSamples)
+{
+    if (! blackBoxLock.tryEnter())   // the message thread is mid-(re)start -- silence this block rather than block
+    {
+        out.clear();
+        return;
+    }
+
+    const int totalCh = blackBoxPreviewBuffer.getNumChannels();
+    const int64_t len = blackBoxPreviewBuffer.getNumSamples();
+    int64_t pos = blackBoxPreviewPos.load(std::memory_order_relaxed);
+
+    if (len <= 0 || totalCh <= 0)
+    {
+        blackBoxPreviewPlaying.store(false, std::memory_order_relaxed);
+        out.clear();
+        blackBoxLock.exit();
+        return;
+    }
+
+    // Loops for as long as the popup's selection stays put -- see startBlackBoxPreview()'s
+    // header comment. No crossfade at the wrap; a hard loop is the point (quick audition of
+    // whatever's selected), not a polished loop point the way the main document's loop
+    // crossfade is for actual playback.
+    for (int i = 0; i < numSamples; ++i)
+    {
+        if (pos >= len)
+            pos = 0;
+        for (int ch = 0; ch < numCh; ++ch)
+            out.setSample(ch, i, blackBoxPreviewBuffer.getSample(juce::jmin(ch, totalCh - 1), (int) pos));
+        ++pos;
+    }
+    blackBoxPreviewPos.store(pos, std::memory_order_relaxed);
+    blackBoxLock.exit();
 }
 
 void R3WRKAudioProcessor::startOutputCapture()

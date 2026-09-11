@@ -265,6 +265,23 @@ void replaceRangeWith(AudioDocument& doc, juce::Range<int64_t> range, const juce
     doc.commitChange(std::move(spliced), actionName);
 }
 
+void loadFromDocument(AudioDocument& dest, const AudioDocument& src, const juce::String& actionName)
+{
+    const auto range = src.getEffectiveRange();
+    if (range.getLength() <= 0)
+        return;
+
+    auto newBuffer = extractRange(src.getBuffer(), range.getStart(), range.getEnd());
+
+    dest.beginChange();
+    dest.setSampleRate(src.getSampleRate());
+    dest.commitChange(std::move(newBuffer), actionName);
+    dest.clearSelection();
+    dest.loopStart = 0;
+    dest.loopEnd = dest.getNumSamples();
+    dest.channelFocus = AudioDocument::ChannelFocus::stereo;
+}
+
 bool exportSelection(const AudioDocument& doc, const juce::File& file, AudioSaveOptions opts)
 {
     auto range = doc.getEffectiveRange();

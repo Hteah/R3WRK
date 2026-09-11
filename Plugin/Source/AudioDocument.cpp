@@ -122,13 +122,19 @@ bool AudioDocument::loadFromFile(const juce::File& file, double resampleToRate)
         finalRate = resampleToRate;
     }
 
+    loadFromBuffer(std::move(newBuffer), finalRate, srcBits, srcFloat);
+    return true;
+}
+
+void AudioDocument::loadFromBuffer(juce::AudioBuffer<float> newBuffer, double sr, int bitDepth, bool isFloat)
+{
     {
         const juce::ScopedLock sl(bufferLock);
         buffer = std::move(newBuffer);
     }
-    sampleRate = finalRate;
-    sourceBitDepth = srcBits;
-    sourceBitDepthFloat = srcFloat;
+    sampleRate = sr;
+    sourceBitDepth = bitDepth;
+    sourceBitDepthFloat = isFloat;
     selPacked.store(0, std::memory_order_relaxed);
     playhead = 0;
     loopStart = 0;
@@ -143,7 +149,6 @@ bool AudioDocument::loadFromFile(const juce::File& file, double resampleToRate)
     markAsOriginal();
     ++bufferVersion;
     notifyChanged();
-    return true;
 }
 
 bool AudioDocument::timePitchKnobsEngaged() const

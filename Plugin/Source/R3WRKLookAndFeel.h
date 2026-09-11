@@ -48,6 +48,7 @@ public:
     static constexpr const char* iconDesktopRec    = "icon:desktopRec";     // a monitor/display outline + record dot
     static constexpr const char* iconFloatTop      = "icon:floatTop";       // pip.enter -- window + corner box + arrow (float on top)
     static constexpr const char* iconCaptureOut    = "icon:captureOut";     // record dot + down arrow (capture the output to a file)
+    static constexpr const char* iconBlackBox      = "icon:blackBox";       // rounded box + record dot (VST/AU always-on background capture)
 
     void drawButtonText(juce::Graphics&, juce::TextButton&,
                        bool isMouseOverButton, bool isButtonDown) override;

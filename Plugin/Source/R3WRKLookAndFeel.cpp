@@ -424,6 +424,21 @@ namespace
         head.addTriangle (cx - aw, shaftBot, cx + aw, shaftBot, cx, a.getBottom());
         g.fillPath (head);
     }
+
+    // Black Box: a rounded rectangle (the flight-recorder box) with a record dot inside --
+    // reads as "quietly, continuously capturing" rather than an urgent record action, so it's
+    // an outline only, no red -- see its neutral colour treatment in the .cpp constructor.
+    void drawBlackBoxIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
+    {
+        auto a = bounds.reduced (bounds.getHeight() * 0.24f);
+        const float stroke = juce::jmax (1.4f, a.getHeight() * 0.11f);
+
+        g.setColour (ink);
+        g.drawRoundedRectangle (a.reduced (stroke * 0.5f), a.getHeight() * 0.18f, stroke);
+
+        const float r = juce::jmin (a.getWidth(), a.getHeight()) * 0.20f;
+        g.fillEllipse (a.getCentreX() - r, a.getCentreY() - r, r * 2.0f, r * 2.0f);
+    }
 }
 
 void R3WRKLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int width, int height,
@@ -508,7 +523,7 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
         && text != iconPlayFromStart && text != iconTools && text != iconScrub
         && text != iconReverse && text != iconClear && text != iconAutoRecord
         && text != iconSlice && text != iconFollow && text != iconDesktopRec
-        && text != iconFloatTop && text != iconCaptureOut)
+        && text != iconFloatTop && text != iconCaptureOut && text != iconBlackBox)
     {
         juce::LookAndFeel_V4::drawButtonText(g, button, isMouseOverButton, isButtonDown);
         return;
@@ -563,6 +578,11 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     if (text == iconCaptureOut)
     {
         drawCaptureOutIcon(g, bounds, ink);
+        return;
+    }
+    if (text == iconBlackBox)
+    {
+        drawBlackBoxIcon(g, bounds, ink);
         return;
     }
     if (text == iconReverse)

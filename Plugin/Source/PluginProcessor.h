@@ -64,6 +64,42 @@ public:
     juce::File stopOutputCaptureAndWrite(const juce::File& dest, const AudioSaveOptions& opts);
     bool isCapturingOutput() const { return capturingOutput.load(std::memory_order_relaxed); }
 
+    // "Black Box" (VST/AU only): a ring buffer that always records this track's raw input in
+    // the background, no arming needed -- see appendToBlackBox(), called at the very top of
+    // processBlock(). isBlackBoxAvailable() is false in the Standalone app (it already has
+    // Record Desktop / Capture Output as its own explicit safety nets, and there's no "track
+    // input" to a Standalone instance the way there is to a plugin insert).
+    // getBlackBoxSnapshot() hands the popup a chronological (oldest-first) copy of whatever's
+    // currently in the ring, up to the full getBlackBoxDurationSecs() once it has wrapped at
+    // least once; safe to call from the message thread.
+    bool isBlackBoxAvailable() const { return blackBoxCapacity > 0; }
+    juce::AudioBuffer<float> getBlackBoxSnapshot(double& sampleRateOut) const;
+
+    // Ring length: 90 seconds or 5 minutes (kBlackBoxDurationShort/Long -- see
+    // EditorToolbar's BlackBoxDurationPanel, the only place that offers a choice between
+    // them), persisted in OutputSettings and read into a fresh instance's default at
+    // construction. setBlackBoxDurationSecs() reallocates the ring immediately (dropping
+    // whatever it currently holds -- same trade-off a sample-rate change already makes, see
+    // prepareToPlay()), so a change from the popup takes effect on this track right away;
+    // other already-loaded instances pick it up next time they're prepared, not live.
+    static constexpr double kBlackBoxDurationShort = 90.0;
+    static constexpr double kBlackBoxDurationLong  = 300.0;
+    double getBlackBoxDurationSecs() const { return blackBoxDurationSecs; }
+    void setBlackBoxDurationSecs(double secs);
+
+    // Auditioning in the Black Box popup: whenever a selection commits there, it starts
+    // looping that range straight out this track's output -- the same trade-off Record
+    // Desktop / Capture Output already make, taking over processBlock() entirely (see
+    // renderBlackBoxPreview()'s branch), so the track's normal output is muted for as long as
+    // it loops. Resamples to the current rate first if `sourceRate` differs. Loops forever
+    // until stopBlackBoxPreview() (clearing the selection, or the popup closing); the popup
+    // polls isBlackBoxPreviewPlaying()/getBlackBoxPreviewPosition() to keep its waveform's
+    // playhead following along.
+    void startBlackBoxPreview(juce::AudioBuffer<float> audio, double sourceRate);
+    void stopBlackBoxPreview();
+    bool isBlackBoxPreviewPlaying() const { return blackBoxPreviewPlaying.load(std::memory_order_relaxed); }
+    int64_t getBlackBoxPreviewPosition() const { return blackBoxPreviewPos.load(std::memory_order_relaxed); }
+
     // Live playback knobs (Speed/Pitch/Stretch) live on `document` now -- see
     // AudioDocument.h -- so the views can read them too, not just the audio thread. All
     // three are realised by a real-time RubberBand stretcher on the playback stream; the
@@ -99,6 +135,31 @@ private:
     juce::AudioBuffer<float> outputCaptureBuffer;
     int64_t outputCaptureWritePos = 0;
     void captureOutput(const juce::AudioBuffer<float>& out, int numCh, int numSamples);
+
+    // Black Box: audio-thread-written, message-thread-read ring buffer. blackBoxLock guards
+    // blackBoxBuffer against the audio thread's writer -- appendToBlackBox() only ever
+    // tryEnter()s it, so the audio thread never blocks; on the rare contended call (the UI
+    // taking a snapshot) it just drops that one block rather than risk a priority inversion.
+    // blackBoxCapacity is 0 in the Standalone app (allocation skipped in reallocateBlackBoxBuffer()),
+    // which doubles as isBlackBoxAvailable()'s flag.
+    double blackBoxDurationSecs = kBlackBoxDurationLong;   // see setBlackBoxDurationSecs()
+    mutable juce::CriticalSection blackBoxLock;   // mutable: getBlackBoxSnapshot() locks it from a const method
+    juce::AudioBuffer<float> blackBoxBuffer;
+    std::atomic<int64_t> blackBoxWritePos { 0 };   // total samples ever written; physical index
+                                                    // is this value mod blackBoxCapacity
+    int blackBoxCapacity = 0;                      // samples per channel; 0 = disabled
+    void reallocateBlackBoxBuffer();   // (re)sizes blackBoxBuffer for blackBoxDurationSecs at
+                                       // currentSampleRate -- called from prepareToPlay() and
+                                       // setBlackBoxDurationSecs()
+    void appendToBlackBox(const juce::AudioBuffer<float>& buffer, int numCh, int numSamples);
+
+    // Black Box preview playback (see startBlackBoxPreview()). Also guarded by blackBoxLock --
+    // start/stop happen on the message thread while renderBlackBoxPreview() reads it on the
+    // audio thread each block.
+    juce::AudioBuffer<float> blackBoxPreviewBuffer;
+    std::atomic<int64_t> blackBoxPreviewPos { 0 };
+    std::atomic<bool> blackBoxPreviewPlaying { false };
+    void renderBlackBoxPreview(juce::AudioBuffer<float>& out, int numCh, int numSamples);
 
     //==============================================================================
     // Real-time pitch/tape engine, rebuilt in prepareToPlay().
