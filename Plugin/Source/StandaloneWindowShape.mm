@@ -98,6 +98,23 @@ static void r3wrkReassertFloatLevel()
         g_floatWindow.level = NSFloatingWindowLevel;
     if ((g_floatWindow.collectionBehavior & kFloatCollectionBits) != kFloatCollectionBits)
         g_floatWindow.collectionBehavior |= kFloatCollectionBits;
+
+    // Don't steal the front spot from one of the app's OWN other windows -- Audio Settings, a
+    // file chooser, a CallOutBox, an alert -- while it's genuinely the one in front and key.
+    // Without this check, the NSWindowDidBecomeKeyNotification observer below fired the instant
+    // any such window opened (it becoming key *is* the notification) and immediately re-lifted
+    // the floating main window in front of it; the 1 s keep-alive timer then kept doing that
+    // every second for as long as the other window stayed open, burying it permanently -- e.g.
+    // opening Audio Settings while Float on Top was on made the settings dialog flash and
+    // vanish, over and over, with no way to interact with it. Only re-lift g_floatWindow when
+    // nothing else in the app currently wants to be key; once that other window closes, the key
+    // window reverts to g_floatWindow itself (or nil), the very next trigger reasserts normally,
+    // and the legitimate cases this exists for -- Spaces switches, full-screen toggles, coming
+    // back from another app -- are untouched, since none of them leave a sibling window key.
+    NSWindow* key = NSApp.keyWindow;
+    if (key != nil && key != g_floatWindow)
+        return;
+
     [g_floatWindow orderFrontRegardless];   // re-lift without activating the app / stealing focus
 }
 
