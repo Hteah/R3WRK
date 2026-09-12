@@ -38,10 +38,42 @@ private:
     void changeListenerCallback(juce::ChangeBroadcaster*) override;   // theme changed
     void applyTheme();
 
+    // A rotary Slider that pins the cursor to itself for the whole drag gesture, instead of
+    // letting the real cursor travel across the screen.
+    //
+    // Plain Slider only offers two drag modes, and neither is quite right for a small knob
+    // sitting above other draggable UI (here, the waveform): absolute mode (the default) maps
+    // *distance* from the click point to value -- precise and direct, but with a real,
+    // visibly-travelling cursor that a big knob swing (JUCE's default full-range drag extent
+    // is ~250px) easily carries off the knob and onto whatever's underneath; velocity mode
+    // hides the cursor, but maps drag *speed* to value instead of distance, which feels
+    // comparatively vague and laggy for careful adjustments -- turning down a filter knob
+    // slowly barely registers, then a slightly faster nudge overshoots.
+    //
+    // This gets both: enabling unbounded mouse movement doesn't change how Slider computes
+    // the drag at all -- it only changes what MouseEvent::position *reports*. Once engaged,
+    // JUCE keeps the OS cursor pinned near the component (hidden, warped back to centre
+    // whenever it would leave) while accumulating the movement that would have happened, and
+    // hands that accumulated position to mouseDrag instead of the pinned real one. Slider's
+    // own absolute-drag math reads that position exactly as before, so the feel -- and the
+    // skew/interval/rotary-wrap handling that math already does correctly -- is untouched;
+    // only the cursor's visible travel disappears.
+    struct PinnedDragSlider : public juce::Slider
+    {
+        using juce::Slider::Slider;
+
+        void mouseDown(const juce::MouseEvent& e) override
+        {
+            juce::Slider::mouseDown(e);
+            if (isMouseButtonDown())
+                e.source.enableUnboundedMouseMovement(true, false);
+        }
+    };
+
     struct Knob
     {
-        juce::Label  caption;
-        juce::Slider slider;
+        juce::Label       caption;
+        PinnedDragSlider  slider;
         std::function<void(double)> apply;   // slider value -> model  (user turns only)
         std::function<double()>     pull;    // model -> slider value  (external changes)
         double lastPulled = std::numeric_limits<double>::quiet_NaN();

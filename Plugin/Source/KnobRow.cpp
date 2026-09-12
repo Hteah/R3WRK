@@ -283,6 +283,7 @@ KnobRow::Knob& KnobRow::addKnob(const juce::String& name)
     k->slider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
     k->slider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 68, 14);
     k->slider.setLookAndFeel(&knobLnF);
+    // Cursor stays pinned to the knob for the whole drag -- see PinnedDragSlider's comment.
 
     Knob* kp = k;
     k->slider.onValueChange = [kp] { if (kp->apply) kp->apply(kp->slider.getValue()); };
