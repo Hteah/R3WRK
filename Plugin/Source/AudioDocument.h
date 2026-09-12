@@ -391,12 +391,16 @@ public:
     //==============================================================================
     // Live, uncommitted preview of a pending Amplify or Stretch/Pitch edit -- set while the
     // corresponding pop-up panel's slider is being dragged (right-click a selection in
-    // WaveformDisplay, or Tools ▾), cleared when the panel closes. Message-thread only (the
-    // audio thread never reads these), so plain fields rather than atomics. EditActions and
-    // the real buffer are untouched until "Apply" -- WaveformDisplay reads these only to draw
-    // a live preview over the selection so an adjustment shows before it's committed.
-    bool previewActive = false;
-    float previewGainLinear = 1.0f;      // Amplify preview: linear gain for the selection's peaks
+    // WaveformDisplay, or Tools ▾), cleared when the panel closes. EditActions and the real
+    // buffer are untouched until "Apply" -- WaveformDisplay reads these to draw a live preview
+    // over the selection so an adjustment shows before it's committed, and (previewActive/
+    // previewGainLinear only) PluginProcessor's playback path reads them too, so an Amplify
+    // adjustment is *heard* as well as seen -- see AmplifyPanel's audition loop and
+    // processBlock's previewActive handling. That audio-thread read is why these two are
+    // atomics, unlike previewStretchRatio (WaveformDisplay/message-thread only so far -- Stretch/
+    // Pitch have no audio audition yet, only the visual preview).
+    std::atomic<bool>  previewActive { false };
+    std::atomic<float> previewGainLinear { 1.0f };   // Amplify preview: linear gain
     double previewStretchRatio = 1.0;    // Stretch preview: the selection's visual width multiplier
 
     //==============================================================================

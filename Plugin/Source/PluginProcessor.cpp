@@ -533,6 +533,20 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             }
         }
 
+        // Amplify panel audition (see AudioDocument::previewGainLinear's comment): while the
+        // panel's slider is being dragged, hear the gain change on whatever's currently
+        // playing -- normally the selection, looped for the panel's lifetime by AmplifyPanel
+        // itself so there's always something to audition -- not just see it in the waveform.
+        // Applied to the raw playback before the filter/output gain, same position
+        // EditActions::applyGainDb's real (destructive) gain sits in the chain conceptually,
+        // so the audition matches what Apply would actually bake in.
+        if (document.previewActive.load(std::memory_order_relaxed))
+        {
+            const float previewGain = document.previewGainLinear.load(std::memory_order_relaxed);
+            for (int ch = 0; ch < numCh; ++ch)
+                buffer.applyGain(ch, 0, numSamples, previewGain);
+        }
+
         // Multi-mode filter, last in the chain -- applied whether the try-lock was held or not
         // (a filtered near-silent block is still correct), and to both direct + stretched paths.
         applyPlaybackFilter(buffer, numCh, numSamples, ! wasPlaying);

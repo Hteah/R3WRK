@@ -798,7 +798,7 @@ void WaveformDisplay::paintSelectionPreview(juce::Graphics& g)
     for (int ch = 0; ch < juce::jmin(numCh, raw.getNumChannels()); ++ch)
     {
         // Amplify only lands on the focused channel(s), so preview the others unchanged.
-        const float gain = document.channelInFocus(ch) ? document.previewGainLinear : 1.0f;
+        const float gain = document.channelInFocus(ch) ? document.previewGainLinear.load() : 1.0f;
         const float* d = raw.getReadPointer(ch);
         for (int i = 0; i < n; ++i)
         {

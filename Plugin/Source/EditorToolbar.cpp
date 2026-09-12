@@ -46,7 +46,7 @@ namespace
     //==============================================================================
     struct AmplifyPanel : juce::Component
     {
-        explicit AmplifyPanel(AudioDocument& doc) : document(doc)
+        AmplifyPanel(R3WRKAudioProcessor& proc, AudioDocument& doc) : processor(proc), document(doc)
         {
             title.setText("Amplify", juce::dontSendNotification);
             title.setFont(juce::FontOptions(14.0f, juce::Font::bold));
@@ -56,8 +56,9 @@ namespace
             gain.setSliderStyle(juce::Slider::LinearHorizontal);
             gain.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 22);
             // Live preview: WaveformDisplay redraws the selection at this gain as the slider
-            // moves (see AudioDocument::previewActive), reverted -- see the destructor below --
-            // whether the user clicks Apply or dismisses the panel without applying.
+            // moves, and PluginProcessor's playback path (see processBlock) applies the same
+            // gain live to whatever's currently playing -- reverted (both visual and audio) in
+            // the destructor below, whether the user clicks Apply or dismisses without applying.
             gain.onValueChange = [this]
             {
                 document.previewActive = true;
@@ -74,12 +75,30 @@ namespace
             addAndMakeVisible(gain);
             addAndMakeVisible(apply);
             setSize(280, 86);
+
+            // Audition: loop the selection (or whole clip -- same region playback would pick on
+            // its own) for the panel's lifetime, so there's always something playing to hear the
+            // live gain on, not just see it. Only if nothing was already playing -- an existing
+            // play/loop session is left running as-is (previewGainLinear still audibly applies
+            // to it above, in processBlock), restored exactly as found on close either way.
+            wasPlayingOnOpen = document.isPlaying.load();
+            if (! wasPlayingOnOpen)
+            {
+                wasLoopEnabledOnOpen = document.loopEnabled.load();
+                document.loopEnabled = true;
+                processor.startPlayback();
+            }
         }
         ~AmplifyPanel() override
         {
             document.previewActive = false;
             document.previewGainLinear = 1.0f;
             document.notifyChanged();
+            if (! wasPlayingOnOpen)
+            {
+                processor.stopPlayback();
+                document.loopEnabled = wasLoopEnabledOnOpen;
+            }
         }
         void resized() override
         {
@@ -90,7 +109,10 @@ namespace
             r.removeFromRight(6);
             gain.setBounds(r);
         }
+        R3WRKAudioProcessor& processor;
         AudioDocument& document;
+        bool wasPlayingOnOpen = false;
+        bool wasLoopEnabledOnOpen = false;
         juce::Label title;
         juce::Slider gain;
         juce::TextButton apply { "Apply" };
@@ -1480,7 +1502,7 @@ void EditorToolbar::showLoopCrossfadeCallout()
 
 void EditorToolbar::showAmplifyCallout(juce::Rectangle<int> screenTargetArea)
 {
-    juce::CallOutBox::launchAsynchronously(std::make_unique<AmplifyPanel>(document),
+    juce::CallOutBox::launchAsynchronously(std::make_unique<AmplifyPanel>(processor, document),
                                            screenTargetArea, nullptr);
 }
 
