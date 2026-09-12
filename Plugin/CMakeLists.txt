@@ -65,6 +65,25 @@ juce_add_plugin(R3WRK
 
 juce_generate_juce_header(R3WRK)
 
+# Ad-hoc signed by default, so a fresh clone builds with zero setup -- but macOS ties the Screen
+# Recording (TCC) grant to the exact code signature, and an ad-hoc signature is a hash of the
+# binary itself, so it changes on every rebuild that touches source: each one needs Screen
+# Recording re-approved from scratch (DesktopAudioCapture.mm / Black Box). To sign with a real
+# Apple identity instead (stable across rebuilds -- same fix RCRDR/SHOWR/Sieve use via their
+# Signing.local.xcconfig), copy Signing.local.cmake.example to Signing.local.cmake (gitignored)
+# next to this file and fill in your own identity/team.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Signing.local.cmake")
+    include("${CMAKE_CURRENT_SOURCE_DIR}/Signing.local.cmake")
+    foreach(r3wrk_signed_format VST3 AU Standalone)
+        if(TARGET R3WRK_${r3wrk_signed_format})
+            set_target_properties(R3WRK_${r3wrk_signed_format} PROPERTIES
+                XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Manual"
+                XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "${R3WRK_CODE_SIGN_IDENTITY}"
+                XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "${R3WRK_DEVELOPMENT_TEAM}")
+        endif()
+    endforeach()
+endif()
+
 target_sources(R3WRK
     PRIVATE
         Source/PluginProcessor.cpp

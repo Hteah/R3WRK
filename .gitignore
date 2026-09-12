@@ -5,6 +5,7 @@ build-*/
 xcuserdata/
 DerivedData/
 .DS_Store
+Plugin/Signing.local.cmake
 
 # Claude Code local worktrees / scratch
 .claude/

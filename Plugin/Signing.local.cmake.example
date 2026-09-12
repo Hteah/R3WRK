@@ -1,0 +1,9 @@
+# Copy this file to Signing.local.cmake (gitignored) to sign R3WRK's VST3/AU/Standalone builds
+# with a real Apple identity instead of the ad-hoc default -- see the comment above the
+# `include(Signing.local.cmake)` block in CMakeLists.txt for why that matters (Screen Recording
+# permission survives rebuilds with a real identity; ad-hoc needs it re-approved every time).
+#
+# Find your identity/team with: security find-identity -v -p codesigning
+
+set(R3WRK_CODE_SIGN_IDENTITY "Apple Development" CACHE STRING "" FORCE)
+set(R3WRK_DEVELOPMENT_TEAM   "ABCDE12345"        CACHE STRING "" FORCE)
