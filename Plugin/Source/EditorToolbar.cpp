@@ -1524,10 +1524,19 @@ void EditorToolbar::showSelectionContextMenu(juce::Point<int> screenPosition)
     enum { idTrim = 1, idAmplify, idFadeIn, idFadeOut, idReverse, idStretch,
            idInsertSilence, idDelete, idClearSel };
 
+    // Reachable now with no selection at all (a right-click anywhere on the waveform, not just
+    // inside one -- see WaveformDisplay::mouseDown). Amplify/Fade/Reverse/Stretch/Insert Silence
+    // all fall back to the whole clip via getEffectiveRange() and stay enabled either way, same
+    // as their Tools ▾ versions; Trim/Delete/Clear Selection are specifically about an existing
+    // selection (and safely no-op without one -- EditActions::trimToSelection/deleteSelection
+    // both early-return on !hasSelection()), so grey them out rather than offer a dead click.
+    const bool hasSel = document.hasSelection();
+
     const juce::String cmd = juce::String::fromUTF8("\xe2\x8c\x98");   // ⌘
     juce::PopupMenu::Item trimItem("Trim to Selection");
     trimItem.itemID = idTrim;
     trimItem.shortcutKeyDescription = cmd + "T";
+    trimItem.isEnabled = hasSel;
 
     juce::PopupMenu m;
     m.addItem(trimItem);
@@ -1538,9 +1547,9 @@ void EditorToolbar::showSelectionContextMenu(juce::Point<int> screenPosition)
     m.addItem(idStretch, juce::String::fromUTF8("Stretch / Pitch\xE2\x80\xA6"));
     m.addItem(idInsertSilence, juce::String::fromUTF8("Insert Silence\xE2\x80\xA6"));
     m.addSeparator();
-    m.addItem(idDelete, "Delete Selection");        // splice the selected audio out
+    m.addItem(idDelete, "Delete Selection", hasSel);        // splice the selected audio out
     m.addSeparator();
-    m.addItem(idClearSel, "Clear Selection");       // just drop the selection markers
+    m.addItem(idClearSel, "Clear Selection", hasSel);       // just drop the selection markers
 
     const auto targetArea = juce::Rectangle<int>(screenPosition.x, screenPosition.y, 1, 1);
     m.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(targetArea), [this, targetArea](int r)

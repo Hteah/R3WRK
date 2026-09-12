@@ -1162,17 +1162,17 @@ void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
         return;
     }
 
-    if (e.mods.isPopupMenu() && document.hasSelection())
+    // Right-click anywhere on the waveform -- not just inside an existing selection -- brings
+    // up the same Amplify/Fade/Reverse/Stretch menu; the effect actions already fall back to
+    // the whole clip when nothing's selected (AudioDocument::getEffectiveRange()), same as
+    // Tools ▾'s versions of these. (Used to require clicking inside the selection body -- was
+    // otherwise easy to miss the narrow hit zone, or have no selection at all and get nothing.)
+    if (e.mods.isPopupMenu())
     {
-        const float sx = sampleToX(document.getSelectionStart());
-        const float ex = sampleToX(document.getSelectionEnd());
-        if ((float) e.x > sx + edgeTolerancePx && (float) e.x < ex - edgeTolerancePx)
-        {
-            dragKind = DragKind::none;
-            if (onSelectionContextMenu)
-                onSelectionContextMenu(e.getScreenPosition());
-            return;
-        }
+        dragKind = DragKind::none;
+        if (onSelectionContextMenu)
+            onSelectionContextMenu(e.getScreenPosition());
+        return;
     }
 
     const int64_t f = xToSample((float) e.x);
