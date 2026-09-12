@@ -74,6 +74,12 @@ public:
     // the open-succeeded bookkeeping (header name, zoom-to-fit, saved/dirty state).
     void loadAudioFile(const juce::File& file);
 
+    // HeaderBar's file name is clickable -- reveals currentFile in Finder, same as the
+    // "reveal in Finder" a written capture/export already gets elsewhere in this class.
+    // A no-op (with a status message explaining why) when there's nothing on disk yet: a
+    // fresh recording, a cleared document, or one loaded but not yet saved under that name.
+    void revealCurrentFile();
+
     // ----- Tools actions, shared by the in-window "Tools ▾" popup (showToolsMenu) and the
     // Standalone macOS menu bar (StandaloneMenuBar). Both build their menus from these IDs
     // and dispatch selections through performToolsItem(). -----
@@ -150,8 +156,17 @@ private:
 
     // The file the document is currently backed by (last opened / last Save As / last
     // recording auto-save). "Save" (⌘S) overwrites it; empty => "Save" behaves as "Save As".
-    // Cleared whenever the document is blanked or a fresh recording starts.
+    // Cleared whenever the document is blanked or a fresh recording starts. Initialised in the
+    // constructor from document.getSourceFilePath() -- surviving state (a live session's
+    // document isn't touched by closing/reopening the editor window, and a full session
+    // reload restores it via getStateInformation) -- rather than always starting blank, so the
+    // header doesn't regress to "Untitled" for a file it already knows about.
     juce::File currentFile;
+
+    // The one place currentFile is ever assigned -- keeps document.sourceFilePath (the
+    // persisted copy HeaderBar/this constructor read back) in lockstep, so the two can never
+    // drift apart.
+    void setCurrentFile(const juce::File& file);
 
     // Play/Loop/Record are drawn as icons (see R3WRKLookAndFeel::drawButtonText) on square
     // (so pill-radius-as-circle) buttons -- a play triangle, a loop/repeat glyph, and (for

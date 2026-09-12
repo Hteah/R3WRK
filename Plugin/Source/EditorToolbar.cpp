@@ -723,6 +723,10 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
                     && R3WRKAudioProcessor::isDesktopCaptureSupported()),
       isPluginBuild(proc.wrapperType != juce::AudioProcessor::wrapperType_Standalone)
 {
+    // Pick up wherever the document already knows it's backed by -- see currentFile's comment.
+    if (document.getSourceFilePath().isNotEmpty())
+        currentFile = juce::File(document.getSourceFilePath());
+
     addAndMakeVisible(playFromStartButton);
     addAndMakeVisible(playButton);
     addAndMakeVisible(loopButton);
@@ -881,7 +885,7 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
         const double sr = document.getSampleRate() > 0 ? document.getSampleRate() : 44100.0;
         document.newEmptyDocument(numCh, sr);
 
-        currentFile = juce::File();
+        setCurrentFile(juce::File());
         if (onSourceNameChanged) onSourceNameChanged({});
         if (onStatusMessage) onStatusMessage("Cleared");
     };
@@ -1045,7 +1049,7 @@ void EditorToolbar::toggleTransport()
     if (document.isRecording.load())      { processor.stopRecording(); autoSaveRecording(); }
     else if (document.isPlaying.load())   processor.stopPlayback();
     else                                { processor.startRecording();
-                                          currentFile = juce::File();
+                                          setCurrentFile(juce::File());
                                           document.channelFocus = AudioDocument::ChannelFocus::stereo;
                                           if (onSourceNameChanged) onSourceNameChanged({}); }
     updateTransportButtonText();
@@ -1067,7 +1071,7 @@ void EditorToolbar::toggleDesktopRecording()
         }
         if (document.isPlaying.load())
             processor.stopPlayback();
-        currentFile = juce::File();
+        setCurrentFile(juce::File());
         document.channelFocus = AudioDocument::ChannelFocus::stereo;
         if (onSourceNameChanged) onSourceNameChanged({});
         processor.startDesktopRecording();        // async -- document.isRecording flips on the started cb
@@ -1124,7 +1128,7 @@ void EditorToolbar::showBlackBoxPopup()
         std::make_unique<BlackBoxPanel>(processor, document, *outputSettings,
             [this]
             {
-                currentFile = juce::File();
+                setCurrentFile(juce::File());
                 document.channelFocus = AudioDocument::ChannelFocus::stereo;
                 if (onSourceNameChanged) onSourceNameChanged({});
                 if (onStatusMessage) onStatusMessage("Loaded Black Box capture");
@@ -1174,7 +1178,7 @@ void EditorToolbar::autoSaveRecording()
     const auto file = outputSettings->makeWavFile();
     if (document.saveToFile(file))
     {
-        currentFile = file;
+        setCurrentFile(file);
         if (onSourceNameChanged) onSourceNameChanged(file.getFileName());
         if (onSaved)             onSaved();
         if (onStatusMessage)     onStatusMessage("Saved " + file.getFileName());
@@ -1667,10 +1671,24 @@ void EditorToolbar::loadAudioFile(const juce::File& file)
 {
     if (document.loadFromFile(file, processor.getSampleRate()))
     {
-        currentFile = file;
+        setCurrentFile(file);
         if (onSourceNameChanged) onSourceNameChanged(file.getFileName());
         if (onSaved) onSaved();
     }
+}
+
+void EditorToolbar::setCurrentFile(const juce::File& file)
+{
+    currentFile = file;
+    document.setSourceFilePath(file == juce::File() ? juce::String() : file.getFullPathName());
+}
+
+void EditorToolbar::revealCurrentFile()
+{
+    if (currentFile != juce::File() && currentFile.existsAsFile())
+        currentFile.revealToUser();
+    else if (onStatusMessage)
+        onStatusMessage("Not saved yet -- nothing on disk to show");
 }
 
 // Shared tail for Save / Save As: write with the persisted Save Options, coercing the
@@ -1683,7 +1701,7 @@ void EditorToolbar::writeDocumentTo(const juce::File& file)
 
     if (document.saveToFile(out, opts))
     {
-        currentFile = out;
+        setCurrentFile(out);
         if (onSourceNameChanged) onSourceNameChanged(out.getFileName());
         if (onSaved) onSaved();
         if (onStatusMessage) onStatusMessage("Saved " + out.getFileName());

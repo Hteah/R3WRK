@@ -4,9 +4,22 @@ HeaderBar::HeaderBar(AudioDocument& doc) : document(doc)
 {
     savedAtVersion = document.getBufferVersion();
 
-    nameLabel.setText("Untitled", juce::dontSendNotification);
+    // Pick up wherever the document already knows it's backed by (see AudioDocument::
+    // getSourceFilePath()'s comment) rather than always starting "Untitled" -- a live session's
+    // document isn't touched by closing/reopening the editor window, and a full session
+    // reload restores it via R3WRKAudioProcessor::setStateInformation.
+    sourceName = document.getSourceFilePath().isNotEmpty()
+                    ? juce::File(document.getSourceFilePath()).getFileName() : juce::String();
+    nameLabel.setText(sourceName.isEmpty() ? "Untitled" : sourceName, juce::dontSendNotification);
     nameLabel.setFont(juce::FontOptions(14.0f, juce::Font::bold));
     nameLabel.setMinimumHorizontalScale(1.0f);
+    // Click to reveal in Finder (onNameClicked, wired by PluginEditor to EditorToolbar::
+    // revealCurrentFile()). addMouseListener rather than a subclass -- Label already consumes
+    // its own mouse events (for its double-click-to-edit machinery, unused here since this one
+    // is never made editable), so this just observes them alongside that, not instead of it.
+    nameLabel.addMouseListener(this, false);
+    nameLabel.setMouseCursor(juce::MouseCursor::PointingHandCursor);
+    nameLabel.setTooltip("Reveal in Finder");
 
     readoutLabel.setFont(juce::FontOptions(11.0f));
 
@@ -40,6 +53,12 @@ void HeaderBar::setSourceName(const juce::String& name)
 {
     sourceName = name;
     nameLabel.setText(name.isEmpty() ? "Untitled" : name, juce::dontSendNotification);
+}
+
+void HeaderBar::mouseUp(const juce::MouseEvent& e)
+{
+    if (e.eventComponent == &nameLabel && e.mouseWasClicked() && onNameClicked)
+        onNameClicked();
 }
 
 void HeaderBar::markSaved()

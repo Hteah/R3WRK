@@ -130,6 +130,16 @@ public:
         return juce::String (sourceBitDepth) + "-bit";
     }
 
+    // Full path to the file this document is currently backed by; "" if none -- a fresh
+    // recording not yet auto-saved, a cleared document, or an in-memory-only take like a
+    // loaded Black Box capture. Purely descriptive bookkeeping, like sourceBitDepth: edits
+    // don't touch it, only EditorToolbar does (see its setCurrentFile()), whenever
+    // currentFile changes. Persisted in plugin state (R3WRKAudioProcessor::
+    // getStateInformation) and read back by HeaderBar/EditorToolbar's constructors, so the
+    // header shows the right name again after a session reload instead of "Untitled".
+    juce::String getSourceFilePath() const { return sourceFilePath; }
+    void setSourceFilePath(const juce::String& path) { sourceFilePath = path; }
+
     int64_t getNumSamples() const { return (int64_t) buffer.getNumSamples(); }
     int getNumChannels() const { return buffer.getNumChannels(); }
     bool isEmpty() const { return buffer.getNumSamples() == 0; }
@@ -407,6 +417,7 @@ private:
     double sampleRate = 44100.0;
     int  sourceBitDepth = 0;            // see getSourceBitDepth()
     bool sourceBitDepthFloat = false;
+    juce::String sourceFilePath;        // see getSourceFilePath()
     std::atomic<uint64_t> selPacked { 0 };   // (uint32 start << 32) | uint32 end -- see getSelection()
     int bufferVersion = 0;
 

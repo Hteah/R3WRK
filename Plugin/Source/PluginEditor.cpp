@@ -39,6 +39,7 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
     };
     toolbar.onSaved = [this] { header.markSaved(); };
     toolbar.onStatusMessage = [this](juce::String m) { header.flashMessage(m); };
+    header.onNameClicked = [this] { toolbar.revealCurrentFile(); };
 
     // A committed drag-selection / edge-resize drops the playhead at the selection start,
     // so Play picks up from there (Sieve's editor jumps playback on selection commit).

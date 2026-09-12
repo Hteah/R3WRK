@@ -69,6 +69,7 @@ void AudioDocument::newEmptyDocument(int numChannels, double sr)
     sampleRate = sr;
     sourceBitDepth = 0;
     sourceBitDepthFloat = false;
+    sourceFilePath.clear();
     selPacked.store(0, std::memory_order_relaxed);
     playhead = 0;
     loopStart = loopEnd = 0;
@@ -135,6 +136,7 @@ void AudioDocument::loadFromBuffer(juce::AudioBuffer<float> newBuffer, double sr
     sampleRate = sr;
     sourceBitDepth = bitDepth;
     sourceBitDepthFloat = isFloat;
+    sourceFilePath.clear();   // caller (e.g. EditorToolbar::loadAudioFile) sets the real path after
     selPacked.store(0, std::memory_order_relaxed);
     playhead = 0;
     loopStart = 0;

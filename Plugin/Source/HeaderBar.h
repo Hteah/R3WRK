@@ -20,8 +20,14 @@ public:
     void markSaved();                               // call after a successful open / save
     void flashMessage(const juce::String& text);   // brief status in the readout area (~3 s)
 
+    // Clicking the file name reveals it in Finder -- see EditorToolbar::revealCurrentFile(),
+    // which this is wired to (PluginEditor). Left to the owner rather than done here directly
+    // since HeaderBar only ever sees the display name (setSourceName), not a real juce::File.
+    std::function<void()> onNameClicked;
+
     void paint(juce::Graphics&) override;
     void resized() override;
+    void mouseUp(const juce::MouseEvent&) override;   // registered on nameLabel too -- see ctor
 
 private:
     void timerCallback() override;
