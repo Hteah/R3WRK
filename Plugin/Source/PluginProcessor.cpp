@@ -390,7 +390,16 @@ void R3WRKAudioProcessor::renderDragScan(juce::AudioBuffer<float>& out, int numC
 
     const int64_t regionLen = regionEnd - regionStart;
     constexpr double catchUpGainPerSec = 8.0;                        // velocity = distance * this
-    const double maxCatchUpSpeed = currentSampleRate * 6.0;          // cap: ~6x normal speed
+    // Backward drags never actually need this branch (see the region-slew comment just below on
+    // why): the playhead already sits at the *far* edge from a retreating regionEnd, comfortably
+    // inside the window at plain 1x the entire time, so it's silent regardless of how fast the
+    // window itself moves. Forward drags are the opposite -- zero margin at the low edge means
+    // this branch runs for as long as the window keeps advancing, i.e. the whole time the mouse
+    // is moving forward, not just briefly. So this cap *is* the forward-drag pitch you hear, the
+    // entire time you're dragging forward, not merely during an occasional big catch-up -- keep
+    // it in lockstep with the region-slew cap just below (a little higher, so it can actually
+    // close the gap) rather than raising just one of them.
+    const double maxCatchUpSpeed = currentSampleRate * 2.0;          // cap: ~2x normal speed
 
     for (int i = 0; i < numSamples; ++i)
     {
@@ -583,7 +592,15 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                     dragRegionSeeded = true;
                 }
                 constexpr double slewGainPerSec = 8.0;   // catch-up rate = distance * this
-                const double maxSlewSpeed = currentSampleRate * 6.0;   // cap: ~6x normal speed
+                // This cap is also, in effect, the forward-drag pitch-shift cap: renderDragScan's
+                // playhead has to keep pace with however fast this window is moving in order to
+                // stay caught up, and (unlike a backward drag, which never needs to chase at all
+                // -- see its comment) a forward drag runs at close to this speed continuously
+                // for as long as the mouse keeps moving forward, not just as a brief catch-up.
+                // Kept modest (rather than the ~6x this used to be) so that's a mild lift instead
+                // of "extreme pitch" -- renderDragScan's own cap is set a little above this one,
+                // so the gap can still actually close.
+                const double maxSlewSpeed = currentSampleRate * 1.5;   // cap: ~1.5x normal speed
                 const double dt = (double) numSamples / juce::jmax(1.0, currentSampleRate);
                 auto slew = [&](double& smoothed, int64_t target)
                 {
