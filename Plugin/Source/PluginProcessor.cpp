@@ -71,7 +71,7 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     lastAppliedPitchScale = -1.0;
     stretchRatioNeedsSnap = true;
 
-    wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false;
+    wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false; dragScanActive = false;
     stretcherPrimed = false;
     rtFinished = false;
     wasScrubbing = false;
@@ -98,7 +98,7 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 void R3WRKAudioProcessor::releaseResources()
 {
     rtStretcher.reset();
-    wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false;
+    wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false; dragScanActive = false;
     stretcherPrimed = false;
     rtFinished = false;
     wasScrubbing = false;
@@ -375,6 +375,75 @@ void R3WRKAudioProcessor::renderScrub(juce::AudioBuffer<float>& out, int numCh, 
     document.playhead.store((int64_t) scrubReadPos, std::memory_order_relaxed);
 }
 
+// See dragScanPos's header comment for the reasoning. `pos` never jumps here -- it either
+// closes in on `regionStart` at a capped, distance-proportional speed (still behind the
+// window), or advances at plain 1x and wraps within [regionStart, regionEnd) (already inside
+// it), with loopFadeGain crossfading the wrap exactly like gatherRegion's own loop wrap does.
+void R3WRKAudioProcessor::renderDragScan(juce::AudioBuffer<float>& out, int numCh, int numSamples,
+                                         const juce::AudioBuffer<float>& docBuf, double& pos,
+                                         int64_t regionStart, int64_t regionEnd, bool loop, int fadeLen)
+{
+    const int64_t docLen = docBuf.getNumSamples();
+    const int srcChans = docBuf.getNumChannels();
+    if (docLen <= 1 || srcChans <= 0 || regionEnd <= regionStart)
+        return;
+
+    const int64_t regionLen = regionEnd - regionStart;
+    constexpr double catchUpGainPerSec = 8.0;                        // velocity = distance * this
+    const double maxCatchUpSpeed = currentSampleRate * 6.0;          // cap: ~6x normal speed
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        double velocitySamplesPerSec;
+        if (pos < (double) regionStart)
+        {
+            const double distance = (double) regionStart - pos;
+            velocitySamplesPerSec = juce::jlimit(currentSampleRate, maxCatchUpSpeed, distance * catchUpGainPerSec);
+        }
+        else if (pos >= (double) regionEnd)
+        {
+            // Overshot the top -- can happen if a shrinking regionEnd (End knob) crossed a
+            // playhead that was previously valid. Race to the wrap below at the cap.
+            velocitySamplesPerSec = maxCatchUpSpeed;
+        }
+        else
+        {
+            velocitySamplesPerSec = currentSampleRate;               // inside the window: plain 1x
+        }
+        const double perSample = velocitySamplesPerSec / juce::jmax(1.0, currentSampleRate);
+
+        if (pos >= 0.0 && pos < (double) (docLen - 1))
+        {
+            const int64_t i0 = (int64_t) pos;
+            const float frac = (float) (pos - (double) i0);
+            const double rp = pos - (double) regionStart;
+            const float fadeGain = (rp >= 0.0 && rp < (double) regionLen)
+                ? (float) loopFadeGain((int64_t) rp, regionLen, fadeLen)
+                : 1.0f;   // still catching up from outside the window -- no wrap-edge fade yet
+            for (int ch = 0; ch < numCh; ++ch)
+            {
+                const int srcCh = juce::jmin(ch, srcChans - 1);
+                const float* d = docBuf.getReadPointer(srcCh);
+                out.setSample(ch, i, (d[i0] + (d[i0 + 1] - d[i0]) * frac) * fadeGain);
+            }
+        }
+        pos += perSample;
+
+        if (pos >= (double) regionEnd)
+        {
+            if (loop)
+            {
+                pos -= (double) regionLen;   // preserves the fractional remainder -- continuous
+            }
+            else
+            {
+                document.isPlaying.store(false, std::memory_order_relaxed);
+                return;   // rest of this block stays silent (buffer is already cleared)
+            }
+        }
+    }
+}
+
 void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
     juce::ScopedNoDenormals noDenormals;
@@ -392,7 +461,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     if (blackBoxPreviewPlaying.load(std::memory_order_relaxed))
     {
         renderBlackBoxPreview(buffer, numCh, numSamples);
-        wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false;
+        wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false; dragScanActive = false;
         return;
     }
 
@@ -401,7 +470,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         // ScreenCaptureKit is doing the capture on its own queue (appendDesktopSamples) --
         // nothing here to record or monitor.
         buffer.clear();
-        wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false;
+        wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false; dragScanActive = false;
         return;
     }
 
@@ -431,7 +500,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         }
         document.recordedSamples.store(recordingWritePos, std::memory_order_relaxed);
 
-        wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false;
+        wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false; dragScanActive = false;
         return; // pass input through unchanged so the user can monitor while recording
     }
 
@@ -451,7 +520,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         captureOutput(buffer, numCh, numSamples);
 
         wasScrubbing = true;
-        wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false;   // so normal playback resets the stretcher cleanly if it resumes
+        wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false; dragScanActive = false;   // so normal playback resets the stretcher cleanly if it resumes
         return;
     }
     wasScrubbing = false;
@@ -511,7 +580,6 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                 {
                     dragRegionStart = (double) rawRegionStart;
                     dragRegionEnd   = (double) rawRegionEnd;
-                    dragRegionStartInt = rawRegionStart;   // so this block's shift computes to 0
                     dragRegionSeeded = true;
                 }
                 constexpr double slewGainPerSec = 8.0;   // catch-up rate = distance * this
@@ -527,35 +595,6 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                 slew(dragRegionEnd,   rawRegionEnd);
                 regionStart = (int64_t) std::llround(dragRegionStart);
                 regionEnd   = juce::jmax(regionStart + 1, (int64_t) std::llround(dragRegionEnd));
-
-                // Carry the playhead forward with the window, on the plain (non-RubberBand)
-                // path only, and only when the window is moving forward (shift > 0) -- see
-                // dragRegionStartInt's comment for why a forward-moving window stray the
-                // playhead with zero margin. A backward-moving window never had that problem
-                // (the playhead already sits at the *far* edge from a retreating regionEnd, so
-                // it rides along validly on its own, still playing forward normally) -- forcing
-                // the same carry there was tried and made it worse, dragging the playhead
-                // backward in lockstep with the window instead of leaving its own forward
-                // progress alone, which is what "still plays the audio between the scans" (the
-                // whole point of this feature) actually depends on.
-                if (! engaged && regionStart > dragRegionStartInt)
-                {
-                    document.playhead.fetch_add(regionStart - dragRegionStartInt, std::memory_order_relaxed);
-
-                    // This splice is exactly as discontinuous as the hard-reset it replaces --
-                    // carrying a sample-accurate read position forward across un-played content
-                    // can never itself sound continuous, whatever you call the mechanism that
-                    // moves it. The old reset-to-regionStart went through the declick check
-                    // below and got softened every time; deliberately avoiding that check is
-                    // exactly what silently dropped the declick here too. Declick it the same
-                    // way explicitly, so a fast forward catch-up is a train of soft thumps
-                    // again (the least-bad option -- see the header comment) instead of raw
-                    // clicks on every block.
-                    declickLen = (int) juce::jlimit<int64_t>(1, 512,
-                        (int64_t) (0.008 * currentSampleRate));
-                    declickRemaining = declickLen;
-                }
-                dragRegionStartInt = regionStart;
             }
             else
             {
@@ -576,40 +615,69 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                                             (regionEnd - regionStart) / 2)
                 : 0;
 
-            int64_t pos = document.playhead.load(std::memory_order_relaxed);
-            if (pos < regionStart || pos >= regionEnd)
+            if (dragEdge != 0 && ! engaged)
             {
-                pos = regionStart;                       // snap a stray playhead into the region
-                playbackDir = 1;
-
-                // That splice is an arbitrary jump in the waveform -- ramp in over a few ms
-                // so it's a soft thump instead of a pop (see the declick fields' comment).
-                declickLen = (int) juce::jlimit<int64_t>(1, 512,
-                    (int64_t) (0.008 * currentSampleRate));
-                declickRemaining = declickLen;
-            }
-
-            // Reset the stretcher at the start of a play pass, or when the knobs cross the
-            // bypass/engaged line, so no stale tail leaks in.
-            if (engaged)
-            {
-                if (rtStretcher != nullptr && (! wasPlaying || ! stretcherPrimed))
+                // Dragging, plain path: a continuous fractional read position instead of the
+                // ordinary integer pos below -- see renderDragScan's header comment for why.
+                // It never jumps, so there's nothing here to declick.
+                if (! dragScanActive)
                 {
-                    rtStretcher->reset();
-                    stretcherPrimed = true;
-                    rtFinished = false;
-                    stretchRatioNeedsSnap = true;   // start at the current ratio, no 120ms slide in
+                    dragScanPos = (double) document.playhead.load(std::memory_order_relaxed);
+                    dragScanActive = true;
                 }
-                renderPlaybackStretched(buffer, numCh, numSamples, docBuf, pos,
-                                        playbackDir, regionStart, regionEnd, loop, pingPong, loopFadeLen,
-                                        speed, pitch, stretch);
+                stretcherPrimed = false;
+                rtFinished = false;
+                renderDragScan(buffer, numCh, numSamples, docBuf, dragScanPos,
+                               regionStart, regionEnd, loop, loopFadeLen);
+                document.playhead.store((int64_t) std::llround(dragScanPos), std::memory_order_relaxed);
             }
             else
             {
-                stretcherPrimed = false;
-                rtFinished = false;
-                renderPlaybackDirect(buffer, numCh, numSamples, docBuf, pos,
-                                     playbackDir, regionStart, regionEnd, loop, pingPong, loopFadeLen);
+                if (dragScanActive)
+                {
+                    // Drag just ended (or crossed into the RubberBand-engaged case) -- hand off
+                    // to the ordinary path from wherever the scan landed. It was already
+                    // tracking/looping within the live region, so this is already valid or a
+                    // few samples off it at most.
+                    document.playhead.store((int64_t) std::llround(dragScanPos), std::memory_order_relaxed);
+                    dragScanActive = false;
+                }
+
+                int64_t pos = document.playhead.load(std::memory_order_relaxed);
+                if (pos < regionStart || pos >= regionEnd)
+                {
+                    pos = regionStart;                       // snap a stray playhead into the region
+                    playbackDir = 1;
+
+                    // That splice is an arbitrary jump in the waveform -- ramp in over a few ms
+                    // so it's a soft thump instead of a pop (see the declick fields' comment).
+                    declickLen = (int) juce::jlimit<int64_t>(1, 512,
+                        (int64_t) (0.008 * currentSampleRate));
+                    declickRemaining = declickLen;
+                }
+
+                // Reset the stretcher at the start of a play pass, or when the knobs cross the
+                // bypass/engaged line, so no stale tail leaks in.
+                if (engaged)
+                {
+                    if (rtStretcher != nullptr && (! wasPlaying || ! stretcherPrimed))
+                    {
+                        rtStretcher->reset();
+                        stretcherPrimed = true;
+                        rtFinished = false;
+                        stretchRatioNeedsSnap = true;   // start at the current ratio, no 120ms slide in
+                    }
+                    renderPlaybackStretched(buffer, numCh, numSamples, docBuf, pos,
+                                            playbackDir, regionStart, regionEnd, loop, pingPong, loopFadeLen,
+                                            speed, pitch, stretch);
+                }
+                else
+                {
+                    stretcherPrimed = false;
+                    rtFinished = false;
+                    renderPlaybackDirect(buffer, numCh, numSamples, docBuf, pos,
+                                         playbackDir, regionStart, regionEnd, loop, pingPong, loopFadeLen);
+                }
             }
         }
 
@@ -655,7 +723,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         return;
     }
 
-    wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false;
+    wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false; dragScanActive = false;
 
     // Neither recording nor playing back: leave `buffer` untouched so the host's input
     // passes straight through -- except Auto-Record standby, which watches that same

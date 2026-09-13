@@ -205,32 +205,40 @@ private:
     double dragRegionEnd   = 0.0;
     bool   dragRegionSeeded = false;
 
-    // The playhead always gets reset to exactly `regionStart` when it falls outside the
-    // region -- which is asymmetric with respect to which way the window is moving. Reset
-    // leaves it sitting at the window's *low* edge, so on a forward-moving window (regionStart
-    // itself climbing) it has zero margin: the very next sample of forward creep stray it
-    // again, forcing a reset (and a fresh declick ramp that never gets to finish) on
-    // essentially every block for as long as the window keeps moving. A backward-moving window
-    // instead retreats *away* from where the playhead already sits, so it stays validly inside
-    // for a full region-length's worth of movement before that happens -- normally the whole
-    // drag converges well within that margin, so it never needs a reset at all, and just keeps
-    // playing forward on its own. That's the "forward stutters, backward is fine" the user
-    // found. Fix: while dragging, carry the playhead forward by however far regionStart itself
-    // moved this block (see the shift computation in processBlock) so a forward-moving window
-    // never leaves it behind in the first place. Deliberately one-directional -- carrying it
-    // backward too (tried once) actively broke the backward case, dragging the playhead along
-    // with a retreating window instead of leaving its own valid forward progress alone,
-    // reintroducing the exact stutter in the direction that never had it. Each carried jump is
-    // just as discontinuous as the reset it replaces -- there's no way around that, skipping a
-    // sample-accurate read position across un-played content can't itself sound continuous --
-    // so processBlock declicks it explicitly too (the check that declicks the old reset path
-    // deliberately never fires here, since the whole point is keeping the playhead in-range).
-    // Also plain (non-RubberBand) path only -- continuously nudging the read position under
-    // renderPlaybackStretched confused it into sustained distortion when this was first tried
-    // (reverted as eb4ec70/9376798); the direct-copy path has no such internal state to upset.
-    // `dragRegionStartInt` is the previous dragging block's rounded regionStart, i.e. what the
-    // shift is measured against.
-    int64_t dragRegionStartInt = 0;
+    // Catching a window up to a big/fast drag means reading through material that hasn't
+    // played yet, and there's no way to do that without EITHER a discontinuity somewhere OR
+    // genuinely playing through it at an accelerated rate. Every previous attempt at the first
+    // option was really just a differently-shaped discontinuity: a hard reset to `regionStart`
+    // (asymmetric -- zero margin against a forward-moving window, since reset always lands
+    // right at its low edge, so a forward drag needed a fresh declick ramp nearly every block
+    // that could never finish before the next one arrived -- a declick ramp that keeps re-
+    // arming *is itself* an audible buzz, not a fix); then a carried jump by the same amount,
+    // un-declicked (still a splice, just softer to reason about, not softer to hear); then that
+    // same carried jump explicitly declicked (same problem as the reset: re-arms before
+    // finishing). None of those were ever going to sound smooth, because they're all fixed-size
+    // per-block teleports dressed up differently.
+    //
+    // renderDragScan() is the second option instead: a continuously-advancing fractional read
+    // position (`dragScanPos`) that never jumps at all, so there's nothing to declick. When
+    // behind the window it closes the gap at a speed proportional to the remaining distance
+    // (capped, so a huge jump sounds like a bounded fast wind, not a shriek) -- a real, if
+    // sped-up, read of the actual buffer, not a synthesized stand-in. Once inside
+    // [regionStart, regionEnd) it settles to plain 1x forward and genuinely loops within it,
+    // wrapping by subtracting the region length so the fractional position stays continuous
+    // across the wrap too (with the same loopFadeGain crossfade gatherRegion itself uses, so
+    // *that* doesn't click either). Plain (non-RubberBand) path only -- continuously perturbing
+    // the read position under renderPlaybackStretched confused it into sustained distortion
+    // when a discrete version of this was first tried (reverted as eb4ec70/9376798); the
+    // RubberBand-engaged case keeps the ordinary hard-snap-and-declick path, unimproved but no
+    // worse than it's always been. `dragScanActive` is false until the first dragging block
+    // seeds `dragScanPos` from the live playhead, and again on release so the next drag (or a
+    // handoff to the stretched path) starts fresh and the final position gets committed back to
+    // `document.playhead`.
+    double dragScanPos = 0.0;
+    bool   dragScanActive = false;
+    void renderDragScan(juce::AudioBuffer<float>& out, int numCh, int numSamples,
+                        const juce::AudioBuffer<float>& docBuf, double& pos,
+                        int64_t regionStart, int64_t regionEnd, bool loop, int fadeLen);
 
     // Modelled Monomachine multimode filter on the playback output (after the stretcher). One
     // MultiModeFilter per channel; all four knob values are per-block-smoothed so a sweep
