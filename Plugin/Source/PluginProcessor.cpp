@@ -528,15 +528,18 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                 regionStart = (int64_t) std::llround(dragRegionStart);
                 regionEnd   = juce::jmax(regionStart + 1, (int64_t) std::llround(dragRegionEnd));
 
-                // Carry the playhead along with the window on the plain (non-RubberBand) path
-                // only -- see dragRegionStartInt's comment for why a forward drag needs this
-                // and a backward one doesn't, and why the stretched path is excluded.
-                if (! engaged)
-                {
-                    const int64_t shift = regionStart - dragRegionStartInt;
-                    if (shift != 0)
-                        document.playhead.fetch_add(shift, std::memory_order_relaxed);
-                }
+                // Carry the playhead forward with the window, on the plain (non-RubberBand)
+                // path only, and only when the window is moving forward (shift > 0) -- see
+                // dragRegionStartInt's comment for why a forward-moving window stray the
+                // playhead with zero margin. A backward-moving window never had that problem
+                // (the playhead already sits at the *far* edge from a retreating regionEnd, so
+                // it rides along validly on its own, still playing forward normally) -- forcing
+                // the same carry there was tried and made it worse, dragging the playhead
+                // backward in lockstep with the window instead of leaving its own forward
+                // progress alone, which is what "still plays the audio between the scans" (the
+                // whole point of this feature) actually depends on.
+                if (! engaged && regionStart > dragRegionStartInt)
+                    document.playhead.fetch_add(regionStart - dragRegionStartInt, std::memory_order_relaxed);
                 dragRegionStartInt = regionStart;
             }
             else

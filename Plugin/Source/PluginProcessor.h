@@ -213,11 +213,15 @@ private:
     // essentially every block for as long as the window keeps moving. A backward-moving window
     // instead retreats *away* from where the playhead already sits, so it stays validly inside
     // for a full region-length's worth of movement before that happens -- normally the whole
-    // drag converges well within that margin, so it never needs a reset at all. That's the
-    // "forward stutters, backward is fine" the user found. Fix: while dragging, carry the
-    // playhead by however far regionStart itself moved this block (see the shift computation
-    // in processBlock) so it never gets left behind in the first place, on either side. Only
-    // done for the plain (non-RubberBand) path -- continuously nudging the read position under
+    // drag converges well within that margin, so it never needs a reset at all, and just keeps
+    // playing forward on its own. That's the "forward stutters, backward is fine" the user
+    // found. Fix: while dragging, carry the playhead forward by however far regionStart itself
+    // moved this block (see the shift computation in processBlock) so a forward-moving window
+    // never leaves it behind in the first place. Deliberately one-directional -- carrying it
+    // backward too (tried once) actively broke the backward case, dragging the playhead along
+    // with a retreating window instead of leaving its own valid forward progress alone,
+    // reintroducing the exact stutter in the direction that never had it. Also plain
+    // (non-RubberBand) path only -- continuously nudging the read position under
     // renderPlaybackStretched confused it into sustained distortion when this was first tried
     // (reverted as eb4ec70/9376798); the direct-copy path has no such internal state to upset.
     // `dragRegionStartInt` is the previous dragging block's rounded regionStart, i.e. what the
