@@ -1245,6 +1245,7 @@ void WaveformDisplay::playSliceAt(int64_t sample)
     // no markers -> just play from the click point
     document.clearSelection();
     document.playhead = juce::jlimit((int64_t) 0, document.getNumSamples(), sample);
+    document.declickRequested = true;   // see its comment -- whole-clip region, no region-jump to declick it otherwise
     if (onSlicePlay) onSlicePlay();
 }
 
@@ -1371,6 +1372,7 @@ void WaveformDisplay::mouseUp(const juce::MouseEvent& e)
         {
             document.clearSelection();
             document.playhead = f;
+            document.declickRequested = true;   // see its comment on AudioDocument
             document.notifyChanged();
         }
         return;
@@ -1393,6 +1395,7 @@ void WaveformDisplay::mouseUp(const juce::MouseEvent& e)
         {
             document.clearSelection();
             document.playhead = f;
+            document.declickRequested = true;   // see its comment on AudioDocument
             document.notifyChanged();
             return;
         }

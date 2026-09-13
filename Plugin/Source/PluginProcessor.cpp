@@ -661,6 +661,11 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                 }
 
                 int64_t pos = document.playhead.load(std::memory_order_relaxed);
+                // Read-and-clear: a manual seek (click-to-seek, or a marker-less slice pick)
+                // that happens to land inside a region that isn't itself changing -- see
+                // declickRequested's comment on AudioDocument for why the check just below
+                // can't notice that jump on its own.
+                const bool manualSeek = document.declickRequested.exchange(false, std::memory_order_relaxed);
                 if (pos < regionStart || pos >= regionEnd)
                 {
                     pos = regionStart;                       // snap a stray playhead into the region
@@ -668,6 +673,12 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
 
                     // That splice is an arbitrary jump in the waveform -- ramp in over a few ms
                     // so it's a soft thump instead of a pop (see the declick fields' comment).
+                    declickLen = (int) juce::jlimit<int64_t>(1, 512,
+                        (int64_t) (0.008 * currentSampleRate));
+                    declickRemaining = declickLen;
+                }
+                else if (manualSeek)
+                {
                     declickLen = (int) juce::jlimit<int64_t>(1, 512,
                         (int64_t) (0.008 * currentSampleRate));
                     declickRemaining = declickLen;

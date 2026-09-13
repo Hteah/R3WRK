@@ -416,6 +416,19 @@ public:
     // Set/cleared from KnobRow's Start/End sliders and WaveformDisplay's selection mouse handling.
     std::atomic<int> selectionEdgeDragging { 0 };
 
+    // Set (true) whenever code moves `playhead` to an arbitrary new spot within a region that
+    // *isn't* itself changing -- clicking to seek the playhead while playing (WaveformDisplay's
+    // click-not-drag cases), or picking a slice with no marker -- so PluginProcessor's own
+    // "did the region just change under me" check has no reason to notice the jump and declick
+    // it (the region is the same, whole-clip or otherwise, before and after). processBlock reads
+    // and clears this each block (std::atomic::exchange) to arm the same declick ramp it already
+    // uses for a region-jump, so a manual seek while playing gets a soft attack instead of a
+    // click too. Not needed for the ordinary "resume from a fresh Play" case (that starts from
+    // silence, no discontinuity to smooth over) or for a seek that already lands in a genuinely
+    // different region (setSelection() there already changes what regionStart/End resolve to,
+    // so the existing region-jump check already declicks it).
+    std::atomic<bool> declickRequested { false };
+
     //==============================================================================
     // Internal: used by the undo action to swap buffer/selection state directly.
     void restoreSnapshot(const juce::AudioBuffer<float>& newBuffer, int64_t newSelStart, int64_t newSelEnd);
