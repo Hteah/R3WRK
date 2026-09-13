@@ -676,12 +676,31 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                     declickLen = (int) juce::jlimit<int64_t>(1, 512,
                         (int64_t) (0.008 * currentSampleRate));
                     declickRemaining = declickLen;
+                    seekCrossfadeActive = false;   // no coherent "old" material for this kind of jump
                 }
                 else if (manualSeek)
                 {
                     declickLen = (int) juce::jlimit<int64_t>(1, 512,
                         (int64_t) (0.008 * currentSampleRate));
                     declickRemaining = declickLen;
+
+                    // Also crossfade out whatever was actually playing a moment ago (see
+                    // seekOldTail's comment) -- the ramp above only softens the incoming edge;
+                    // the outgoing one, where the old material just stops, clicks on its own
+                    // otherwise. Captured now, while the lock is held and docBuf is reachable,
+                    // so the declick-application code below (which runs unlocked) doesn't need it.
+                    seekOldTail.setSize(numCh, declickLen, false, false, true);
+                    const int64_t oldDocLen = docBuf.getNumSamples();
+                    const int oldChans = docBuf.getNumChannels();
+                    for (int i = 0; i < declickLen; ++i)
+                    {
+                        const int64_t s = lastKnownPlayhead + i;
+                        const bool valid = s >= 0 && s < oldDocLen && oldChans > 0;
+                        for (int ch = 0; ch < numCh; ++ch)
+                            seekOldTail.setSample(ch, i, valid
+                                ? docBuf.getSample(juce::jmin(ch, oldChans - 1), (int) s) : 0.0f);
+                    }
+                    seekCrossfadeActive = true;
                 }
 
                 // Reset the stretcher at the start of a play pass, or when the knobs cross the
@@ -709,9 +728,16 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             }
         }
 
+        // Our own record of where playback last was, kept independent of document.playhead
+        // itself so a manual seek overwriting that atomic doesn't erase what "old" means -- see
+        // lastKnownPlayhead's comment.
+        lastKnownPlayhead = document.playhead.load(std::memory_order_relaxed);
+
         // Declick ramp-in after a region-jump snap (see declickRemaining's comment) --
         // equal-power raised-cosine, same shape as loopFadeGain, just applied to the whole
-        // block's output rather than one region edge.
+        // block's output rather than one region edge. A manual seek's ramp also crossfades out
+        // seekOldTail (captured above, while docBuf was reachable) so the material the old
+        // playhead left behind fades out instead of just stopping -- see its comment.
         if (declickRemaining > 0)
         {
             const int n = juce::jmin(declickRemaining, numSamples);
@@ -722,9 +748,18 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                 const double s = std::sin(0.5 * juce::MathConstants<double>::pi * x);
                 const float g = (float) (s * s);
                 for (int ch = 0; ch < numCh; ++ch)
-                    buffer.setSample(ch, i, buffer.getSample(ch, i) * g);
+                {
+                    const float in = buffer.getSample(ch, i) * g;
+                    // seekOldTail is indexed globally across the whole ramp (like `x` above),
+                    // not per-block, since the ramp -- and so the tail -- can span more than
+                    // one block.
+                    const float old = seekCrossfadeActive ? seekOldTail.getSample(ch, done + i) * (1.0f - g) : 0.0f;
+                    buffer.setSample(ch, i, in + old);
+                }
             }
             declickRemaining -= n;
+            if (declickRemaining <= 0)
+                seekCrossfadeActive = false;
         }
 
         // Amplify panel audition (see AudioDocument::previewGainLinear's comment): while the

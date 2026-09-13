@@ -192,6 +192,23 @@ private:
     int declickLen = 0;
     int declickRemaining = 0;
 
+    // The declick ramp above only softens the *incoming* edge of a jump -- fine for a plain
+    // region-jump reset (fresh Play, Undo, a new file...), where there's no coherent "old"
+    // material to blend from anyway. A manual seek while playing (see declickRequested's
+    // comment on AudioDocument) is different: the audio right where the old playhead left off
+    // was still playing normally, and cutting it off abruptly is *itself* an audible click on
+    // top of the incoming one, however well that one's softened. `seekCrossfadeActive` marks
+    // that the current declick ramp should also crossfade in `seekOldTail` -- a short, ordinary
+    // continuation of the material from wherever the playhead was a moment ago (captured once,
+    // while the lock is held, at the instant the seek is detected), fading it out exactly as
+    // the new position fades in. `lastKnownPlayhead` is what makes that possible at all: our
+    // own record of where playback last was, updated at the end of every playing block, so it
+    // still holds the *old* value at the moment a manual seek has already overwritten
+    // `document.playhead` itself.
+    bool seekCrossfadeActive = false;
+    juce::AudioBuffer<float> seekOldTail;
+    int64_t lastKnownPlayhead = 0;
+
     // While AudioDocument::selectionEdgeDragging is nonzero (a Start/End knob or waveform
     // bracket is being dragged), regionStart/regionEnd below are slewed toward their live
     // (fast-moving) values instead of being read straight through -- so the window that's
