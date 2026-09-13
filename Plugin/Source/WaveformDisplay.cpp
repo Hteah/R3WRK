@@ -1185,9 +1185,11 @@ void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
         switch (hitEdge((float) e.x, sx, ex, edgeTolerancePx))
         {
             case EdgeHit::resizeStart:
-                dragKind = DragKind::resizeStart; dragAnchor = document.getSelectionEnd();   return;
+                dragKind = DragKind::resizeStart; dragAnchor = document.getSelectionEnd();
+                document.selectionEdgeDragging = true; return;
             case EdgeHit::resizeEnd:
-                dragKind = DragKind::resizeEnd;   dragAnchor = document.getSelectionStart(); return;
+                dragKind = DragKind::resizeEnd;   dragAnchor = document.getSelectionStart();
+                document.selectionEdgeDragging = true; return;
             case EdgeHit::newSelection:
                 break;
         }
@@ -1204,6 +1206,7 @@ void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
     // The playhead move / selection clear waits for mouseUp, so we can tell a click from a drag.
     dragKind = DragKind::newSelection;
     dragAnchor = f;
+    document.selectionEdgeDragging = true;   // harmless if this turns out to be just a click
 }
 
 int WaveformDisplay::sliceMarkerAtPixel(float x, float tolPx) const
@@ -1315,6 +1318,7 @@ void WaveformDisplay::mouseDrag(const juce::MouseEvent& e)
 void WaveformDisplay::mouseUp(const juce::MouseEvent& e)
 {
     edgeScrollDir = 0;   // the drag is over -- stop any edge auto-scroll
+    document.selectionEdgeDragging = false;   // no-op if it was never set for this gesture
 
     if (document.sliceModeEnabled)
     {

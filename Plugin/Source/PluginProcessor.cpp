@@ -71,7 +71,7 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     lastAppliedPitchScale = -1.0;
     stretchRatioNeedsSnap = true;
 
-    wasPlaying = false; declickRemaining = 0;
+    wasPlaying = false; declickRemaining = 0; scrubMuteGain = 1.0f;
     stretcherPrimed = false;
     rtFinished = false;
     wasScrubbing = false;
@@ -98,7 +98,7 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 void R3WRKAudioProcessor::releaseResources()
 {
     rtStretcher.reset();
-    wasPlaying = false; declickRemaining = 0;
+    wasPlaying = false; declickRemaining = 0; scrubMuteGain = 1.0f;
     stretcherPrimed = false;
     rtFinished = false;
     wasScrubbing = false;
@@ -392,7 +392,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     if (blackBoxPreviewPlaying.load(std::memory_order_relaxed))
     {
         renderBlackBoxPreview(buffer, numCh, numSamples);
-        wasPlaying = false; declickRemaining = 0;
+        wasPlaying = false; declickRemaining = 0; scrubMuteGain = 1.0f;
         return;
     }
 
@@ -401,7 +401,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         // ScreenCaptureKit is doing the capture on its own queue (appendDesktopSamples) --
         // nothing here to record or monitor.
         buffer.clear();
-        wasPlaying = false; declickRemaining = 0;
+        wasPlaying = false; declickRemaining = 0; scrubMuteGain = 1.0f;
         return;
     }
 
@@ -431,7 +431,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         }
         document.recordedSamples.store(recordingWritePos, std::memory_order_relaxed);
 
-        wasPlaying = false; declickRemaining = 0;
+        wasPlaying = false; declickRemaining = 0; scrubMuteGain = 1.0f;
         return; // pass input through unchanged so the user can monitor while recording
     }
 
@@ -451,7 +451,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         captureOutput(buffer, numCh, numSamples);
 
         wasScrubbing = true;
-        wasPlaying = false; declickRemaining = 0;   // so normal playback resets the stretcher cleanly if it resumes
+        wasPlaying = false; declickRemaining = 0; scrubMuteGain = 1.0f;   // so normal playback resets the stretcher cleanly if it resumes
         return;
     }
     wasScrubbing = false;
@@ -557,6 +557,26 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             declickRemaining -= n;
         }
 
+        // Selection-drag mute (see AudioDocument::selectionEdgeDragging / scrubMuteGain's
+        // comments): a Start/End drag calls setSelection() far faster than the region-jump
+        // snap above can gracefully follow, which is the flutter the user heard as scratching.
+        // Fade toward silence while the drag is live; the region-jump declick already covers
+        // fading back in once it lands on the settled region.
+        {
+            const bool dragging = document.selectionEdgeDragging.load(std::memory_order_relaxed);
+            const int muteRampLen = (int) juce::jmax(1.0, 0.008 * currentSampleRate);   // ~8 ms, matches declickLen
+            const float muteRampPerSample = 1.0f / (float) muteRampLen;
+            const float target = dragging ? 0.0f : 1.0f;
+            for (int i = 0; i < numSamples; ++i)
+            {
+                scrubMuteGain = target < scrubMuteGain
+                    ? juce::jmax(target, scrubMuteGain - muteRampPerSample)
+                    : juce::jmin(target, scrubMuteGain + muteRampPerSample);
+                for (int ch = 0; ch < numCh; ++ch)
+                    buffer.setSample(ch, i, buffer.getSample(ch, i) * scrubMuteGain);
+            }
+        }
+
         // Amplify panel audition (see AudioDocument::previewGainLinear's comment): while the
         // panel's slider is being dragged, hear the gain change on whatever's currently
         // playing -- normally the selection, looped for the panel's lifetime by AmplifyPanel
@@ -581,7 +601,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         return;
     }
 
-    wasPlaying = false; declickRemaining = 0;
+    wasPlaying = false; declickRemaining = 0; scrubMuteGain = 1.0f;
 
     // Neither recording nor playing back: leave `buffer` untouched so the host's input
     // passes straight through -- except Auto-Record standby, which watches that same

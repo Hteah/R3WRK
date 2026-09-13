@@ -192,6 +192,12 @@ private:
     int declickLen = 0;
     int declickRemaining = 0;
 
+    // Ducks playback to silence for as long as AudioDocument::selectionEdgeDragging reads true
+    // (a Start/End knob or waveform bracket is being dragged) -- see that flag's comment. Ramps
+    // toward 0 or 1 a sample at a time rather than snapping, so neither muting nor unmuting is
+    // itself a click; the declick ramp above still covers the position jump once unmuted.
+    float scrubMuteGain = 1.0f;
+
     // Modelled Monomachine multimode filter on the playback output (after the stretcher). One
     // MultiModeFilter per channel; all four knob values are per-block-smoothed so a sweep
     // doesn't zipper the coefficients. Reset on a fresh play pass and when the engaged line is
