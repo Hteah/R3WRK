@@ -193,19 +193,17 @@ private:
     int declickRemaining = 0;
 
     // While AudioDocument::selectionEdgeDragging is nonzero (a Start/End knob or waveform
-    // bracket is being dragged), playback is rendered by renderDragChase() instead of the
-    // ordinary region logic above: a continuously interpolated read position that chases
-    // wherever the dragged edge currently sits, at a speed proportional to the remaining
-    // distance (capped, so a big jump sounds like a fast tape wind rather than a shriek) and
-    // settling to plain 1x forward once it catches up. `dragChasePos` is the fractional read
-    // position, carried across blocks; `dragChaseActive` is false until the first dragging
-    // block seeds it from the live playhead. Because it's chasing the exact point regionStart/
-    // End will resolve to, handing back to ordinary playback on release needs no ramp of its
-    // own -- it's already at (or a few samples from) the settled region.
-    double dragChasePos = 0.0;
-    bool   dragChaseActive = false;
-    void renderDragChase(juce::AudioBuffer<float>& out, int numCh, int numSamples,
-                         const juce::AudioBuffer<float>& docBuf, double& pos, double target);
+    // bracket is being dragged), regionStart/regionEnd below are slewed toward their live
+    // (fast-moving) values instead of being read straight through -- so the window that's
+    // actually playing scans smoothly across the file instead of teleporting every block, and
+    // the ordinary loop/gatherRegion machinery keeps genuinely playing it the whole time (real
+    // audio, real pitch, real loop crossfade -- not a synthesized stand-in). `dragRegionStart/
+    // End` are the smoothed (fractional) edges, carried across blocks; `dragRegionSeeded` is
+    // false until the first dragging block seeds them from the live region, and gets cleared
+    // again on release so the *next* drag starts fresh rather than resuming a stale slew.
+    double dragRegionStart = 0.0;
+    double dragRegionEnd   = 0.0;
+    bool   dragRegionSeeded = false;
 
     // Modelled Monomachine multimode filter on the playback output (after the stretcher). One
     // MultiModeFilter per channel; all four knob values are per-block-smoothed so a sweep

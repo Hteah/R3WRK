@@ -408,10 +408,11 @@ public:
     // moving, 2 = the End edge is moving. setSelection() fires on every mouse-move/knob-step
     // during that, and hard-resyncing a live playhead into the ever-moving region on every
     // audio block sounded like scratching/crackling; muting for the duration killed the
-    // crackle but also killed the "hear where you're trimming to" feedback the user liked.
-    // PluginProcessor::processBlock instead chases the moving edge with a smoothly
-    // interpolated read position (see renderDragChase) -- audible, tape-scrub-like feedback
-    // that closes in on wherever the edge currently sits rather than teleporting there.
+    // crackle but also killed the "hear where you're trimming to" feedback, and a synthetic
+    // tape-wind chase (an earlier attempt) always sounded the same regardless of the actual
+    // material. PluginProcessor::processBlock instead slews regionStart/regionEnd toward their
+    // live values at a bounded rate, so the *real* loop -- ordinary machinery, real audio, real
+    // pitch, real loop crossfade -- scans smoothly across the file instead of teleporting.
     // Set/cleared from KnobRow's Start/End sliders and WaveformDisplay's selection mouse handling.
     std::atomic<int> selectionEdgeDragging { 0 };
 

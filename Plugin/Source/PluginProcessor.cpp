@@ -71,7 +71,7 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     lastAppliedPitchScale = -1.0;
     stretchRatioNeedsSnap = true;
 
-    wasPlaying = false; declickRemaining = 0; dragChaseActive = false;
+    wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false;
     stretcherPrimed = false;
     rtFinished = false;
     wasScrubbing = false;
@@ -98,7 +98,7 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 void R3WRKAudioProcessor::releaseResources()
 {
     rtStretcher.reset();
-    wasPlaying = false; declickRemaining = 0; dragChaseActive = false;
+    wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false;
     stretcherPrimed = false;
     rtFinished = false;
     wasScrubbing = false;
@@ -375,53 +375,6 @@ void R3WRKAudioProcessor::renderScrub(juce::AudioBuffer<float>& out, int numCh, 
     document.playhead.store((int64_t) scrubReadPos, std::memory_order_relaxed);
 }
 
-// Called only while a Start/End edge is actively being dragged (see selectionEdgeDragging's
-// comment on AudioDocument). `target` is wherever that edge currently sits -- moving every
-// block as the drag continues. Rather than teleporting `pos` there (the click storm this
-// replaced) or muting, this closes the gap at a speed proportional to the remaining distance:
-// far away moves fast (bounded, so a huge jump sounds like a fast tape wind, not a shriek),
-// close up moves slow, and once within a few samples it locks to plain 1x forward -- so
-// pausing mid-drag just plays on normally from there instead of sitting frozen. Same
-// fractional linear-interpolation read as renderScrub, just velocity-driven by distance-to-
-// target instead of a user-set scrub-shuttle rate.
-void R3WRKAudioProcessor::renderDragChase(juce::AudioBuffer<float>& out, int numCh, int numSamples,
-                                          const juce::AudioBuffer<float>& docBuf,
-                                          double& pos, double target)
-{
-    const int64_t docLen = docBuf.getNumSamples();
-    if (docLen <= 1 || docBuf.getNumChannels() <= 0)
-        return;
-
-    constexpr double catchUpGainPerSec = 8.0;              // velocity = distance * this
-    constexpr double maxCatchUpSpeed   = 44100.0 * 6.0;    // cap: ~6x normal speed's worth
-    constexpr double settleSamples     = 4.0;              // this close -> just play forward
-
-    const double distance = target - pos;
-    const double velocity = std::abs(distance) <= settleSamples
-        ? currentSampleRate                                // settled: ordinary 1x forward
-        : juce::jlimit(-maxCatchUpSpeed, maxCatchUpSpeed, distance * catchUpGainPerSec);
-    const double perSample = velocity / juce::jmax(1.0, currentSampleRate);
-
-    for (int i = 0; i < numSamples; ++i)
-    {
-        if (pos >= 0.0 && pos < (double) (docLen - 1))
-        {
-            const int64_t i0 = (int64_t) pos;
-            const float frac = (float) (pos - (double) i0);
-            for (int ch = 0; ch < numCh; ++ch)
-            {
-                const int srcCh = juce::jmin(ch, docBuf.getNumChannels() - 1);
-                const float* d = docBuf.getReadPointer(srcCh);
-                out.setSample(ch, i, d[i0] + (d[i0 + 1] - d[i0]) * frac);
-            }
-        }
-        // else: past either end -- leave this sample silent (buffer is already cleared)
-        pos += perSample;
-    }
-
-    pos = juce::jlimit(0.0, (double) (docLen - 1), pos);
-}
-
 void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
     juce::ScopedNoDenormals noDenormals;
@@ -439,7 +392,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     if (blackBoxPreviewPlaying.load(std::memory_order_relaxed))
     {
         renderBlackBoxPreview(buffer, numCh, numSamples);
-        wasPlaying = false; declickRemaining = 0; dragChaseActive = false;
+        wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false;
         return;
     }
 
@@ -448,7 +401,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         // ScreenCaptureKit is doing the capture on its own queue (appendDesktopSamples) --
         // nothing here to record or monitor.
         buffer.clear();
-        wasPlaying = false; declickRemaining = 0; dragChaseActive = false;
+        wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false;
         return;
     }
 
@@ -478,7 +431,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         }
         document.recordedSamples.store(recordingWritePos, std::memory_order_relaxed);
 
-        wasPlaying = false; declickRemaining = 0; dragChaseActive = false;
+        wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false;
         return; // pass input through unchanged so the user can monitor while recording
     }
 
@@ -498,7 +451,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         captureOutput(buffer, numCh, numSamples);
 
         wasScrubbing = true;
-        wasPlaying = false; declickRemaining = 0; dragChaseActive = false;   // so normal playback resets the stretcher cleanly if it resumes
+        wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false;   // so normal playback resets the stretcher cleanly if it resumes
         return;
     }
     wasScrubbing = false;
@@ -506,44 +459,6 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     if (document.isPlaying.load(std::memory_order_relaxed))
     {
         buffer.clear();
-
-        // A Start/End edge is being actively dragged -- chase it with a smoothly interpolated
-        // read position instead of running the ordinary region logic below (see
-        // renderDragChase's header comment and selectionEdgeDragging's comment on
-        // AudioDocument). Skips the stretcher/region/declick machinery entirely; none of it
-        // applies while the destination itself is still moving under the mouse.
-        const int dragEdge = document.selectionEdgeDragging.load(std::memory_order_relaxed);
-        if (dragEdge != 0)
-        {
-            const juce::CriticalSection::ScopedTryLockType stl(document.getLock());
-            if (stl.isLocked())
-            {
-                auto& docBuf = document.getBuffer();
-                if (docBuf.getNumSamples() > 1 && docBuf.getNumChannels() > 0)
-                {
-                    const auto sel = document.getSelection();
-                    const double target = dragEdge == 1 ? (double) sel.getStart() : (double) sel.getEnd();
-                    if (! dragChaseActive)
-                    {
-                        dragChasePos = (double) document.playhead.load(std::memory_order_relaxed);
-                        dragChaseActive = true;
-                    }
-                    renderDragChase(buffer, numCh, numSamples, docBuf, dragChasePos, target);
-                }
-            }
-            applyPlaybackGain(buffer, numCh, numSamples);
-            captureOutput(buffer, numCh, numSamples);
-            wasPlaying = true;
-            return;
-        }
-        if (dragChaseActive)
-        {
-            // Just released -- hand off to the ordinary region logic below from wherever the
-            // chase landed. It was chasing the exact point regionStart/End resolves to, so
-            // this is already at (or a few samples from) the settled region: no jump, no click.
-            document.playhead.store((int64_t) dragChasePos, std::memory_order_relaxed);
-            dragChaseActive = false;
-        }
 
         if (! wasPlaying)
             playbackDir = 1;   // every fresh play pass starts forward
@@ -571,9 +486,53 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             const int64_t loopStartS = document.loopStart.load(std::memory_order_relaxed);
             const int64_t loopEndS   = document.loopEnd.load(std::memory_order_relaxed);
 
-            int64_t regionStart = 0, regionEnd = docLen;
-            if (selE > selS)                              { regionStart = selS;       regionEnd = selE; }
-            else if (loop && loopEndS > loopStartS)       { regionStart = loopStartS; regionEnd = loopEndS; }
+            int64_t rawRegionStart = 0, rawRegionEnd = docLen;
+            if (selE > selS)                              { rawRegionStart = selS;       rawRegionEnd = selE; }
+            else if (loop && loopEndS > loopStartS)       { rawRegionStart = loopStartS; rawRegionEnd = loopEndS; }
+
+            // A Start/End knob or waveform bracket is being dragged: setSelection() fires far
+            // faster than a hard-snapped playhead can gracefully follow, which used to be an
+            // audible click storm (region-jump-per-block) and then, briefly, a full mute or a
+            // synthetic tape-wind chase. Neither kept the thing the user actually wanted: the
+            // *real* loop genuinely playing while it scans across the file. So instead, slew
+            // the region edges themselves toward their live values at a bounded, distance-
+            // proportional rate (same shape as the loop-crossfade/declick envelopes elsewhere)
+            // -- the window that's actually looping/playing below then scans smoothly across
+            // the file rather than teleporting, with the ordinary machinery (loop wrap,
+            // crossfade, ping-pong, RubberBand if engaged) still genuinely rendering it the
+            // whole time. `dragRegionSeeded` means "these are live", not "the file's default
+            // 0..docLen" -- without it the very first dragging block would slew from the wrong
+            // starting point.
+            const int dragEdge = document.selectionEdgeDragging.load(std::memory_order_relaxed);
+            int64_t regionStart, regionEnd;
+            if (dragEdge != 0)
+            {
+                if (! dragRegionSeeded)
+                {
+                    dragRegionStart = (double) rawRegionStart;
+                    dragRegionEnd   = (double) rawRegionEnd;
+                    dragRegionSeeded = true;
+                }
+                constexpr double slewGainPerSec = 8.0;   // catch-up rate = distance * this
+                const double maxSlewSpeed = currentSampleRate * 6.0;   // cap: ~6x normal speed
+                const double dt = (double) numSamples / juce::jmax(1.0, currentSampleRate);
+                auto slew = [&](double& smoothed, int64_t target)
+                {
+                    const double distance = (double) target - smoothed;
+                    const double vel = juce::jlimit(-maxSlewSpeed, maxSlewSpeed, distance * slewGainPerSec);
+                    smoothed += vel * dt;
+                };
+                slew(dragRegionStart, rawRegionStart);
+                slew(dragRegionEnd,   rawRegionEnd);
+                regionStart = (int64_t) std::llround(dragRegionStart);
+                regionEnd   = juce::jmax(regionStart + 1, (int64_t) std::llround(dragRegionEnd));
+            }
+            else
+            {
+                dragRegionSeeded = false;   // next drag starts fresh from wherever the region is
+                regionStart = rawRegionStart;
+                regionEnd   = rawRegionEnd;
+            }
 
             // Ping-pong needs at least 3 frames to have a distinct return leg; below that it
             // just plays as a plain loop.
@@ -666,7 +625,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         return;
     }
 
-    wasPlaying = false; declickRemaining = 0; dragChaseActive = false;
+    wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false;
 
     // Neither recording nor playing back: leave `buffer` untouched so the host's input
     // passes straight through -- except Auto-Record standby, which watches that same
