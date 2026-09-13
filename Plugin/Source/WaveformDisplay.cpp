@@ -1186,10 +1186,10 @@ void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
         {
             case EdgeHit::resizeStart:
                 dragKind = DragKind::resizeStart; dragAnchor = document.getSelectionEnd();
-                document.selectionEdgeDragging = true; return;
+                document.selectionEdgeDragging = 1; return;
             case EdgeHit::resizeEnd:
                 dragKind = DragKind::resizeEnd;   dragAnchor = document.getSelectionStart();
-                document.selectionEdgeDragging = true; return;
+                document.selectionEdgeDragging = 2; return;
             case EdgeHit::newSelection:
                 break;
         }
@@ -1206,7 +1206,12 @@ void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
     // The playhead move / selection clear waits for mouseUp, so we can tell a click from a drag.
     dragKind = DragKind::newSelection;
     dragAnchor = f;
-    document.selectionEdgeDragging = true;   // harmless if this turns out to be just a click
+    // Chase the End edge as a reasonable default -- harmless if this turns out to be just a
+    // click. Not perfect: dragging leftward from the anchor actually moves Start, not End, and
+    // there's no cheap way to tell processBlock which edge is live here, so that direction gets
+    // a static chase target instead of a moving one. Still strictly better than the full mute
+    // this replaced, and the common case (dragging rightward to sweep out a selection) is exact.
+    document.selectionEdgeDragging = 2;
 }
 
 int WaveformDisplay::sliceMarkerAtPixel(float x, float tolPx) const
@@ -1318,7 +1323,7 @@ void WaveformDisplay::mouseDrag(const juce::MouseEvent& e)
 void WaveformDisplay::mouseUp(const juce::MouseEvent& e)
 {
     edgeScrollDir = 0;   // the drag is over -- stop any edge auto-scroll
-    document.selectionEdgeDragging = false;   // no-op if it was never set for this gesture
+    document.selectionEdgeDragging = 0;   // no-op if it was never set for this gesture
 
     if (document.sliceModeEnabled)
     {

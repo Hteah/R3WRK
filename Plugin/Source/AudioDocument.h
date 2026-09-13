@@ -403,14 +403,17 @@ public:
     std::atomic<float> previewGainLinear { 1.0f };   // Amplify preview: linear gain
     double previewStretchRatio = 1.0;    // Stretch preview: the selection's visual width multiplier
 
-    // True while a selection edge (Start/End knob, or a bracket dragged directly in
-    // WaveformDisplay) is actively being dragged -- setSelection() fires on every mouse-move/
-    // knob-step during that, and hard-resyncing a live playhead into the ever-moving region on
-    // every audio block sounded like scratching/crackling. PluginProcessor::processBlock ducks
-    // playback to silence (short fade both ways, not a hard mute) for as long as this is true,
-    // and resumes cleanly -- via the ordinary region-jump declick -- once it drops back to false.
+    // Nonzero while a selection edge (Start/End knob, or a bracket dragged directly in
+    // WaveformDisplay) is actively being dragged: 0 = not dragging, 1 = the Start edge is
+    // moving, 2 = the End edge is moving. setSelection() fires on every mouse-move/knob-step
+    // during that, and hard-resyncing a live playhead into the ever-moving region on every
+    // audio block sounded like scratching/crackling; muting for the duration killed the
+    // crackle but also killed the "hear where you're trimming to" feedback the user liked.
+    // PluginProcessor::processBlock instead chases the moving edge with a smoothly
+    // interpolated read position (see renderDragChase) -- audible, tape-scrub-like feedback
+    // that closes in on wherever the edge currently sits rather than teleporting there.
     // Set/cleared from KnobRow's Start/End sliders and WaveformDisplay's selection mouse handling.
-    std::atomic<bool> selectionEdgeDragging { false };
+    std::atomic<int> selectionEdgeDragging { 0 };
 
     //==============================================================================
     // Internal: used by the undo action to swap buffer/selection state directly.

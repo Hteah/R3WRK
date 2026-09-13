@@ -71,7 +71,7 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     lastAppliedPitchScale = -1.0;
     stretchRatioNeedsSnap = true;
 
-    wasPlaying = false; declickRemaining = 0; scrubMuteGain = 1.0f;
+    wasPlaying = false; declickRemaining = 0; dragChaseActive = false;
     stretcherPrimed = false;
     rtFinished = false;
     wasScrubbing = false;
@@ -98,7 +98,7 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 void R3WRKAudioProcessor::releaseResources()
 {
     rtStretcher.reset();
-    wasPlaying = false; declickRemaining = 0; scrubMuteGain = 1.0f;
+    wasPlaying = false; declickRemaining = 0; dragChaseActive = false;
     stretcherPrimed = false;
     rtFinished = false;
     wasScrubbing = false;
@@ -375,6 +375,53 @@ void R3WRKAudioProcessor::renderScrub(juce::AudioBuffer<float>& out, int numCh, 
     document.playhead.store((int64_t) scrubReadPos, std::memory_order_relaxed);
 }
 
+// Called only while a Start/End edge is actively being dragged (see selectionEdgeDragging's
+// comment on AudioDocument). `target` is wherever that edge currently sits -- moving every
+// block as the drag continues. Rather than teleporting `pos` there (the click storm this
+// replaced) or muting, this closes the gap at a speed proportional to the remaining distance:
+// far away moves fast (bounded, so a huge jump sounds like a fast tape wind, not a shriek),
+// close up moves slow, and once within a few samples it locks to plain 1x forward -- so
+// pausing mid-drag just plays on normally from there instead of sitting frozen. Same
+// fractional linear-interpolation read as renderScrub, just velocity-driven by distance-to-
+// target instead of a user-set scrub-shuttle rate.
+void R3WRKAudioProcessor::renderDragChase(juce::AudioBuffer<float>& out, int numCh, int numSamples,
+                                          const juce::AudioBuffer<float>& docBuf,
+                                          double& pos, double target)
+{
+    const int64_t docLen = docBuf.getNumSamples();
+    if (docLen <= 1 || docBuf.getNumChannels() <= 0)
+        return;
+
+    constexpr double catchUpGainPerSec = 8.0;              // velocity = distance * this
+    constexpr double maxCatchUpSpeed   = 44100.0 * 6.0;    // cap: ~6x normal speed's worth
+    constexpr double settleSamples     = 4.0;              // this close -> just play forward
+
+    const double distance = target - pos;
+    const double velocity = std::abs(distance) <= settleSamples
+        ? currentSampleRate                                // settled: ordinary 1x forward
+        : juce::jlimit(-maxCatchUpSpeed, maxCatchUpSpeed, distance * catchUpGainPerSec);
+    const double perSample = velocity / juce::jmax(1.0, currentSampleRate);
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        if (pos >= 0.0 && pos < (double) (docLen - 1))
+        {
+            const int64_t i0 = (int64_t) pos;
+            const float frac = (float) (pos - (double) i0);
+            for (int ch = 0; ch < numCh; ++ch)
+            {
+                const int srcCh = juce::jmin(ch, docBuf.getNumChannels() - 1);
+                const float* d = docBuf.getReadPointer(srcCh);
+                out.setSample(ch, i, d[i0] + (d[i0 + 1] - d[i0]) * frac);
+            }
+        }
+        // else: past either end -- leave this sample silent (buffer is already cleared)
+        pos += perSample;
+    }
+
+    pos = juce::jlimit(0.0, (double) (docLen - 1), pos);
+}
+
 void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
     juce::ScopedNoDenormals noDenormals;
@@ -392,7 +439,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     if (blackBoxPreviewPlaying.load(std::memory_order_relaxed))
     {
         renderBlackBoxPreview(buffer, numCh, numSamples);
-        wasPlaying = false; declickRemaining = 0; scrubMuteGain = 1.0f;
+        wasPlaying = false; declickRemaining = 0; dragChaseActive = false;
         return;
     }
 
@@ -401,7 +448,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         // ScreenCaptureKit is doing the capture on its own queue (appendDesktopSamples) --
         // nothing here to record or monitor.
         buffer.clear();
-        wasPlaying = false; declickRemaining = 0; scrubMuteGain = 1.0f;
+        wasPlaying = false; declickRemaining = 0; dragChaseActive = false;
         return;
     }
 
@@ -431,7 +478,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         }
         document.recordedSamples.store(recordingWritePos, std::memory_order_relaxed);
 
-        wasPlaying = false; declickRemaining = 0; scrubMuteGain = 1.0f;
+        wasPlaying = false; declickRemaining = 0; dragChaseActive = false;
         return; // pass input through unchanged so the user can monitor while recording
     }
 
@@ -451,7 +498,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         captureOutput(buffer, numCh, numSamples);
 
         wasScrubbing = true;
-        wasPlaying = false; declickRemaining = 0; scrubMuteGain = 1.0f;   // so normal playback resets the stretcher cleanly if it resumes
+        wasPlaying = false; declickRemaining = 0; dragChaseActive = false;   // so normal playback resets the stretcher cleanly if it resumes
         return;
     }
     wasScrubbing = false;
@@ -459,6 +506,44 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     if (document.isPlaying.load(std::memory_order_relaxed))
     {
         buffer.clear();
+
+        // A Start/End edge is being actively dragged -- chase it with a smoothly interpolated
+        // read position instead of running the ordinary region logic below (see
+        // renderDragChase's header comment and selectionEdgeDragging's comment on
+        // AudioDocument). Skips the stretcher/region/declick machinery entirely; none of it
+        // applies while the destination itself is still moving under the mouse.
+        const int dragEdge = document.selectionEdgeDragging.load(std::memory_order_relaxed);
+        if (dragEdge != 0)
+        {
+            const juce::CriticalSection::ScopedTryLockType stl(document.getLock());
+            if (stl.isLocked())
+            {
+                auto& docBuf = document.getBuffer();
+                if (docBuf.getNumSamples() > 1 && docBuf.getNumChannels() > 0)
+                {
+                    const auto sel = document.getSelection();
+                    const double target = dragEdge == 1 ? (double) sel.getStart() : (double) sel.getEnd();
+                    if (! dragChaseActive)
+                    {
+                        dragChasePos = (double) document.playhead.load(std::memory_order_relaxed);
+                        dragChaseActive = true;
+                    }
+                    renderDragChase(buffer, numCh, numSamples, docBuf, dragChasePos, target);
+                }
+            }
+            applyPlaybackGain(buffer, numCh, numSamples);
+            captureOutput(buffer, numCh, numSamples);
+            wasPlaying = true;
+            return;
+        }
+        if (dragChaseActive)
+        {
+            // Just released -- hand off to the ordinary region logic below from wherever the
+            // chase landed. It was chasing the exact point regionStart/End resolves to, so
+            // this is already at (or a few samples from) the settled region: no jump, no click.
+            document.playhead.store((int64_t) dragChasePos, std::memory_order_relaxed);
+            dragChaseActive = false;
+        }
 
         if (! wasPlaying)
             playbackDir = 1;   // every fresh play pass starts forward
@@ -557,26 +642,6 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             declickRemaining -= n;
         }
 
-        // Selection-drag mute (see AudioDocument::selectionEdgeDragging / scrubMuteGain's
-        // comments): a Start/End drag calls setSelection() far faster than the region-jump
-        // snap above can gracefully follow, which is the flutter the user heard as scratching.
-        // Fade toward silence while the drag is live; the region-jump declick already covers
-        // fading back in once it lands on the settled region.
-        {
-            const bool dragging = document.selectionEdgeDragging.load(std::memory_order_relaxed);
-            const int muteRampLen = (int) juce::jmax(1.0, 0.008 * currentSampleRate);   // ~8 ms, matches declickLen
-            const float muteRampPerSample = 1.0f / (float) muteRampLen;
-            const float target = dragging ? 0.0f : 1.0f;
-            for (int i = 0; i < numSamples; ++i)
-            {
-                scrubMuteGain = target < scrubMuteGain
-                    ? juce::jmax(target, scrubMuteGain - muteRampPerSample)
-                    : juce::jmin(target, scrubMuteGain + muteRampPerSample);
-                for (int ch = 0; ch < numCh; ++ch)
-                    buffer.setSample(ch, i, buffer.getSample(ch, i) * scrubMuteGain);
-            }
-        }
-
         // Amplify panel audition (see AudioDocument::previewGainLinear's comment): while the
         // panel's slider is being dragged, hear the gain change on whatever's currently
         // playing -- normally the selection, looped for the panel's lifetime by AmplifyPanel
@@ -601,7 +666,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         return;
     }
 
-    wasPlaying = false; declickRemaining = 0; scrubMuteGain = 1.0f;
+    wasPlaying = false; declickRemaining = 0; dragChaseActive = false;
 
     // Neither recording nor playing back: leave `buffer` untouched so the host's input
     // passes straight through -- except Auto-Record standby, which watches that same

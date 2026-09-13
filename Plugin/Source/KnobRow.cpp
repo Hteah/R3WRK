@@ -125,11 +125,11 @@ KnobRow::KnobRow(AudioDocument& doc, bool standalone)
         auto& k = addKnob("Start");
         startKnob = &k;
         k.slider.setRange(0.0, 1.0, 0.0);
-        // Playback ducks out for as long as this reads true -- see selectionEdgeDragging's
+        // Playback chases this edge for as long as it's set -- see selectionEdgeDragging's
         // comment on AudioDocument. Covers a drag started on the knob itself; the waveform's
         // own Start/End brackets set the same flag from WaveformDisplay's mouse handling.
-        k.slider.onDragStart = [this] { document.selectionEdgeDragging = true; };
-        k.slider.onDragEnd   = [this] { document.selectionEdgeDragging = false; };
+        k.slider.onDragStart = [this] { document.selectionEdgeDragging = 1; };
+        k.slider.onDragEnd   = [this] { document.selectionEdgeDragging = 0; };
         k.slider.textFromValueFunction = [this](double v)
         {
             return timeString(v * (double) document.getNumSamples()
@@ -167,8 +167,8 @@ KnobRow::KnobRow(AudioDocument& doc, bool standalone)
         endKnob = &k;
         k.slider.setRange(0.0, 1.0, 0.0);
         k.slider.setValue(1.0, juce::dontSendNotification);
-        k.slider.onDragStart = [this] { document.selectionEdgeDragging = true; };
-        k.slider.onDragEnd   = [this] { document.selectionEdgeDragging = false; };
+        k.slider.onDragStart = [this] { document.selectionEdgeDragging = 2; };
+        k.slider.onDragEnd   = [this] { document.selectionEdgeDragging = 0; };
         k.slider.textFromValueFunction = [this](double v)
         {
             return timeString(v * (double) document.getNumSamples()

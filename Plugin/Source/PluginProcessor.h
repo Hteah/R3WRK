@@ -192,11 +192,20 @@ private:
     int declickLen = 0;
     int declickRemaining = 0;
 
-    // Ducks playback to silence for as long as AudioDocument::selectionEdgeDragging reads true
-    // (a Start/End knob or waveform bracket is being dragged) -- see that flag's comment. Ramps
-    // toward 0 or 1 a sample at a time rather than snapping, so neither muting nor unmuting is
-    // itself a click; the declick ramp above still covers the position jump once unmuted.
-    float scrubMuteGain = 1.0f;
+    // While AudioDocument::selectionEdgeDragging is nonzero (a Start/End knob or waveform
+    // bracket is being dragged), playback is rendered by renderDragChase() instead of the
+    // ordinary region logic above: a continuously interpolated read position that chases
+    // wherever the dragged edge currently sits, at a speed proportional to the remaining
+    // distance (capped, so a big jump sounds like a fast tape wind rather than a shriek) and
+    // settling to plain 1x forward once it catches up. `dragChasePos` is the fractional read
+    // position, carried across blocks; `dragChaseActive` is false until the first dragging
+    // block seeds it from the live playhead. Because it's chasing the exact point regionStart/
+    // End will resolve to, handing back to ordinary playback on release needs no ramp of its
+    // own -- it's already at (or a few samples from) the settled region.
+    double dragChasePos = 0.0;
+    bool   dragChaseActive = false;
+    void renderDragChase(juce::AudioBuffer<float>& out, int numCh, int numSamples,
+                         const juce::AudioBuffer<float>& docBuf, double& pos, double target);
 
     // Modelled Monomachine multimode filter on the playback output (after the stretcher). One
     // MultiModeFilter per channel; all four knob values are per-block-smoothed so a sweep
