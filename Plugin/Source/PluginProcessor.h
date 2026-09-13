@@ -205,6 +205,25 @@ private:
     double dragRegionEnd   = 0.0;
     bool   dragRegionSeeded = false;
 
+    // The playhead always gets reset to exactly `regionStart` when it falls outside the
+    // region -- which is asymmetric with respect to which way the window is moving. Reset
+    // leaves it sitting at the window's *low* edge, so on a forward-moving window (regionStart
+    // itself climbing) it has zero margin: the very next sample of forward creep stray it
+    // again, forcing a reset (and a fresh declick ramp that never gets to finish) on
+    // essentially every block for as long as the window keeps moving. A backward-moving window
+    // instead retreats *away* from where the playhead already sits, so it stays validly inside
+    // for a full region-length's worth of movement before that happens -- normally the whole
+    // drag converges well within that margin, so it never needs a reset at all. That's the
+    // "forward stutters, backward is fine" the user found. Fix: while dragging, carry the
+    // playhead by however far regionStart itself moved this block (see the shift computation
+    // in processBlock) so it never gets left behind in the first place, on either side. Only
+    // done for the plain (non-RubberBand) path -- continuously nudging the read position under
+    // renderPlaybackStretched confused it into sustained distortion when this was first tried
+    // (reverted as eb4ec70/9376798); the direct-copy path has no such internal state to upset.
+    // `dragRegionStartInt` is the previous dragging block's rounded regionStart, i.e. what the
+    // shift is measured against.
+    int64_t dragRegionStartInt = 0;
+
     // Modelled Monomachine multimode filter on the playback output (after the stretcher). One
     // MultiModeFilter per channel; all four knob values are per-block-smoothed so a sweep
     // doesn't zipper the coefficients. Reset on a fresh play pass and when the engaged line is

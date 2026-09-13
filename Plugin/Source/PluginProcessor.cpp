@@ -511,6 +511,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                 {
                     dragRegionStart = (double) rawRegionStart;
                     dragRegionEnd   = (double) rawRegionEnd;
+                    dragRegionStartInt = rawRegionStart;   // so this block's shift computes to 0
                     dragRegionSeeded = true;
                 }
                 constexpr double slewGainPerSec = 8.0;   // catch-up rate = distance * this
@@ -526,6 +527,17 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                 slew(dragRegionEnd,   rawRegionEnd);
                 regionStart = (int64_t) std::llround(dragRegionStart);
                 regionEnd   = juce::jmax(regionStart + 1, (int64_t) std::llround(dragRegionEnd));
+
+                // Carry the playhead along with the window on the plain (non-RubberBand) path
+                // only -- see dragRegionStartInt's comment for why a forward drag needs this
+                // and a backward one doesn't, and why the stretched path is excluded.
+                if (! engaged)
+                {
+                    const int64_t shift = regionStart - dragRegionStartInt;
+                    if (shift != 0)
+                        document.playhead.fetch_add(shift, std::memory_order_relaxed);
+                }
+                dragRegionStartInt = regionStart;
             }
             else
             {
