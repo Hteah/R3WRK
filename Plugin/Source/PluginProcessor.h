@@ -183,6 +183,15 @@ private:
     double lastAppliedPitchScale = -1.0;
     bool   stretchRatioNeedsSnap = true;
 
+    // Dragging the Start/End knobs during playback moves the region under a live playhead;
+    // whenever that leaves `pos` outside the new region it gets snapped back to regionStart,
+    // which is an arbitrary splice point and pops. Ramp in from silence over a few ms right
+    // after such a snap instead -- can't un-click the frame that already played, but this
+    // covers the attack, which is the audible part. `declickLen` is the ramp's total length
+    // (samples), `declickRemaining` counts down from it each block.
+    int declickLen = 0;
+    int declickRemaining = 0;
+
     // Modelled Monomachine multimode filter on the playback output (after the stretcher). One
     // MultiModeFilter per channel; all four knob values are per-block-smoothed so a sweep
     // doesn't zipper the coefficients. Reset on a fresh play pass and when the engaged line is

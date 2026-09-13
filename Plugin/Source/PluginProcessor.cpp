@@ -71,7 +71,7 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     lastAppliedPitchScale = -1.0;
     stretchRatioNeedsSnap = true;
 
-    wasPlaying = false;
+    wasPlaying = false; declickRemaining = 0;
     stretcherPrimed = false;
     rtFinished = false;
     wasScrubbing = false;
@@ -98,7 +98,7 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 void R3WRKAudioProcessor::releaseResources()
 {
     rtStretcher.reset();
-    wasPlaying = false;
+    wasPlaying = false; declickRemaining = 0;
     stretcherPrimed = false;
     rtFinished = false;
     wasScrubbing = false;
@@ -392,7 +392,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     if (blackBoxPreviewPlaying.load(std::memory_order_relaxed))
     {
         renderBlackBoxPreview(buffer, numCh, numSamples);
-        wasPlaying = false;
+        wasPlaying = false; declickRemaining = 0;
         return;
     }
 
@@ -401,7 +401,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         // ScreenCaptureKit is doing the capture on its own queue (appendDesktopSamples) --
         // nothing here to record or monitor.
         buffer.clear();
-        wasPlaying = false;
+        wasPlaying = false; declickRemaining = 0;
         return;
     }
 
@@ -431,7 +431,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         }
         document.recordedSamples.store(recordingWritePos, std::memory_order_relaxed);
 
-        wasPlaying = false;
+        wasPlaying = false; declickRemaining = 0;
         return; // pass input through unchanged so the user can monitor while recording
     }
 
@@ -451,7 +451,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         captureOutput(buffer, numCh, numSamples);
 
         wasScrubbing = true;
-        wasPlaying = false;   // so normal playback resets the stretcher cleanly if it resumes
+        wasPlaying = false; declickRemaining = 0;   // so normal playback resets the stretcher cleanly if it resumes
         return;
     }
     wasScrubbing = false;
@@ -507,6 +507,12 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             {
                 pos = regionStart;                       // snap a stray playhead into the region
                 playbackDir = 1;
+
+                // That splice is an arbitrary jump in the waveform -- ramp in over a few ms
+                // so it's a soft thump instead of a pop (see the declick fields' comment).
+                declickLen = (int) juce::jlimit<int64_t>(1, 512,
+                    (int64_t) (0.008 * currentSampleRate));
+                declickRemaining = declickLen;
             }
 
             // Reset the stretcher at the start of a play pass, or when the knobs cross the
@@ -533,6 +539,24 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             }
         }
 
+        // Declick ramp-in after a region-jump snap (see declickRemaining's comment) --
+        // equal-power raised-cosine, same shape as loopFadeGain, just applied to the whole
+        // block's output rather than one region edge.
+        if (declickRemaining > 0)
+        {
+            const int n = juce::jmin(declickRemaining, numSamples);
+            const int done = declickLen - declickRemaining;
+            for (int i = 0; i < n; ++i)
+            {
+                const double x = juce::jlimit(0.0, 1.0, (double) (done + i) / (double) declickLen);
+                const double s = std::sin(0.5 * juce::MathConstants<double>::pi * x);
+                const float g = (float) (s * s);
+                for (int ch = 0; ch < numCh; ++ch)
+                    buffer.setSample(ch, i, buffer.getSample(ch, i) * g);
+            }
+            declickRemaining -= n;
+        }
+
         // Amplify panel audition (see AudioDocument::previewGainLinear's comment): while the
         // panel's slider is being dragged, hear the gain change on whatever's currently
         // playing -- normally the selection, looped for the panel's lifetime by AmplifyPanel
@@ -557,7 +581,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         return;
     }
 
-    wasPlaying = false;
+    wasPlaying = false; declickRemaining = 0;
 
     // Neither recording nor playing back: leave `buffer` untouched so the host's input
     // passes straight through -- except Auto-Record standby, which watches that same
