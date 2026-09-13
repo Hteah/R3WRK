@@ -1204,14 +1204,13 @@ void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
     }
 
     // The playhead move / selection clear waits for mouseUp, so we can tell a click from a drag.
+    // selectionEdgeDragging is deliberately NOT set here -- a plain click-to-seek while playing
+    // (no drag at all) must not route through the drag-scan path in processBlock, or it can race
+    // the click's own document.playhead write in mouseUp and clobber it back to the pre-click
+    // position (a real regression this caused once already). mouseDrag sets it once an actual
+    // drag -- i.e. an actual setSelection() -- starts happening.
     dragKind = DragKind::newSelection;
     dragAnchor = f;
-    // Chase the End edge as a reasonable default -- harmless if this turns out to be just a
-    // click. Not perfect: dragging leftward from the anchor actually moves Start, not End, and
-    // there's no cheap way to tell processBlock which edge is live here, so that direction gets
-    // a static chase target instead of a moving one. Still strictly better than the full mute
-    // this replaced, and the common case (dragging rightward to sweep out a selection) is exact.
-    document.selectionEdgeDragging = 2;
 }
 
 int WaveformDisplay::sliceMarkerAtPixel(float x, float tolPx) const
@@ -1307,7 +1306,16 @@ void WaveformDisplay::mouseDrag(const juce::MouseEvent& e)
     const int64_t hi = juce::jmax(dragAnchor, f);
 
     if (dragKind == DragKind::newSelection)
+    {
         document.setSelection(lo, hi);                    // end <= start reads as "no selection"
+        // Armed only here, once real dragging is actually happening -- see mouseDown's comment
+        // on why arming it there instead (on the mere press) broke plain click-to-seek. Chasing
+        // the End edge is a reasonable default -- harmless if this is a click (can't be, we're
+        // in mouseDrag) or a leftward sweep (that direction just gets a static rather than
+        // moving chase target, since there's no cheap way to tell processBlock which edge is
+        // actually live here; the common rightward-sweep case is exact).
+        document.selectionEdgeDragging = 2;
+    }
     else
         document.setSelection(lo, juce::jmax(hi, lo + 1));
 
