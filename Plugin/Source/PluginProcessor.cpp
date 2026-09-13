@@ -511,6 +511,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                 {
                     dragRegionStart = (double) rawRegionStart;
                     dragRegionEnd   = (double) rawRegionEnd;
+                    dragRegionStartInt = rawRegionStart;   // so this block's shift computes to 0
                     dragRegionSeeded = true;
                 }
                 constexpr double slewGainPerSec = 8.0;   // catch-up rate = distance * this
@@ -526,6 +527,18 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                 slew(dragRegionEnd,   rawRegionEnd);
                 regionStart = (int64_t) std::llround(dragRegionStart);
                 regionEnd   = juce::jmax(regionStart + 1, (int64_t) std::llround(dragRegionEnd));
+
+                // Carry the playhead along with the window as it slides -- see
+                // dragRegionStartInt's comment. Without this, a fast catch-up (window moving
+                // at up to the slew cap, playhead only ever advancing at 1x) falls behind the
+                // window on nearly every block and gets hard-resynced each time: individually
+                // softened by the declick ramp below, but as a train it's a sustained buzz --
+                // the "strange sound" while holding a big drag. Zero on the seeding block
+                // (dragRegionStartInt is freshly set to match, just above).
+                const int64_t shift = regionStart - dragRegionStartInt;
+                if (shift != 0)
+                    document.playhead.fetch_add(shift, std::memory_order_relaxed);
+                dragRegionStartInt = regionStart;
             }
             else
             {
