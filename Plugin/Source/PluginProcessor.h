@@ -205,18 +205,6 @@ private:
     double dragRegionEnd   = 0.0;
     bool   dragRegionSeeded = false;
 
-    // The window sliding (regionStart moving) is not the same thing as the playhead being
-    // stray -- but left alone, the ordinary "pos outside regionStart..regionEnd" check can't
-    // tell them apart, and during a fast catch-up (window scanning at up to the slew cap while
-    // pos only advances at 1x) it fires on nearly *every block*, each with its own declick
-    // ramp: individually soft, but a sustained buzz/tone as a train -- the "strange sound"
-    // while holding a big drag. Fix: carry the playhead by however far regionStart itself moved
-    // this block (see the shift computation in processBlock), so its position *within* the loop
-    // stays continuous and that check goes back to firing only for genuine discontinuities
-    // (undo, a new file, Slice nav...). `dragRegionStartInt` is the rounded regionStart from
-    // the last dragging block, i.e. what the shift is measured against.
-    int64_t dragRegionStartInt = 0;
-
     // Modelled Monomachine multimode filter on the playback output (after the stretcher). One
     // MultiModeFilter per channel; all four knob values are per-block-smoothed so a sweep
     // doesn't zipper the coefficients. Reset on a fresh play pass and when the engaged line is
