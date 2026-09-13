@@ -220,8 +220,12 @@ private:
     // never leaves it behind in the first place. Deliberately one-directional -- carrying it
     // backward too (tried once) actively broke the backward case, dragging the playhead along
     // with a retreating window instead of leaving its own valid forward progress alone,
-    // reintroducing the exact stutter in the direction that never had it. Also plain
-    // (non-RubberBand) path only -- continuously nudging the read position under
+    // reintroducing the exact stutter in the direction that never had it. Each carried jump is
+    // just as discontinuous as the reset it replaces -- there's no way around that, skipping a
+    // sample-accurate read position across un-played content can't itself sound continuous --
+    // so processBlock declicks it explicitly too (the check that declicks the old reset path
+    // deliberately never fires here, since the whole point is keeping the playhead in-range).
+    // Also plain (non-RubberBand) path only -- continuously nudging the read position under
     // renderPlaybackStretched confused it into sustained distortion when this was first tried
     // (reverted as eb4ec70/9376798); the direct-copy path has no such internal state to upset.
     // `dragRegionStartInt` is the previous dragging block's rounded regionStart, i.e. what the

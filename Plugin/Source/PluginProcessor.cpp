@@ -539,7 +539,22 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                 // progress alone, which is what "still plays the audio between the scans" (the
                 // whole point of this feature) actually depends on.
                 if (! engaged && regionStart > dragRegionStartInt)
+                {
                     document.playhead.fetch_add(regionStart - dragRegionStartInt, std::memory_order_relaxed);
+
+                    // This splice is exactly as discontinuous as the hard-reset it replaces --
+                    // carrying a sample-accurate read position forward across un-played content
+                    // can never itself sound continuous, whatever you call the mechanism that
+                    // moves it. The old reset-to-regionStart went through the declick check
+                    // below and got softened every time; deliberately avoiding that check is
+                    // exactly what silently dropped the declick here too. Declick it the same
+                    // way explicitly, so a fast forward catch-up is a train of soft thumps
+                    // again (the least-bad option -- see the header comment) instead of raw
+                    // clicks on every block.
+                    declickLen = (int) juce::jlimit<int64_t>(1, 512,
+                        (int64_t) (0.008 * currentSampleRate));
+                    declickRemaining = declickLen;
+                }
                 dragRegionStartInt = regionStart;
             }
             else
