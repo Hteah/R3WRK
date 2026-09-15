@@ -159,16 +159,6 @@ KnobRow::KnobRow(AudioDocument& doc, bool standalone)
                 // until it can't slide any further. Only the End knob changes the length.
                 s = juce::jlimit((int64_t) 0, juce::jmax((int64_t) 0, n - length), s);
                 e = s + length;
-                // `e` here is a pure arithmetic offset from the (already snapped) `s` -- snapping
-                // `s` alone doesn't put `e` anywhere near a zero crossing too, since real audio's
-                // zero crossings aren't evenly spaced exactly `length` apart. This was the
-                // still-clicking case a whole-loop slide (as opposed to a resize) exposed: only
-                // one of the two loop points was ever actually landing on zero. Snap `e`
-                // independently too; the loop's length can drift very slightly as it slides
-                // across different material as a result, which is the accepted trade for both
-                // ends actually being click-safe.
-                if (document.selectionEdgeDragging.load() == 1)
-                    e = document.nearestZeroCrossing(e);
             }
             else
             {
