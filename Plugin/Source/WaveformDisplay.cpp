@@ -109,7 +109,7 @@ void WaveformDisplay::timerCallback()
         const float stepPx = juce::jlimit(8.0f, 40.0f, depthPastInner * 1.5f);
         panByPixels((float) -edgeScrollDir * stepPx);   // dir +1 -> viewStart increases
 
-        const int64_t f  = document.nearestZeroCrossing(xToSample(edgeScrollMouseX));
+        const int64_t f  = xToSample(edgeScrollMouseX);
         const int64_t lo = juce::jmin(dragAnchor, f);
         const int64_t hi = juce::jmax(dragAnchor, f);
         if (dragKind == DragKind::newSelection)
@@ -1210,7 +1210,7 @@ void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
     // position (a real regression this caused once already). mouseDrag sets it once an actual
     // drag -- i.e. an actual setSelection() -- starts happening.
     dragKind = DragKind::newSelection;
-    dragAnchor = document.nearestZeroCrossing(f);   // this click becomes a fixed selection edge
+    dragAnchor = f;
 }
 
 int WaveformDisplay::sliceMarkerAtPixel(float x, float tolPx) const
@@ -1302,11 +1302,7 @@ void WaveformDisplay::mouseDrag(const juce::MouseEvent& e)
     }
 
     const float   mx = (float) e.x;
-    // Snap the edge actually being dragged onto the nearest low-amplitude point -- a loop/
-    // selection edge landing mid-waveform clicks on its own, independent of whatever the
-    // playback engine's own declick/crossfade handles. dragAnchor (the other, un-dragged edge)
-    // is left alone.
-    const int64_t f  = document.nearestZeroCrossing(xToSample(mx));
+    const int64_t f  = xToSample(mx);
     const int64_t lo = juce::jmin(dragAnchor, f);
     const int64_t hi = juce::jmax(dragAnchor, f);
 

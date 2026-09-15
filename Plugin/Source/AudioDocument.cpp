@@ -3,7 +3,6 @@
 #include "BiquadFilter.h"
 #include <algorithm>
 #include <cmath>
-#include <limits>
 
 namespace
 {
@@ -507,35 +506,6 @@ int AudioDocument::moveSliceMarker(int index, int64_t newSample)
         if (sliceMarkers[(size_t) i] == newSample)
             return i;
     return -1;   // shouldn't happen
-}
-
-int64_t AudioDocument::nearestZeroCrossing(int64_t s, double radiusMs) const
-{
-    const juce::ScopedLock sl(bufferLock);
-    const int64_t len = (int64_t) buffer.getNumSamples();
-    if (len <= 0)
-        return s;
-
-    const int64_t radius = juce::jmax((int64_t) 1,
-        (int64_t) (radiusMs * 0.001 * juce::jmax(1.0, sampleRate)));
-    const int64_t lo = juce::jlimit((int64_t) 0, len - 1, s - radius);
-    const int64_t hi = juce::jlimit((int64_t) 0, len - 1, s + radius);
-    const int numCh = buffer.getNumChannels();
-
-    int64_t best = juce::jlimit((int64_t) 0, len - 1, s);
-    float bestPeak = std::numeric_limits<float>::max();
-    for (int64_t i = lo; i <= hi; ++i)
-    {
-        float peak = 0.0f;
-        for (int ch = 0; ch < numCh; ++ch)
-            peak = juce::jmax(peak, std::abs(buffer.getSample(ch, (int) i)));
-        if (peak < bestPeak)
-        {
-            bestPeak = peak;
-            best = i;
-        }
-    }
-    return best;
 }
 
 void AudioDocument::clearSliceMarkers()

@@ -140,10 +140,6 @@ KnobRow::KnobRow(AudioDocument& doc, bool standalone)
             const int64_t n = juce::jmax((int64_t) 1, document.getNumSamples());
             const int64_t length = document.getSelectionEnd() - document.getSelectionStart();
             int64_t s = fracToSample(v, n);
-            // Only while actually being dragged (not a typed-in value or a double-click reset)
-            // -- see nearestZeroCrossing()'s comment.
-            if (document.selectionEdgeDragging.load() == 1)
-                s = document.nearestZeroCrossing(s);
             int64_t e;
             if (length > 0)
             {
@@ -182,10 +178,6 @@ KnobRow::KnobRow(AudioDocument& doc, bool standalone)
         {
             const int64_t n = juce::jmax((int64_t) 1, document.getNumSamples());
             int64_t e = fracToSample(v, n);
-            // Only while actually being dragged (not a typed-in value or a double-click reset)
-            // -- see nearestZeroCrossing()'s comment.
-            if (document.selectionEdgeDragging.load() == 2)
-                e = document.nearestZeroCrossing(e);
             int64_t s = fracToSample(startKnob->slider.getValue(), n);
             if (s >= e) s = juce::jmax((int64_t) 0, e - 1);
             document.setSelection(s, e);
