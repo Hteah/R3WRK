@@ -1185,30 +1185,11 @@ void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
         switch (hitEdge((float) e.x, sx, ex, edgeTolerancePx))
         {
             case EdgeHit::resizeStart:
-            {
-                // Snap the *other* (fixed) edge too, right now -- it's where the loop actually
-                // wraps back to while the dragged edge scans around, and a wrap with even one
-                // non-zero-crossing side clicks regardless of how well the moving edge is
-                // snapped. Committed immediately (not just used for this drag's math) so even a
-                // drag that barely moves still leaves the loop with both ends snapped.
-                dragKind = DragKind::resizeStart;
-                const int64_t snappedEnd = document.nearestZeroCrossing(document.getSelectionEnd());
-                document.setSelection(document.getSelectionStart(),
-                                       juce::jmax(snappedEnd, document.getSelectionStart() + 1));
-                dragAnchor = snappedEnd;
-                document.selectionEdgeDragging = 1;
-                return;
-            }
+                dragKind = DragKind::resizeStart; dragAnchor = document.getSelectionEnd();
+                document.selectionEdgeDragging = 1; return;
             case EdgeHit::resizeEnd:
-            {
-                const int64_t snappedStart = document.nearestZeroCrossing(document.getSelectionStart());
-                document.setSelection(juce::jmin(snappedStart, document.getSelectionEnd() - 1),
-                                       document.getSelectionEnd());
-                dragKind = DragKind::resizeEnd;
-                dragAnchor = snappedStart;
-                document.selectionEdgeDragging = 2;
-                return;
-            }
+                dragKind = DragKind::resizeEnd;   dragAnchor = document.getSelectionStart();
+                document.selectionEdgeDragging = 2; return;
             case EdgeHit::newSelection:
                 break;
         }

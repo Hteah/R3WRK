@@ -128,15 +128,7 @@ KnobRow::KnobRow(AudioDocument& doc, bool standalone)
         // Playback chases this edge for as long as it's set -- see selectionEdgeDragging's
         // comment on AudioDocument. Covers a drag started on the knob itself; the waveform's
         // own Start/End brackets set the same flag from WaveformDisplay's mouse handling.
-        k.slider.onDragStart = [this]
-        {
-            // Snap the *other* (fixed) edge too -- see WaveformDisplay::mouseDown's matching
-            // comment on why a loop wrap needs both ends snapped, not just the one being dragged.
-            const int64_t snappedEnd = document.nearestZeroCrossing(document.getSelectionEnd());
-            document.setSelection(document.getSelectionStart(),
-                                   juce::jmax(snappedEnd, document.getSelectionStart() + 1));
-            document.selectionEdgeDragging = 1;
-        };
+        k.slider.onDragStart = [this] { document.selectionEdgeDragging = 1; };
         k.slider.onDragEnd   = [this] { document.selectionEdgeDragging = 0; };
         k.slider.textFromValueFunction = [this](double v)
         {
@@ -179,15 +171,7 @@ KnobRow::KnobRow(AudioDocument& doc, bool standalone)
         endKnob = &k;
         k.slider.setRange(0.0, 1.0, 0.0);
         k.slider.setValue(1.0, juce::dontSendNotification);
-        k.slider.onDragStart = [this]
-        {
-            // Snap the *other* (fixed) edge too -- see WaveformDisplay::mouseDown's matching
-            // comment on why a loop wrap needs both ends snapped, not just the one being dragged.
-            const int64_t snappedStart = document.nearestZeroCrossing(document.getSelectionStart());
-            document.setSelection(juce::jmin(snappedStart, document.getSelectionEnd() - 1),
-                                   document.getSelectionEnd());
-            document.selectionEdgeDragging = 2;
-        };
+        k.slider.onDragStart = [this] { document.selectionEdgeDragging = 2; };
         k.slider.onDragEnd   = [this] { document.selectionEdgeDragging = 0; };
         k.slider.textFromValueFunction = [this](double v)
         {
