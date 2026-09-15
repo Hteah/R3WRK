@@ -148,6 +148,13 @@ public:
     // moves) -- lets expensive views (e.g. the spectrogram) know when to recompute.
     int getBufferVersion() const { return bufferVersion; }
 
+    // Nearest sample to `s` (within +/-radiusMs, clamped to the document) whose peak amplitude
+    // across channels is closest to zero -- lets a dragged loop/selection edge "snap to zero
+    // crossing" so the loop point doesn't land mid-waveform and click on its own, independent of
+    // whatever declick/crossfade the playback engine applies. Message-thread only (locks the
+    // buffer directly); the audio thread never calls this.
+    int64_t nearestZeroCrossing(int64_t s, double radiusMs = 5.0) const;
+
     //==============================================================================
     // Selection, in samples, half-open [start, end). processBlock() (audio thread) reads
     // this to decide the playback region while the UI edits it, so start+end are packed
