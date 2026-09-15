@@ -255,7 +255,8 @@ private:
     bool   dragScanActive = false;
     void renderDragScan(juce::AudioBuffer<float>& out, int numCh, int numSamples,
                         const juce::AudioBuffer<float>& docBuf, double& pos,
-                        int64_t regionStart, int64_t regionEnd, bool loop, int fadeLen);
+                        int64_t regionStart, int64_t regionEnd, bool loop, int fadeLen,
+                        double catchUpGainPerSec);
 
     // Modelled Monomachine multimode filter on the playback output (after the stretcher). One
     // MultiModeFilter per channel; all four knob values are per-block-smoothed so a sweep

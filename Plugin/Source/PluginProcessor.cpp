@@ -381,7 +381,8 @@ void R3WRKAudioProcessor::renderScrub(juce::AudioBuffer<float>& out, int numCh, 
 // it), with loopFadeGain crossfading the wrap exactly like gatherRegion's own loop wrap does.
 void R3WRKAudioProcessor::renderDragScan(juce::AudioBuffer<float>& out, int numCh, int numSamples,
                                          const juce::AudioBuffer<float>& docBuf, double& pos,
-                                         int64_t regionStart, int64_t regionEnd, bool loop, int fadeLen)
+                                         int64_t regionStart, int64_t regionEnd, bool loop, int fadeLen,
+                                         double catchUpGainPerSec)
 {
     const int64_t docLen = docBuf.getNumSamples();
     const int srcChans = docBuf.getNumChannels();
@@ -389,7 +390,9 @@ void R3WRKAudioProcessor::renderDragScan(juce::AudioBuffer<float>& out, int numC
         return;
 
     const int64_t regionLen = regionEnd - regionStart;
-    constexpr double catchUpGainPerSec = 8.0;                        // velocity = distance * this
+    // velocity = distance * catchUpGainPerSec. Passed in (rather than a fixed constant) so the
+    // caller can raise it for a short loop -- see its computation in processBlock for why a fixed
+    // gain leaves small loops permanently unreachable during a fast forward drag.
     // Backward drags never actually need this branch (see the region-slew comment just below on
     // why): the playhead already sits at the *far* edge from a retreating regionEnd, comfortably
     // inside the window at plain 1x the entire time, so it's silent regardless of how fast the
@@ -582,6 +585,18 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             // 0..docLen" -- without it the very first dragging block would slew from the wrong
             // starting point.
             const int dragEdge = document.selectionEdgeDragging.load(std::memory_order_relaxed);
+            // Shared with renderDragScan's own catch-up below -- see catchUpGainPerSec just past
+            // this block for why the window's cap has to be known there too.
+            constexpr double slewGainPerSec = 8.0;   // catch-up rate = distance * this
+            // This cap is also, in effect, the forward-drag pitch-shift cap: renderDragScan's
+            // playhead has to keep pace with however fast this window is moving in order to
+            // stay caught up, and (unlike a backward drag, which never needs to chase at all
+            // -- see its comment) a forward drag runs at close to this speed continuously
+            // for as long as the mouse keeps moving forward, not just as a brief catch-up.
+            // Kept modest (rather than the ~6x this used to be) so that's a mild lift instead
+            // of "extreme pitch" -- renderDragScan's own cap is set a little above this one,
+            // so the gap can still actually close.
+            const double maxSlewSpeed = currentSampleRate * 1.5;   // cap: ~1.5x normal speed
             int64_t regionStart, regionEnd;
             if (dragEdge != 0)
             {
@@ -591,16 +606,6 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                     dragRegionEnd   = (double) rawRegionEnd;
                     dragRegionSeeded = true;
                 }
-                constexpr double slewGainPerSec = 8.0;   // catch-up rate = distance * this
-                // This cap is also, in effect, the forward-drag pitch-shift cap: renderDragScan's
-                // playhead has to keep pace with however fast this window is moving in order to
-                // stay caught up, and (unlike a backward drag, which never needs to chase at all
-                // -- see its comment) a forward drag runs at close to this speed continuously
-                // for as long as the mouse keeps moving forward, not just as a brief catch-up.
-                // Kept modest (rather than the ~6x this used to be) so that's a mild lift instead
-                // of "extreme pitch" -- renderDragScan's own cap is set a little above this one,
-                // so the gap can still actually close.
-                const double maxSlewSpeed = currentSampleRate * 1.5;   // cap: ~1.5x normal speed
                 const double dt = (double) numSamples / juce::jmax(1.0, currentSampleRate);
                 auto slew = [&](double& smoothed, int64_t target)
                 {
@@ -619,6 +624,21 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                 regionStart = rawRegionStart;
                 regionEnd   = rawRegionEnd;
             }
+
+            // The window can slew at up to maxSlewSpeed (~1.5x) indefinitely during a sustained
+            // forward drag, so renderDragScan's catch-up settles to a steady-state trailing
+            // distance of maxSlewSpeed/catchUpGainPerSec -- with the stock 8.0 gain that's a
+            // *fixed* ~187ms, independent of the loop's own length. For any loop shorter than
+            // that, the playhead can never actually close the gap and re-enter it: it just trails
+            // forever, reading unrelated material further back in the file at a pitched-up rate
+            // (confirmed by simulation -- this is the "distortion on a small loop" bug). Raise the
+            // gain so the steady-state distance stays a bounded fraction of *this* region's own
+            // length instead of a fixed number of ms; large loops are unaffected (the max() floor
+            // keeps the original 8.0/187ms for anything roomy enough not to need tightening).
+            const double regionLenForCatchUp = (double) juce::jmax((int64_t) 1, regionEnd - regionStart);
+            constexpr double maxTrailingFractionOfLoop = 0.35;
+            const double catchUpGainPerSec = juce::jmax(slewGainPerSec,
+                maxSlewSpeed / (regionLenForCatchUp * maxTrailingFractionOfLoop));
 
             // Ping-pong needs at least 3 frames to have a distinct return leg; below that it
             // just plays as a plain loop.
@@ -645,7 +665,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                 stretcherPrimed = false;
                 rtFinished = false;
                 renderDragScan(buffer, numCh, numSamples, docBuf, dragScanPos,
-                               regionStart, regionEnd, loop, loopFadeLen);
+                               regionStart, regionEnd, loop, loopFadeLen, catchUpGainPerSec);
                 document.playhead.store((int64_t) std::llround(dragScanPos), std::memory_order_relaxed);
             }
             else
