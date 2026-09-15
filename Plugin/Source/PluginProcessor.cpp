@@ -664,9 +664,32 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             {
                 // Dragging, plain path: a continuous fractional read position instead of the
                 // ordinary integer pos below -- see renderDragScan's header comment for why.
-                // It never jumps, so there's nothing here to declick.
+                // Position itself never jumps at the hand-off (dragScanPos is seeded from the
+                // exact live playhead below), but renderDragScan always reads *forward* --  if
+                // the ordinary path happened to be on a ping-pong loop's backward return leg
+                // (playbackDir == -1) at the exact instant you grab a bracket/knob, direction
+                // reverses right at the hand-off even though position lines up, which is
+                // audible as a click on the material itself. Crossfade it out exactly like a
+                // manual seek's old tail (same fields, same ramp shape, same application code
+                // below), just captured playing in whatever direction was actually live.
                 if (! dragScanActive)
                 {
+                    declickLen = (int) juce::jlimit<int64_t>(1, 512,
+                        (int64_t) (0.008 * currentSampleRate));
+                    seekOldTail.setSize(numCh, declickLen, false, false, true);
+                    const int64_t oldDocLen = docBuf.getNumSamples();
+                    const int oldChans = docBuf.getNumChannels();
+                    for (int i = 0; i < declickLen; ++i)
+                    {
+                        const int64_t s = lastKnownPlayhead + (int64_t) i * playbackDir;
+                        const bool valid = s >= 0 && s < oldDocLen && oldChans > 0;
+                        for (int ch = 0; ch < numCh; ++ch)
+                            seekOldTail.setSample(ch, i, valid
+                                ? docBuf.getSample(juce::jmin(ch, oldChans - 1), (int) s) : 0.0f);
+                    }
+                    seekCrossfadeActive = true;
+                    declickRemaining = declickLen;
+
                     dragScanPos = (double) document.playhead.load(std::memory_order_relaxed);
                     dragScanActive = true;
                 }
