@@ -153,6 +153,17 @@ private:
                                        // setBlackBoxDurationSecs()
     void appendToBlackBox(const juce::AudioBuffer<float>& buffer, int numCh, int numSamples);
 
+    // Black Box follows whichever audio is actually meaningful each block: the live input while
+    // it's genuinely passing through (idle, recording), or R3WRK's own rendered output once
+    // R3WRK has taken over the buffer to play/loop/scrub -- which otherwise silently "mutes" the
+    // input from Black Box's perspective. blackBoxInputScratch holds a snapshot of the raw input,
+    // taken at the very top of processBlock before anything below can touch `buffer`, so it's
+    // still available to append later for the input-passthrough branches even though those
+    // branches don't rewrite `buffer` themselves. Sized (not reallocated) once per block; JUCE's
+    // setSize with avoidReallocating=true is a no-op once big enough, matching seekOldTail's
+    // pattern elsewhere in this file.
+    juce::AudioBuffer<float> blackBoxInputScratch;
+
     // Black Box preview playback (see startBlackBoxPreview()). Also guarded by blackBoxLock --
     // start/stop happen on the message thread while renderBlackBoxPreview() reads it on the
     // audio thread each block.

@@ -464,17 +464,25 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     const int numSamples = buffer.getNumSamples();
     const int numCh = buffer.getNumChannels();
 
-    // Black Box: taps the raw input exactly as it arrives, before anything below (recording,
-    // playback, the desktop-capture bypass) touches `buffer` -- a passive capture of whatever's
-    // coming into this track, independent of what R3WRK itself is doing with it.
+    // Black Box: snapshot the raw input now, before anything below can touch `buffer` --
+    // appended for the branches where the input genuinely passes through (idle, recording); the
+    // playback/scrub branches append their own rendered `buffer` instead, right where
+    // captureOutput() does, since R3WRK has taken the input over for those blocks (see
+    // blackBoxInputScratch's header comment).
     if (blackBoxCapacity > 0)
-        appendToBlackBox(buffer, numCh, numSamples);
+    {
+        blackBoxInputScratch.setSize(numCh, numSamples, false, false, true);
+        for (int ch = 0; ch < numCh; ++ch)
+            blackBoxInputScratch.copyFrom(ch, 0, buffer, ch, 0, numSamples);
+    }
 
     // Black Box preview (Play in the popup): takes over the output entirely, same as the
     // desktop-recording bypass just below -- see startBlackBoxPreview()'s header comment.
     if (blackBoxPreviewPlaying.load(std::memory_order_relaxed))
     {
         renderBlackBoxPreview(buffer, numCh, numSamples);
+        if (blackBoxCapacity > 0)
+            appendToBlackBox(blackBoxInputScratch, numCh, numSamples);
         wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false; dragScanActive = false;
         return;
     }
@@ -484,6 +492,8 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         // ScreenCaptureKit is doing the capture on its own queue (appendDesktopSamples) --
         // nothing here to record or monitor.
         buffer.clear();
+        if (blackBoxCapacity > 0)
+            appendToBlackBox(blackBoxInputScratch, numCh, numSamples);
         wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false; dragScanActive = false;
         return;
     }
@@ -514,6 +524,8 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         }
         document.recordedSamples.store(recordingWritePos, std::memory_order_relaxed);
 
+        if (blackBoxCapacity > 0)
+            appendToBlackBox(blackBoxInputScratch, numCh, numSamples);
         wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false; dragScanActive = false;
         return; // pass input through unchanged so the user can monitor while recording
     }
@@ -565,6 +577,10 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
 
         applyPlaybackGain(buffer, numCh, numSamples);   // Gain knob rides scrub monitoring too
         captureOutput(buffer, numCh, numSamples);
+        // R3WRK has taken the buffer over to scrub -- Black Box follows that, not the (now
+        // irrelevant) input snapshot; see blackBoxInputScratch's header comment.
+        if (blackBoxCapacity > 0)
+            appendToBlackBox(buffer, numCh, numSamples);
 
         wasScrubbing = true;
         wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false; dragScanActive = false;   // so normal playback resets the stretcher cleanly if it resumes
@@ -865,6 +881,10 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         applyPlaybackFilter(buffer, numCh, numSamples, ! wasPlaying);
         applyPlaybackGain(buffer, numCh, numSamples);
         captureOutput(buffer, numCh, numSamples);
+        // R3WRK has taken the buffer over to play/loop -- Black Box follows that, not the (now
+        // irrelevant) input snapshot; see blackBoxInputScratch's header comment.
+        if (blackBoxCapacity > 0)
+            appendToBlackBox(buffer, numCh, numSamples);
 
         wasPlaying = true;
         return;
@@ -895,6 +915,11 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     // muted, so this is silence -- but it stops a stop/start of playback mid-capture from
     // splicing the two parts together with no gap).
     captureOutput(buffer, numCh, numSamples);
+
+    // Genuinely idle: `buffer` above is untouched host input, exactly what blackBoxInputScratch
+    // already snapshotted at the top of this function.
+    if (blackBoxCapacity > 0)
+        appendToBlackBox(blackBoxInputScratch, numCh, numSamples);
 }
 
 void R3WRKAudioProcessor::applyPlaybackFilter(juce::AudioBuffer<float>& buffer, int numCh, int numSamples,
