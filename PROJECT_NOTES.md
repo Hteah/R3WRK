@@ -2144,6 +2144,35 @@ independent second read of the code/history sooner rather than later (doesn't ha
 separate AI session -- deliberately re-reading this file and the relevant commit range from
 scratch, setting aside the current working theory, can catch the same kind of thing).
 
+## Black Box: a self-recorder as well as a channel recorder (`1011260`)
+
+User: "in the vst. If the blackbox recorder could also record what I'm doing in r3wrk. Like a
+self recorder as well as a channel recorder." Black Box (VST/AU only) had always passively taped
+the raw *input* arriving at the track, from before `appendToBlackBox()` was added -- useful for
+rescuing a take you forgot to hit Record on. But R3WRK replaces the track's audio with its own
+rendered output whenever it's playing, looping, or scrubbing (that's how the plugin fundamentally
+works), which meant Black Box's input-only tap went dark for exactly those stretches -- the user's
+own framing was that R3WRK "mutes the input" while doing its own thing, and Black Box should
+still be capturing *something* useful during that time.
+
+Considered two straightforward options first -- record both input and output simultaneously in
+two ring buffers (double the memory), or make the source a manual switch (Input vs R3WRK Output)
+-- but the user's actual description pointed at something better: Black Box should automatically
+follow whichever audio is actually meaningful moment to moment, in the one buffer it already has.
+No memory increase, no setting to remember to flip.
+
+`PluginProcessor::processBlock()`: a new `blackBoxInputScratch` member buffer snapshots the raw
+input at the very top of the function, before Black Box preview/desktop-recording/recording/
+playback/scrub can touch `buffer`. Each of the function's six exit points now appends to Black
+Box explicitly (replacing the old single unconditional call at the top): the passthrough branches
+(idle, recording, desktop-recording bypass, Black-Box-preview-playback) append the input
+snapshot, since `buffer` there either is the genuine input or has been overwritten with something
+Black-Box-irrelevant (silence, or Black Box's own prior content being reviewed); the playback and
+scrub branches append the final rendered `buffer` instead, right next to the existing
+`captureOutput()` call that already taps the same point for the separate manual Capture Output
+feature. `appendToBlackBox()` itself is unchanged -- it has no idea which kind of audio it's
+being handed, by design.
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).
