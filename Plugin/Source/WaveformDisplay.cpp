@@ -76,7 +76,7 @@ void WaveformDisplay::followPlayheadIfNeeded()
     // span/timeScale -- hence the half-offset is span/(2*timeScale), which is span/2 at identity.
     const double timeScale = juce::jmax(0.0001, document.getTimeScale());
     const int64_t half   = (int64_t) std::llround((double) span / (2.0 * timeScale));
-    const int64_t maxStart = juce::jmax((int64_t) 0, maxViewSpan() - span);
+    const int64_t maxStart = maxViewStart(span);
     const int64_t target = juce::jlimit((int64_t) 0, maxStart, playheadNow - half);
 
     if (target == viewStart)
@@ -144,7 +144,12 @@ void WaveformDisplay::timerCallback()
     }
 
     const int64_t maxSpan = maxViewSpan();
-    const bool viewBad = viewEnd <= viewStart || viewEnd > maxSpan || viewStart >= juce::jmax((int64_t) 1, maxSpan);
+    // NOT "viewEnd > maxSpan" -- viewEnd legitimately exceeds maxSpan (a *scaled* quantity) once
+    // you're zoomed in on content later in the file with timeScale < 1; see maxViewStart()'s
+    // comment. The real validity check is whether viewStart is within its own (raw-consistent)
+    // ceiling for the current span.
+    const int64_t span = viewEnd - viewStart;
+    const bool viewBad = span <= 0 || viewStart < 0 || viewStart > maxViewStart(span);
 
     if (contentChanged || timeScaleChanged || viewBad
         || getWidth() != lastPathWidth || getHeight() != lastPathHeight)
@@ -211,6 +216,31 @@ int64_t WaveformDisplay::maxViewSpan() const
     return effectiveSpanFor(document.getNumSamples(), document.getTimeScale());
 }
 
+// The largest valid viewStart for a given (scaled) span. viewStart is always a RAW sample bound
+// (xToSample(0) returns it unmodified -- see that function's comment), so its ceiling must be
+// expressed in raw terms too: rawTotal minus however many raw samples `span` actually covers,
+// i.e. span/timeScale (same conversion xToSample/sampleToX use throughout).
+//
+// `maxViewSpan() - span` looks like the obvious ceiling and was used everywhere below until
+// 2026-09-15, but it's `timeScale` times too small whenever timeScale != 1 (Speed and/or Stretch
+// knobs off centre) -- maxViewSpan() itself is a *scaled* quantity (rawTotal*timeScale, chosen so
+// the fully-zoomed-out view fills the width edge to edge regardless of timeScale; see
+// effectiveSpanFor()'s comment), not a raw one. Subtracting a scaled `span` from it and using the
+// result as a bound on a raw viewStart silently capped how far into the file you could ever zoom
+// in or scroll once timeScale dropped much below 1 -- content past roughly rawTotal*timeScale
+// became permanently unreachable while zoomed in, even though it was still genuinely there and
+// still selectable. (At span == maxViewSpan(), i.e. fully zoomed out, this coincidentally gave
+// the right answer -- 0 -- which is why the bug went unnoticed: it only shows once you actually
+// zoom in on content late in a file with Speed/Stretch not both at their defaults.)
+int64_t WaveformDisplay::maxViewStart(int64_t span) const
+{
+    const double  timeScale  = juce::jmax(0.0001, document.getTimeScale());
+    const int64_t rawTotal   = document.getNumSamples();
+    const int64_t visibleRaw = juce::jlimit((int64_t) 1, juce::jmax((int64_t) 1, rawTotal),
+                                             (int64_t) ((double) span / timeScale));
+    return juce::jmax((int64_t) 0, rawTotal - visibleRaw);
+}
+
 void WaveformDisplay::zoomToFit()
 {
     viewStart = 0;
@@ -249,7 +279,7 @@ void WaveformDisplay::keyboardScroll(int dir, bool bigStep)
     const bool canScroll = span > 0 && span < maxViewSpan();
     if (canScroll)
     {
-        const int64_t maxStart = juce::jmax((int64_t) 0, maxViewSpan() - span);
+        const int64_t maxStart = maxViewStart(span);
         const int64_t newStart = juce::jlimit((int64_t) 0, maxStart, viewStart + delta);
         if (newStart != viewStart)
         {
@@ -319,7 +349,7 @@ void WaveformDisplay::zoomToward(double spanFactor, float pointerX)
     {
         int64_t newStart = anchorSample
                          - (int64_t) std::llround(anchorFrac * (double) newLen / timeScale);
-        newStart = juce::jlimit((int64_t) 0, juce::jmax((int64_t) 0, maxSpan - newLen), newStart);
+        newStart = juce::jlimit((int64_t) 0, maxViewStart(newLen), newStart);
         viewStart = newStart;
         viewEnd   = newStart + newLen;
         rebuildWaveformPath();
@@ -397,7 +427,7 @@ void WaveformDisplay::panByPixels(float dxPixels)
     const double framesPerPixel = (double) len / (double) juce::jmax(1, getWidth())
                                  / juce::jmax(0.0001, document.getTimeScale());
     int64_t newStart = viewStart - (int64_t) (dxPixels * framesPerPixel);
-    newStart = juce::jlimit((int64_t) 0, juce::jmax((int64_t) 0, maxViewSpan() - len), newStart);
+    newStart = juce::jlimit((int64_t) 0, maxViewStart(len), newStart);
     viewStart = newStart;
     viewEnd = newStart + len;
     rebuildWaveformPath();
@@ -435,7 +465,7 @@ void WaveformDisplay::scrollSelectionIntoView()
     else
         return;                                                  // selection already comfortably in view
 
-    newStart = juce::jlimit((int64_t) 0, juce::jmax((int64_t) 0, maxSpan - span), newStart);
+    newStart = juce::jlimit((int64_t) 0, maxViewStart(span), newStart);
     if (newStart == viewStart)
         return;
 
@@ -1526,12 +1556,13 @@ void WaveformDisplay::changeListenerCallback(juce::ChangeBroadcaster*)
     // changed -- otherwise a selection drag would rescan the whole buffer every message loop.
     const bool contentChanged = refitViewIfContentChanged();
 
-    const int64_t maxSpan = maxViewSpan();
-    const bool viewBad = viewEnd <= viewStart || viewEnd > maxSpan;
+    // See timerCallback()'s matching check for why this isn't "viewEnd > maxViewSpan()".
+    const int64_t span = viewEnd - viewStart;
+    const bool viewBad = span <= 0 || viewStart < 0 || viewStart > maxViewStart(span);
     if (viewBad)
     {
         viewStart = 0;
-        viewEnd = juce::jmax((int64_t) 1, maxSpan);
+        viewEnd = juce::jmax((int64_t) 1, maxViewSpan());
     }
 
     if (viewBad || contentChanged)

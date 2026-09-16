@@ -133,6 +133,10 @@ private:
     int64_t effectiveSpanFor(int64_t rawTotal, double timeScale) const;   // maxViewSpan(), but
                                                                           // for a given (e.g. an
                                                                           // *old*) total/timeScale
+    int64_t maxViewStart(int64_t span) const;   // largest valid viewStart (a RAW sample bound)
+                                                 // for a given (scaled) span -- see .cpp; every
+                                                 // clamp on a candidate viewStart must go through
+                                                 // this, not maxViewSpan()-span directly
 
     AudioDocument& document;
     juce::SharedResourcePointer<ThemeManager> theme;
