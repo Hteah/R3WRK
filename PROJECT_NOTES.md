@@ -2042,6 +2042,108 @@ the knobs, and it records exactly what you hear.
   running (and vice versa). The time readout shows `● CAP m:ss` (wall-clock from
   `captureStartMs`) while capturing. Does NOT touch the document or the transport.
 
+## Zoom/scroll lands far from the target once Speed or Stretch isn't 1x (`b0d4ca9`)
+
+User: "when I hover the mouse over the selection [and zoom in], it should auto zoom to it. It
+just isn't anymore" -- then, more precisely, "it doesn't zoom to the selected area... zooms way
+left or way right of the place I zoomed into." Couldn't be pinned down further than that, and
+three rounds of reverting recent `WaveformDisplay.cpp`/`KnobRow.cpp` commits (suspecting a
+same-session regression) didn't fix it -- confirmed via `git diff` that the code was already
+byte-identical to a previously-confirmed-good commit, so it wasn't a regression at all. The
+decisive clue: "I just checked the VST3 r3wrk and it works correctly. But the standalone is
+not" -- same C++ in both, so the difference had to be *data* (each plugin instance's own Speed/
+Stretch knob state), not code.
+
+**How it was found:** stopped reasoning about the code and added temporary `fprintf(stderr,...)`
+logging inside `zoomToward()`/its `applyView` lambda (spanFactor, pointerX, selection bounds,
+`viewStart`/`viewEnd` before and after). Rebuilt, launched the binary *directly* (not via `open`,
+which shows no console output) with stderr piped to a log file:
+```
+nohup <path>/R3WRK.app/Contents/MacOS/R3WRK > /tmp/zoom_debug.log 2>&1 &
+```
+Had the user reproduce it once against that build, then read the log. It showed
+`applyView(anchorSample=<selMid>, anchorFrac=0.5)` firing exactly as intended, but the resulting
+`viewStart`/`viewEnd` nowhere near `selMid` -- so the selection-centering logic *was* triggering,
+the clamp math afterward was just wrong. Back-computed `getTimeScale()` (`=playbackStretch/
+playbackSpeed`) from the logged numbers to ~0.31 -- the Standalone instance under test had Speed
+and/or Stretch away from 1x; the VST3 instance the user separately checked presumably didn't.
+
+**Root cause:** `maxViewSpan()` deliberately returns `rawSampleCount * timeScale` (a *scaled*
+quantity, so "fully zoomed out" fills the width edge-to-edge at any Speed/Stretch -- this part is
+correct by design). Five places used `maxViewSpan() - someSpan` as the upper clamp on a candidate
+`viewStart`, which is always a *raw* sample position (`xToSample(0) == viewStart`, see that
+function's own comment). Clamping raw against scaled is off by a factor of `timeScale` --
+invisible at `timeScale == 1` (scaled and raw coincide, which is presumably why this was never
+caught since the original zoom rework), but once timeScale drops meaningfully below 1, every
+zoom-in/scroll/follow-selection silently capped `viewStart` around `rawSampleCount * timeScale`,
+regardless of where the selection/pointer/playhead actually was.
+
+**Fix:** new `WaveformDisplay::maxViewStart(span)` computes the ceiling correctly in raw terms
+(`rawSampleCount - span/timeScale`), replacing all 5 call sites (`zoomToward`'s `applyView`,
+`followPlayheadIfNeeded`, `keyboardScroll`, `panByPixels`, `scrollSelectionIntoView`). Also had to
+fix two "is the view valid" sanity checks (`timerCallback`, `changeListenerCallback`) that both
+flagged `viewEnd > maxViewSpan()` as invalid -- no longer true once `viewStart` can legitimately
+sit past that scaled boundary; both now check `viewStart` against its own `maxViewStart()`
+instead. (Skipping this part would have had the checks silently snap any corrected view straight
+back to broken on the next 30Hz tick.) Verified the fix numerically against the actual logged
+values in a throwaway Python script *before* rebuilding, to catch a wrong formula cheaply.
+
+**If this class of bug comes back:** check the Speed/Stretch knob values first -- this whole bug
+only exists when `getTimeScale() != 1`. If reasoning about the code doesn't converge in 1-2
+passes, stop and instrument (`fprintf` + launch the binary directly with stderr redirected +
+have the user reproduce it once) rather than keep guessing -- that found this in a single pass
+after three failed reasoning-only attempts. And before assuming any "it broke" report is a new
+regression, diff the suspect files against the last commit the user confirmed as working; if
+they're identical, the bug is either pre-existing (just newly triggered) or environmental (see
+next entry for a real instance of the latter), not something a code change caused.
+
+## Loop-drag clicks were mostly the wrap crossfade being off by default (`6fcdbbc`)
+
+Long debugging chain across two sessions (2026-09-12's `af2ffac`...`f765db7` drag-scan rewrite,
+then 2026-09-15's four zero-crossing-snapping attempts, `9ecf58a`...`d8e07b4`, all reverted) never
+fully killed a click/crackle when dragging a loop's Start/End, worse on longer loops. What broke
+the stall wasn't more debugging on this thread -- the user had a *separate* Claude Desktop session
+independently clone the repo and read the full commit history + this file fresh, cross-referenced
+against general audio-engineering practice, and wrote up findings
+(saved as `R3WRK-click-artifact-research.md`, not committed here -- ask the user if it's needed
+again). Verified its two central claims directly against the code before acting -- both checked
+out exactly:
+
+1. **`AudioDocument::loopCrossfadeMs` defaulted to `0.0` (off)**, hidden behind a right-click
+   panel on the Loop button. Every loop -- dragged or not -- hard-splices at the wrap point
+   unless its edges happen to land on matching low-amplitude samples, which for a freely dragged
+   selection is the uncommon case, not the exception. This is a more fundamental, more general
+   click source than anything about the drag mechanism specifically, and nobody had checked it at
+   any point across either session's debugging.
+2. **The zero-crossing-snapping attempts couldn't have been fixing the drag-time click anyway**:
+   `dragRegionStart`/`dragRegionEnd` slew toward the continuously-*moving* raw target while the
+   mouse is moving (see "Selection zoom"-adjacent drag-scan entries above), so a snapped target
+   only affects what's audibly playing once the drag stops and the slew settles. This explains
+   why those four attempts each seemed reasonable but never actually fixed the reported click --
+   they were solving a real but secondary problem, not the dominant one.
+
+(Same research also caught a smaller, separate gap: the Scrub tool's `renderScrub()` had no
+fade-out on release -- `processBlock`'s scrub branch returns before ever reaching the shared
+`declickRemaining` ramp code, so releasing mid-scrub at real speed stopped dead. Fixed at the
+same time.)
+
+**Fix:** `loopCrossfadeMs` default changed `0.0` -> `10.0` (ms) -- users can still disable/retune
+via the existing panel; the general `regionLen/2` clamp already protects very short loops from
+losing too much of themselves to the fade. New `AudioDocument::scrubStopRequested` flag: `mouseUp`
+requests a stop instead of clearing `isScrubbing` directly; the audio thread fades scrub output to
+silence over 8ms (same equal-power shape used elsewhere) before actually clearing `isScrubbing`/
+`scrubVelocity`.
+
+**If a click/crackle complaint comes back:** check `loopCrossfadeMs` (right-click the Loop button)
+first, before touching any DSP -- rule out it having been turned back down, or a saved project
+predating this default change. If it's specifically during an *active* drag (not just ordinary
+looping), remember that whatever you snap the drag target to doesn't affect the sound while the
+mouse is still moving, only how it settles once you stop -- fixes aimed at the target itself won't
+help the live-dragging sound. And if 2-3 direct attempts on this thread don't resolve it, get an
+independent second read of the code/history sooner rather than later (doesn't have to be a
+separate AI session -- deliberately re-reading this file and the relevant commit range from
+scratch, setting aside the current working theory, can catch the same kind of thing).
+
 ## Known gaps / natural next steps
 
 - Recording is destructive-replace only (no overdub/punch-in/multiple takes).
