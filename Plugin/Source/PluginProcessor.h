@@ -296,6 +296,15 @@ private:
     bool wasScrubbing = false;     // edge-detect scrub start, so scrubReadPos picks up from
                                    // document.playhead (wherever the drag began) rather than
                                    // continuing from a stale previous position
+
+    // Releasing the mouse mid-scrub used to stop dead -- the scrub branch returns before ever
+    // reaching the shared declickRemaining ramp below, so a real-speed scrub just cut off
+    // whatever amplitude it happened to be at. On document.scrubStopRequested, fade scrub's own
+    // output to silence over scrubStopFadeLen samples (same 8ms/equal-power shape as the region-
+    // jump declick, just applied here since the scrub branch can't reach that code), then clear
+    // isScrubbing/scrubVelocity itself once the fade completes.
+    int scrubStopFadeLen = 0;
+    int scrubStopFadeRemaining = 0;
     void renderScrub(juce::AudioBuffer<float>& out, int numCh, int numSamples,
                      const juce::AudioBuffer<float>& docBuf);
 

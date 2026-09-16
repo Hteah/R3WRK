@@ -526,8 +526,41 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         if (stl.isLocked())
         {
             if (! wasScrubbing)   // just started -- pick up from wherever the drag began
+            {
                 scrubReadPos = (double) document.playhead.load(std::memory_order_relaxed);
+                scrubStopFadeRemaining = 0;   // a rapid re-press cancels any pending stop-fade
+            }
             renderScrub(buffer, numCh, numSamples, document.getBuffer());
+        }
+
+        if (document.scrubStopRequested.exchange(false, std::memory_order_relaxed)
+            && scrubStopFadeRemaining <= 0)
+        {
+            scrubStopFadeLen = (int) juce::jlimit<int64_t>(1, 512,
+                (int64_t) (0.008 * currentSampleRate));
+            scrubStopFadeRemaining = scrubStopFadeLen;
+        }
+
+        if (scrubStopFadeRemaining > 0)
+        {
+            const int n = juce::jmin(scrubStopFadeRemaining, numSamples);
+            const int done = scrubStopFadeLen - scrubStopFadeRemaining;
+            for (int i = 0; i < n; ++i)
+            {
+                // Equal-power fade-OUT: complementary curve to the fade-in used elsewhere
+                // (cos ramps 1 -> 0 over the same x in [0,1] that sin ramps 0 -> 1 there).
+                const double x = juce::jlimit(0.0, 1.0, (double) (done + i) / (double) scrubStopFadeLen);
+                const double c = std::cos(0.5 * juce::MathConstants<double>::pi * x);
+                const float g = (float) (c * c);
+                for (int ch = 0; ch < numCh; ++ch)
+                    buffer.setSample(ch, i, buffer.getSample(ch, i) * g);
+            }
+            scrubStopFadeRemaining -= n;
+            if (scrubStopFadeRemaining <= 0)
+            {
+                document.isScrubbing = false;
+                document.scrubVelocity = 0.0;
+            }
         }
 
         applyPlaybackGain(buffer, numCh, numSamples);   // Gain knob rides scrub monitoring too

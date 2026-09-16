@@ -222,7 +222,12 @@ public:
     // Loop crossfade: a raised-cosine volume envelope over the first/last N ms of the loop
     // region during playback (loop only), so the wrap doesn't click. 0 = off. Set by
     // right-clicking the loop button; persisted. Never touches the stored audio.
-    std::atomic<double> loopCrossfadeMs { 0.0 };
+    // Defaults on (was 0.0/off): an arbitrary user-dragged loop point essentially never lands
+    // exactly on a zero crossing, so with this off, every loop hard-splices at the wrap by
+    // default -- that's a bigger, more general source of clicks than anything about dragging
+    // itself. 10ms is comfortably audible-effective but small next to any real loop (the
+    // existing regionLen/2 clamp in processBlock already protects very short loops).
+    std::atomic<double> loopCrossfadeMs { 10.0 };
     // When true, Export Selection (and dragging a selection out) also bakes that same
     // crossfade envelope into the exported file's ends. Persisted. Toggle in the same callout.
     std::atomic<bool> bakeLoopCrossfadeOnExport { false };
@@ -243,6 +248,12 @@ public:
     bool scrubModeEnabled = false;
     std::atomic<bool> isScrubbing { false };
     std::atomic<double> scrubVelocity { 0.0 };
+    // Set by WaveformDisplay::mouseUp() instead of clearing isScrubbing directly: releasing the
+    // mouse while scrubbing at any real speed used to stop dead (the scrub branch returns before
+    // reaching processBlock's shared declick-ramp code), which clicked. The audio thread reads
+    // and clears this itself once it has faded scrub output to silence, only then clearing
+    // isScrubbing -- see processBlock's isScrubbing branch.
+    std::atomic<bool> scrubStopRequested { false };
 
     //==============================================================================
     // Follow-playhead: while playing and zoomed in, WaveformDisplay slides its view each

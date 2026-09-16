@@ -1152,6 +1152,7 @@ void WaveformDisplay::mouseDown(const juce::MouseEvent& e)
         scrubAnchorX = (float) e.x;   // the shuttle's "centre" -- see mouseDrag()
         document.playhead = xToSample((float) e.x);
         document.scrubVelocity = 0.0;   // dead centre -- silent until you pull away from it
+        document.scrubStopRequested = false;   // a rapid re-press cancels any pending stop-fade
         document.isScrubbing = true;
         document.notifyChanged();
         return;
@@ -1383,8 +1384,9 @@ void WaveformDisplay::mouseUp(const juce::MouseEvent& e)
 
     if (document.scrubModeEnabled)
     {
-        document.isScrubbing = false;
-        document.scrubVelocity = 0.0;
+        // Not cleared directly -- see scrubStopRequested's comment. The audio thread fades
+        // scrub output to silence first, then clears isScrubbing/scrubVelocity itself.
+        document.scrubStopRequested = true;
         document.notifyChanged();   // repaint the playhead at wherever the drag ended
         return;
     }
