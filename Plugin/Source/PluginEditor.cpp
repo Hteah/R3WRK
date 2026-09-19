@@ -24,6 +24,8 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
       timeRuler(waveformDisplay, p.document), toolbar(p, p.document),
       knobRow(p.document, standaloneWindow)
 {
+    juce::LookAndFeel::setDefaultLookAndFeel(&fontLnf);
+
     addAndMakeVisible(header);
     addAndMakeVisible(waveformDisplay);
     addChildComponent(spectrogramDisplay); // built but not currently reachable from the UI
@@ -108,8 +110,8 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
     const int topInset = standaloneWindow ? kMacTrafficLightInset : 0;
     setWantsKeyboardFocus(true);
     setResizable(true, true);
-    setResizeLimits(680, 464 + topInset, 2200, 1300 + topInset);
-    setSize(1000, 630 + topInset);
+    setResizeLimits(680, 473 + topInset, 2200, 1300 + topInset);
+    setSize(1000, 639 + topInset);
 }
 
 R3WRKAudioProcessorEditor::~R3WRKAudioProcessorEditor()
@@ -120,6 +122,7 @@ R3WRKAudioProcessorEditor::~R3WRKAudioProcessorEditor()
    #endif
     followButton.setLookAndFeel(nullptr);
     floatOnTopButton.setLookAndFeel(nullptr);
+    juce::LookAndFeel::setDefaultLookAndFeel(nullptr);   // detach before fontLnf is destroyed
     theme->removeChangeListener(this);
 }
 
@@ -245,7 +248,9 @@ void R3WRKAudioProcessorEditor::resized()
     }
     area.removeFromTop(6);
 
-    knobRow.setBounds(area.removeFromBottom(74));   // knob strip, under the transport bar
+    knobRow.setBounds(area.removeFromBottom(83));   // knob strip, under the transport bar --
+        // 74 + 9 for the bigger caption/readout fonts (experiment/space-mono-font), so the
+        // rotary disc gets that space back instead of losing it to the taller text
     area.removeFromBottom(4);
     toolbar.setBounds(area.removeFromBottom(38));   // transport control strip (dark band + padding)
     area.removeFromBottom(6);

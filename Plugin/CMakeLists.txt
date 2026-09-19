@@ -84,6 +84,14 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Signing.local.cmake")
     endforeach()
 endif()
 
+# EXPERIMENT (branch experiment/space-mono-font, not on main): embeds the Space Mono
+# Google Font (OFL) as binary data so R3WRKLookAndFeel::getTypefaceForFont can swap it in
+# app-wide -- see that override for the rationale.
+juce_add_binary_data(R3WRKFonts
+    SOURCES
+        Resources/Fonts/SpaceMono-Regular.ttf
+        Resources/Fonts/SpaceMono-Bold.ttf)
+
 target_sources(R3WRK
     PRIVATE
         Source/PluginProcessor.cpp
@@ -127,6 +135,7 @@ target_link_libraries(R3WRK
         juce::juce_dsp
         juce::juce_gui_extra
         rubberband_dep
+        R3WRKFonts
         "-framework CoreMedia"
         "-weak_framework ScreenCaptureKit"
     PUBLIC

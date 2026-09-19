@@ -1,5 +1,16 @@
 #include "R3WRKLookAndFeel.h"
+#include "BinaryData.h"
 #include <cmath>
+
+juce::Typeface::Ptr R3WRKLookAndFeel::getTypefaceForFont(const juce::Font& font)
+{
+    static juce::Typeface::Ptr regular = juce::Typeface::createSystemTypefaceFor(
+        BinaryData::SpaceMonoRegular_ttf, BinaryData::SpaceMonoRegular_ttfSize);
+    static juce::Typeface::Ptr bold = juce::Typeface::createSystemTypefaceFor(
+        BinaryData::SpaceMonoBold_ttf, BinaryData::SpaceMonoBold_ttfSize);
+
+    return font.isBold() ? bold : regular;
+}
 
 namespace
 {
@@ -39,6 +50,28 @@ namespace
         addLoopArrowhead(heads, centre, radius, 160.0f, radius * 0.55f);
         addLoopArrowhead(heads, centre, radius, 340.0f, radius * 0.55f);
         g.fillPath(heads);
+    }
+
+    // A plain leftward arrow -- same shape/proportions as Reverse's own icon (see
+    // drawReverseIcon below) -- for the reverse-loop state of the Loop button (off -> loop
+    // -> ping-pong -> reverse -> off). Its own function, not a shared call, so the two can
+    // still diverge later if reverse-loop turns out to need a visually distinct glyph.
+    void drawLoopReverseIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
+    {
+        auto area = bounds.reduced(bounds.getHeight() * 0.28f);
+        const float shaftThickness = juce::jmax(1.6f, area.getHeight() * 0.28f);
+        const float headLen        = area.getWidth() * 0.55f;
+        const float headHalfHeight = area.getHeight() * 0.5f;
+
+        juce::Path arrow;
+        arrow.addTriangle(area.getX(),                area.getCentreY(),
+                          area.getX() + headLen,      area.getCentreY() - headHalfHeight,
+                          area.getX() + headLen,      area.getCentreY() + headHalfHeight);
+        arrow.addRectangle(area.getX() + headLen * 0.55f, area.getCentreY() - shaftThickness * 0.5f,
+                           area.getRight() - (area.getX() + headLen * 0.55f), shaftThickness);
+
+        g.setColour(ink);
+        g.fillPath(arrow);
     }
 
     // A continuous figure-eight (lemniscate) -- the "ping-pong loop" glyph. One stroke that
@@ -443,7 +476,7 @@ namespace
 
 void R3WRKLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int width, int height,
                                         float sliderPos, float rotaryStartAngle, float rotaryEndAngle,
-                                        juce::Slider&)
+                                        juce::Slider& slider)
 {
     const auto& pal = theme->palette();
 
@@ -453,27 +486,29 @@ void R3WRKLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int wid
     const float radius   = diameter * 0.5f;
     const float angle    = rotaryStartAngle + sliderPos * (rotaryEndAngle - rotaryStartAngle);
 
-    // Disc: the panel colour, darkened for weight/contrast -- so it visibly tracks each
-    // theme (dark blue-grey in Midnight, dark warm brown in Amber, a muted tan in the
-    // light Paper theme) rather than staying a fixed near-black regardless of theme.
-    const juce::Colour disc    = pal.panelBg.interpolatedWith(juce::Colours::black, 0.35f);
-    const juce::Colour outline = pal.text.withAlpha(0.35f);
-    const juce::Colour pointer = pal.accent;
+    // No filled disc -- just an outline ring in the accent colour, on whatever's behind it
+    // (the knob row's own panel), plus a full-length clock-hand pointer from a small centre
+    // gap out to near the rim -- matching a reference knob the user supplied (a plain
+    // outlined circle + hand, no fill, no short rim tick, no centre dot). Both strokes go
+    // bolder while the knob is actively being dragged, so turning one gives clear feedback
+    // about which knob has the mouse.
+    const juce::Colour ring = pal.accent;
+    const bool active = slider.isMouseButtonDown();
+    const float weight = active ? 1.6f : 1.0f;
 
     const juce::Rectangle<float> discBounds(centre.x - radius, centre.y - radius, diameter, diameter);
-    g.setColour(disc);
-    g.fillEllipse(discBounds);
-    g.setColour(outline);
-    g.drawEllipse(discBounds.reduced(0.75f), 1.5f);
+    g.setColour(ring);
+    g.drawEllipse(discBounds.reduced(1.0f), juce::jmax(1.6f, radius * 0.09f) * weight);
 
-    // A short tick near the rim, not a long line through the middle.
+    const float pointerThickness = juce::jmax(1.6f, radius * 0.14f) * weight;
+    const float innerGap = radius * 0.18f;
+    const float outerLen = radius * 0.82f;
+
     juce::Path pointerPath;
-    const float pointerLen       = radius * 0.30f;
-    const float pointerThickness = juce::jmax(1.6f, radius * 0.16f);
-    pointerPath.addRoundedRectangle(-pointerThickness * 0.5f, -radius * 0.88f,
-                                    pointerThickness, pointerLen, pointerThickness * 0.5f);
+    pointerPath.addRoundedRectangle(-pointerThickness * 0.5f, -outerLen,
+                                    pointerThickness, outerLen - innerGap, pointerThickness * 0.5f);
     pointerPath.applyTransform(juce::AffineTransform::rotation(angle).translated(centre));
-    g.setColour(pointer);
+    g.setColour(ring);
     g.fillPath(pointerPath);
 }
 
@@ -520,6 +555,7 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
 {
     const auto text = button.getButtonText();
     if (text != iconPlay && text != iconStop && text != iconLoop && text != iconInfinity
+        && text != iconLoopReverse
         && text != iconPlayFromStart && text != iconTools && text != iconScrub
         && text != iconReverse && text != iconClear && text != iconAutoRecord
         && text != iconSlice && text != iconFollow && text != iconDesktopRec
@@ -543,6 +579,11 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     if (text == iconInfinity)
     {
         drawInfinityIcon(g, bounds, ink);
+        return;
+    }
+    if (text == iconLoopReverse)
+    {
+        drawLoopReverseIcon(g, bounds, ink);
         return;
     }
     if (text == iconTools)

@@ -848,12 +848,14 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     playFromStartButton.onClick = [this] { playFromStart(); };
     loopButton.onClick          = [this]
     {
-        // One button, three states: off -> loop -> ping-pong -> off.
-        const bool on = document.loopEnabled.load();
-        const bool pp = document.loopPingPong.load();
-        if      (! on) { document.loopEnabled = true;  document.loopPingPong = false; }
-        else if (! pp) {                                document.loopPingPong = true;  }
-        else           { document.loopEnabled = false; document.loopPingPong = false; }
+        // One button, four states: off -> loop -> ping-pong -> reverse -> off.
+        const bool on  = document.loopEnabled.load();
+        const bool pp  = document.loopPingPong.load();
+        const bool rev = document.loopReverse.load();
+        if      (! on)          { document.loopEnabled = true;  document.loopPingPong = false; document.loopReverse = false; }
+        else if (! pp && ! rev) {                                document.loopPingPong = true;  }
+        else if (pp)            {                                document.loopPingPong = false; document.loopReverse = true; }
+        else                    { document.loopEnabled = false; document.loopPingPong = false; document.loopReverse = false; }
         refreshLoopButton();
     };
     loopButton.onSecondaryClick = [this] { showLoopCrossfadeCallout(); };
@@ -1624,13 +1626,17 @@ void EditorToolbar::updateTransportButtonText()
 
 void EditorToolbar::refreshLoopButton()
 {
-    const bool on = document.loopEnabled.load();
-    const bool pp = on && document.loopPingPong.load();
+    const bool on  = document.loopEnabled.load();
+    const bool pp  = on && document.loopPingPong.load();
+    const bool rev = on && document.loopReverse.load();
     loopButton.setToggleState(on, juce::dontSendNotification);   // drives the accent fill (applyTheme)
-    loopButton.setButtonText(pp ? R3WRKLookAndFeel::iconInfinity : R3WRKLookAndFeel::iconLoop);
-    loopButton.setTooltip(juce::String(pp ? "Ping-pong loop -- plays forward, then backward (click to turn off)"
-                                          : on ? "Loop (click for ping-pong)"
-                                               : "Loop")
+    loopButton.setButtonText(pp ? R3WRKLookAndFeel::iconInfinity
+                             : rev ? R3WRKLookAndFeel::iconLoopReverse
+                                   : R3WRKLookAndFeel::iconLoop);
+    loopButton.setTooltip(juce::String(pp  ? "Ping-pong loop -- plays forward, then backward (click for reverse)"
+                                      : rev ? "Reverse loop -- plays backward only (click to turn off)"
+                                      : on  ? "Loop (click for ping-pong)"
+                                            : "Loop")
                           + ".  Right-click: loop crossfade");
 }
 

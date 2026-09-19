@@ -72,6 +72,16 @@ private:
     //                        Every build. Moved here from the transport strip.
     //   floatOnTopButton -- keep the window above other apps. Standalone only. Native
     //                        NSWindow level, persisted via OutputSettings.
+    // EXPERIMENT (branch experiment/space-mono-font): JUCE resolves every Font's typeface
+    // through the process-wide juce::LookAndFeel::getDefaultLookAndFeel() singleton
+    // (juce_LookAndFeel.cpp's getTypefaceForFontFromLookAndFeel), not through whichever
+    // LookAndFeel is attached to the component doing the drawing -- so
+    // R3WRKLookAndFeel::getTypefaceForFont only has any effect once an instance is
+    // installed as that default. Every other LookAndFeel member below (cornerButtonLnF,
+    // toolbarLnF, knobLnF, ...) already inherits the same override, so this one instance
+    // covers plain Labels too (HeaderBar, KnobRow captions, ...) that never get an
+    // explicit setLookAndFeel() of their own.
+    R3WRKLookAndFeel fontLnf;
     R3WRKIconRectLookAndFeel cornerButtonLnF;
     juce::TextButton followButton    { R3WRKLookAndFeel::iconFollow };
     juce::TextButton floatOnTopButton { R3WRKLookAndFeel::iconFloatTop };

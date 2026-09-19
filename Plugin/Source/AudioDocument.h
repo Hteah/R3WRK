@@ -216,9 +216,12 @@ public:
     std::atomic<int64_t> loopEnd { 0 };
     std::atomic<bool> loopEnabled { false };
     // loopEnabled && loopPingPong => the region plays forward, then backward, then forward...
-    // (bouncing at both ends) instead of wrapping head-to-tail. The Loop button cycles
-    // off -> loop -> ping-pong.
+    // (bouncing at both ends) instead of wrapping head-to-tail. loopEnabled && loopReverse
+    // => the region plays backward only, wrapping tail-to-head each cycle (the mirror image
+    // of a plain forward loop, not a bounce). Mutually exclusive with loopPingPong -- the
+    // Loop button cycles off -> loop -> ping-pong -> reverse -> off.
     std::atomic<bool> loopPingPong { false };
+    std::atomic<bool> loopReverse { false };
     // Loop crossfade: a raised-cosine volume envelope over the first/last N ms of the loop
     // region during playback (loop only), so the wrap doesn't click. 0 = off. Set by
     // right-clicking the loop button; persisted. Never touches the stored audio.

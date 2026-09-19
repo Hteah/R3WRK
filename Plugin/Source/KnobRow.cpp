@@ -2,6 +2,13 @@
 #include "BiquadFilter.h"   // r3wrk::mnm::{hpCutoffHz,lpCutoffHz} for the Base/Width knob readouts
 #include <cmath>
 
+juce::Label* KnobRow::KnobLookAndFeel::createSliderTextBox(juce::Slider& slider)
+{
+    auto* l = R3WRKLookAndFeel::createSliderTextBox(slider);
+    l->setFont(juce::FontOptions(16.0f));
+    return l;
+}
+
 namespace
 {
     int64_t fracToSample(double frac, int64_t numSamples)
@@ -283,12 +290,12 @@ KnobRow::Knob& KnobRow::addKnob(const juce::String& name)
 {
     auto* k = knobs.add(new Knob());
 
-    k->caption.setText(name, juce::dontSendNotification);
+    k->caption.setText(name.toUpperCase(), juce::dontSendNotification);   // trying all-caps captions
     k->caption.setJustificationType(juce::Justification::centred);
-    k->caption.setFont(juce::FontOptions(11.0f));
+    k->caption.setFont(juce::FontOptions(14.0f));
 
     k->slider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-    k->slider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 68, 14);
+    k->slider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 68, 20);
     k->slider.setLookAndFeel(&knobLnF);
     // Cursor stays pinned to the knob for the whole drag -- see PinnedDragSlider's comment.
 
@@ -348,7 +355,7 @@ void KnobRow::resized()
         if (r.getWidth() < 24) break;
         auto* k = knobs[i];
         auto col = r.removeFromLeft(juce::jmin(knobW, r.getWidth()));
-        k->caption.setBounds(col.removeFromTop(14));
+        k->caption.setBounds(col.removeFromTop(17));
         k->slider.setBounds(col);
 
         // A wide gap at each section boundary (after knob 2 / 6 / 8 -- see paint()): the

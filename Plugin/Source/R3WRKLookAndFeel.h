@@ -23,6 +23,14 @@ class R3WRKLookAndFeel : public juce::LookAndFeel_V4
 public:
     R3WRKLookAndFeel() = default;
 
+    // EXPERIMENT (branch experiment/space-mono-font): swaps every font request -- default
+    // sans, bold, and the explicit getDefaultMonospacedFontName() ones (TimeRuler, hex
+    // field, etc.) alike -- for the embedded Space Mono typeface, app-wide, without
+    // touching each of the dozens of individual setFont() call sites. Space Mono is
+    // itself monospaced, so the monospace call sites read the same as before, just in the
+    // new face.
+    juce::Typeface::Ptr getTypefaceForFont(const juce::Font&) override;
+
     void drawRotarySlider(juce::Graphics&, int x, int y, int width, int height,
                           float sliderPosProportional, float rotaryStartAngle,
                           float rotaryEndAngle, juce::Slider&) override;
@@ -37,6 +45,7 @@ public:
     static constexpr const char* iconStop          = "icon:stop";
     static constexpr const char* iconLoop          = "icon:loop";
     static constexpr const char* iconInfinity      = "icon:infinity";      // ping-pong loop (a figure-eight)
+    static constexpr const char* iconLoopReverse   = "icon:loopReverse";   // reverse loop (mirror of iconLoop)
     static constexpr const char* iconPlayFromStart = "icon:playFromStart";   // a bar + the play triangle
     static constexpr const char* iconTools         = "icon:tools";          // a gear/cog
     static constexpr const char* iconScrub         = "icon:scrub";          // a notched reel hub

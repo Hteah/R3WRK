@@ -174,7 +174,7 @@ private:
     // "record" on its own; a stop square appears on it once recording.
     juce::TextButton playFromStartButton { R3WRKLookAndFeel::iconPlayFromStart };
     juce::TextButton playButton   { R3WRKLookAndFeel::iconPlay };
-    SecondaryClickButton loopButton { R3WRKLookAndFeel::iconLoop };  // cycles off -> loop -> ping-pong
+    SecondaryClickButton loopButton { R3WRKLookAndFeel::iconLoop };  // cycles off -> loop -> ping-pong -> reverse
                                                                      // (see refreshLoopButton); right-click
                                                                      // opens the loop-crossfade slider
     juce::TextButton scrubButton  { R3WRKLookAndFeel::iconScrub };  // setClickingTogglesState(true)

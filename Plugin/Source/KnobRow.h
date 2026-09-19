@@ -102,9 +102,20 @@ private:
     juce::String timeString(double seconds) const;
     void syncModelBadge();   // text/colour/tooltip from document.filterModel
 
+    // The value readout below each knob (e.g. "0.00 st", "1.00x") is JUCE's own built-in
+    // Slider text-box Label, which never gets an explicit setFont() -- so it draws at
+    // whatever size Label defaults to, clipped against the slider's small text-box height.
+    // Scoped to just the knob row (not R3WRKLookAndFeel's other users -- EditorToolbar's
+    // popup sliders share that base class too) so only these readouts get bigger.
+    class KnobLookAndFeel : public R3WRKLookAndFeel
+    {
+    public:
+        juce::Label* createSliderTextBox(juce::Slider&) override;
+    };
+
     AudioDocument& document;
     juce::SharedResourcePointer<ThemeManager> theme;
-    R3WRKLookAndFeel knobLnF;
+    KnobLookAndFeel knobLnF;
 
     juce::OwnedArray<Knob> knobs;
     Knob* startKnob = nullptr;
