@@ -53,6 +53,7 @@ void HeaderBar::setSourceName(const juce::String& name)
 {
     sourceName = name;
     nameLabel.setText(name.isEmpty() ? "Untitled" : name, juce::dontSendNotification);
+    resized();   // re-fit nameLabel's (click-target) bounds to the new text
 }
 
 void HeaderBar::mouseUp(const juce::MouseEvent& e)
@@ -134,6 +135,14 @@ void HeaderBar::resized()
 {
     auto r = getLocalBounds();
     r.removeFromLeft(16);   // room for the dirty dot
-    nameLabel.setBounds(r.removeFromTop(r.getHeight() / 2));
+    auto topRow = r.removeFromTop(r.getHeight() / 2);
+
+    // Size nameLabel to just fit its text rather than the whole row -- it's the "reveal in
+    // Finder" click target (see onNameClicked), and used to span the full header width,
+    // which meant clicking (or dragging the window from) anywhere across the top of the
+    // editor could open Finder instead of just clicking the file name itself.
+    const int textWidth = juce::GlyphArrangement::getStringWidthInt(nameLabel.getFont(), nameLabel.getText()) + 2;
+    nameLabel.setBounds(topRow.removeFromLeft(juce::jmin(topRow.getWidth(), textWidth)));
+
     readoutLabel.setBounds(r);
 }
