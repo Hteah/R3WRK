@@ -178,7 +178,60 @@ void R3WRKAudioProcessorEditor::parentHierarchyChanged()
 
 void R3WRKAudioProcessorEditor::paint(juce::Graphics& g)
 {
-    g.fillAll(theme->palette().windowBg);
+    const auto& pal = theme->palette();
+
+    if (pal.shadedPanel)
+    {
+        // "Panel body" look: a shadow anchored to each of the four edges, bleeding inward
+        // until it reaches the waveform display -- a recessed/inset look -- in place of the
+        // flat windowBg fill every other theme uses (see the shadedPanel comment on
+        // Palette). Earlier attempts (a centred vignette, then a directional light-source
+        // gradient) both read as flat or left-to-right: almost all of the editor's own
+        // background is covered by child components, so only a thin, wide-but-short strip
+        // (the header margin, mostly) ever shows windowBg directly, and any single gradient
+        // spanning the whole window is dominated by that strip's width. Four edge-anchored
+        // fades side-step that -- each reaches exactly as far as the gap to the waveform's
+        // own edge on that side (so top/bottom, which cross the header/transport/knob rows,
+        // bleed much further than the ~8px left/right margins) -- and overlap naturally at
+        // the corners. Each is eased (a couple of intermediate stops) rather than a plain
+        // linear ramp, for a softer edge than a straight fade gives.
+        auto bounds = getLocalBounds().toFloat();
+        g.fillAll(pal.windowBg);
+
+        const auto shadow = pal.windowBg.darker(pal.edgeShadeDarken).withAlpha(pal.edgeShadeAlpha);
+
+        auto softEdgeGradient = [&shadow](juce::Point<float> from, juce::Point<float> to)
+        {
+            juce::ColourGradient grad(shadow, from.x, from.y,
+                                      shadow.withAlpha(0.0f), to.x, to.y, false);
+            grad.addColour(0.35, shadow.withMultipliedAlpha(0.85f));
+            grad.addColour(0.65, shadow.withMultipliedAlpha(0.35f));
+            return grad;
+        };
+
+        const auto wave = waveformDisplay.getBounds().toFloat();
+        const float minFade = 6.0f;   // guard against a degenerate (near-zero) gap before first layout
+        const float topFade    = juce::jmax(minFade, wave.getY() - bounds.getY());
+        const float bottomFade = juce::jmax(minFade, bounds.getBottom() - wave.getBottom());
+        const float leftFade   = juce::jmax(minFade, wave.getX() - bounds.getX());
+        const float rightFade  = juce::jmax(minFade, bounds.getRight() - wave.getRight());
+
+        g.setGradientFill(softEdgeGradient({ 0, bounds.getY() }, { 0, bounds.getY() + topFade }));
+        g.fillRect(bounds);
+
+        g.setGradientFill(softEdgeGradient({ 0, bounds.getBottom() }, { 0, bounds.getBottom() - bottomFade }));
+        g.fillRect(bounds);
+
+        g.setGradientFill(softEdgeGradient({ bounds.getX(), 0 }, { bounds.getX() + leftFade, 0 }));
+        g.fillRect(bounds);
+
+        g.setGradientFill(softEdgeGradient({ bounds.getRight(), 0 }, { bounds.getRight() - rightFade, 0 }));
+        g.fillRect(bounds);
+    }
+    else
+    {
+        g.fillAll(pal.windowBg);
+    }
 
     if (showingDropHighlight)
     {

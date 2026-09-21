@@ -32,12 +32,44 @@ ThemeEditor::ThemeEditor()
     };
     resetButton.onClick = [this] { theme->setPalette(theme->getPreset("Midnight")); };
 
+    shadedToggle.onClick = [this]
+    {
+        Palette p = theme->palette();
+        p.shadedPanel = shadedToggle.getToggleState();
+        theme->setPalette(p);
+    };
+
+    darkenLabel.setFont(juce::FontOptions(12.0f));
+    darkenSlider.setRange(0.0, 1.0, 0.01);
+    darkenSlider.setTextBoxIsEditable(false);
+    darkenSlider.onValueChange = [this]
+    {
+        Palette p = theme->palette();
+        p.edgeShadeDarken = (float) darkenSlider.getValue();
+        theme->setPalette(p);
+    };
+
+    alphaLabel.setFont(juce::FontOptions(12.0f));
+    alphaSlider.setRange(0.0, 1.0, 0.01);
+    alphaSlider.setTextBoxIsEditable(false);
+    alphaSlider.onValueChange = [this]
+    {
+        Palette p = theme->palette();
+        p.edgeShadeAlpha = (float) alphaSlider.getValue();
+        theme->setPalette(p);
+    };
+
     picker.addChangeListener(this);
     pickerDone.onClick = [this] { closePicker(); };
 
     addAndMakeVisible(titleLabel);
     addAndMakeVisible(startLabel);
     addAndMakeVisible(presetBox);
+    addAndMakeVisible(shadedToggle);
+    addAndMakeVisible(darkenLabel);
+    addAndMakeVisible(darkenSlider);
+    addAndMakeVisible(alphaLabel);
+    addAndMakeVisible(alphaSlider);
     addAndMakeVisible(nameField);
     addAndMakeVisible(saveButton);
     addAndMakeVisible(deleteButton);
@@ -50,7 +82,7 @@ ThemeEditor::ThemeEditor()
     refreshFromPalette();
 
     theme->addChangeListener(this);
-    setSize(340, 540);   // 2 rows taller than before: screenText / screenTextDim added
+    setSize(340, 618);   // +3 rows: shaded-panel toggle, edge-darken and edge-opacity sliders
 }
 
 ThemeEditor::~ThemeEditor()
@@ -156,6 +188,25 @@ void ThemeEditor::refreshFromPalette()
 
     titleLabel.setColour(juce::Label::textColourId, p.text);
     startLabel.setColour(juce::Label::textColourId, p.textDim);
+    shadedToggle.setToggleState(p.shadedPanel, juce::dontSendNotification);
+    shadedToggle.setColour(juce::ToggleButton::textColourId, p.textDim);
+    shadedToggle.setColour(juce::ToggleButton::tickColourId, p.accent);
+
+    if (! darkenSlider.isMouseButtonDown())
+        darkenSlider.setValue(p.edgeShadeDarken, juce::dontSendNotification);
+    if (! alphaSlider.isMouseButtonDown())
+        alphaSlider.setValue(p.edgeShadeAlpha, juce::dontSendNotification);
+    darkenLabel.setColour(juce::Label::textColourId, p.textDim);
+    alphaLabel.setColour(juce::Label::textColourId, p.textDim);
+    darkenSlider.setColour(juce::Slider::trackColourId, p.accent);
+    darkenSlider.setColour(juce::Slider::thumbColourId, p.accent);
+    darkenSlider.setColour(juce::Slider::textBoxTextColourId, p.text);
+    darkenSlider.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+    alphaSlider.setColour(juce::Slider::trackColourId, p.accent);
+    alphaSlider.setColour(juce::Slider::thumbColourId, p.accent);
+    alphaSlider.setColour(juce::Slider::textBoxTextColourId, p.text);
+    alphaSlider.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+
     for (auto* r : rows)
         r->label.setColour(juce::Label::textColourId, p.textDim);
 
@@ -215,7 +266,20 @@ void ThemeEditor::resized()
     auto sf = r.removeFromTop(24);
     startLabel.setBounds(sf.removeFromLeft(66));
     presetBox.setBounds(sf);
-    r.removeFromTop(10);
+    r.removeFromTop(6);
+
+    shadedToggle.setBounds(r.removeFromTop(22));
+    r.removeFromTop(4);
+
+    auto dr = r.removeFromTop(22);
+    darkenLabel.setBounds(dr.removeFromLeft(80));
+    darkenSlider.setBounds(dr);
+    r.removeFromTop(2);
+
+    auto ar = r.removeFromTop(22);
+    alphaLabel.setBounds(ar.removeFromLeft(80));
+    alphaSlider.setBounds(ar);
+    r.removeFromTop(8);
 
     const auto rowsArea = r;   // remember for the picker overlay
 

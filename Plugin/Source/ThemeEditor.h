@@ -47,6 +47,11 @@ private:
     juce::Label      titleLabel;
     juce::Label      startLabel;
     juce::ComboBox   presetBox;
+    juce::ToggleButton shadedToggle { "Shaded panel" };
+    juce::Label      darkenLabel { {}, "Edge darken" };
+    juce::Slider     darkenSlider { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
+    juce::Label      alphaLabel  { {}, "Edge opacity" };
+    juce::Slider     alphaSlider { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
     juce::OwnedArray<Row> rows;
 
     juce::TextEditor nameField;

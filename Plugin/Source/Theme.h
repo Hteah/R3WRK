@@ -33,6 +33,21 @@ struct Palette
     juce::Colour screenText    { 0xffe0e0e0 };
     juce::Colour screenTextDim { 0xff888888 };
 
+    // When true, the editor's own background (PluginEditor::paint) is painted as an inset
+    // shadow bled in from each of the four edges toward the waveform display, instead of a
+    // flat windowBg fill -- a "panel body" look, toggleable per-theme from ThemeEditor
+    // (works for any theme, light or dark, since it's computed from that theme's own
+    // windowBg rather than fixed colours). Not a Colour, so it's serialised separately from
+    // kPaletteFields.
+    bool shadedPanel = false;
+
+    // Edge-shading intensity, editable live from ThemeEditor's sliders. edgeShadeDarken
+    // (0-1): how far PluginEditor::paint's edge-shadow colour is darkened from windowBg
+    // (juce::Colour::darker's amount). edgeShadeAlpha (0-1): that shadow's peak opacity,
+    // right at the window edge. Both no-ops while shadedPanel is off.
+    float edgeShadeDarken = 0.85f;
+    float edgeShadeAlpha  = 0.42f;
+
     juce::String toString() const;                       // "key:aarrggbb;key:aarrggbb;..."
     static Palette fromString(const juce::String&);      // unknown keys ignored, missing keep default
 

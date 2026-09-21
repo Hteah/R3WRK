@@ -1,4 +1,5 @@
 #include "Theme.h"
+#include <cmath>
 
 //==============================================================================
 const PaletteField kPaletteFields[] =
@@ -28,6 +29,10 @@ juce::String Palette::toString() const
         const auto& f = kPaletteFields[i];
         parts.add(juce::String(f.key) + ":" + (this->*(f.member)).toDisplayString(true));
     }
+    if (shadedPanel)
+        parts.add("shadedPanel:1");
+    parts.add("edgeShadeDarken:" + juce::String(edgeShadeDarken, 3));
+    parts.add("edgeShadeAlpha:" + juce::String(edgeShadeAlpha, 3));
     return parts.joinIntoString(";");
 }
 
@@ -40,6 +45,21 @@ Palette Palette::fromString(const juce::String& s)
         auto val = tok.fromFirstOccurrenceOf(":", false, false).trim();
         if (key.isEmpty() || val.isEmpty())
             continue;
+        if (key == "shadedPanel")
+        {
+            p.shadedPanel = (val == "1");
+            continue;
+        }
+        if (key == "edgeShadeDarken")
+        {
+            p.edgeShadeDarken = val.getFloatValue();
+            continue;
+        }
+        if (key == "edgeShadeAlpha")
+        {
+            p.edgeShadeAlpha = val.getFloatValue();
+            continue;
+        }
         for (int i = 0; i < kNumPaletteFields; ++i)
             if (key == kPaletteFields[i].key)
                 p.*(kPaletteFields[i].member) = juce::Colour::fromString(val);
@@ -52,7 +72,9 @@ bool Palette::operator== (const Palette& o) const
     for (int i = 0; i < kNumPaletteFields; ++i)
         if ((this->*(kPaletteFields[i].member)) != (o.*(kPaletteFields[i].member)))
             return false;
-    return true;
+    return shadedPanel == o.shadedPanel
+        && std::abs(edgeShadeDarken - o.edgeShadeDarken) < 0.001f
+        && std::abs(edgeShadeAlpha - o.edgeShadeAlpha) < 0.001f;
 }
 
 //==============================================================================
@@ -101,6 +123,17 @@ namespace
           "zeroLine:29ffffff;gridLine:80000000;playhead:ffff3b30;loopMarker:ffffa500;"
           "recordButton:ffc1503a;text:ff1b2433;textDim:ff46536a;"
           "screenText:ffe0e0e0;screenTextDim:ff888888" },
+
+        // Brushed-silver panel body (from the "Panel Body (Silver Grey)" mockup): a light
+        // grey chrome with the shadedPanel gradient (see PluginEditor::paint) on, in place
+        // of Madrona's flat light windowBg. Screen stays Midnight-dark for the same reason
+        // Madrona's does -- see the screenText/screenTextDim comment on Palette.
+        { "Silver",
+          "windowBg:ffc9cbce;panelBg:ff17191e;waveform:ff5ec2ff;accent:ff2f6ea5;"
+          "zeroLine:29ffffff;gridLine:80000000;playhead:ffff3b30;loopMarker:ffffa500;"
+          "recordButton:ff8b0000;text:ff2b2c2e;textDim:ff6e6f72;"
+          "screenText:ffe0e0e0;screenTextDim:ff888888;shadedPanel:1;"
+          "edgeShadeDarken:0.85;edgeShadeAlpha:0.42" },
     };
     const int kNumBuiltIns = (int) (sizeof(kBuiltIns) / sizeof(kBuiltIns[0]));
 
