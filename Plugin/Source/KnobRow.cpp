@@ -223,6 +223,13 @@ KnobRow::KnobRow(AudioDocument& doc, bool standalone)
         for (auto* k : knobs) k->slider.updateText();   // Base/Width Hz readouts follow the model
     };
 
+    drawerButton.setClickingTogglesState(false);   // the editor decides open/closed, not the button itself
+    drawerButton.setWantsKeyboardFocus(false);
+    drawerButton.setTooltip("More effects (LFO, Delay, Reverb, Granular)");
+    drawerButton.setLookAndFeel(&drawerLnF);
+    drawerButton.onClick = [this] { if (onDrawerToggle) onDrawerToggle(); };
+    addAndMakeVisible(drawerButton);
+
     applyTheme();
     syncModelBadge();
     theme->addChangeListener(this);
@@ -233,6 +240,7 @@ KnobRow::~KnobRow()
 {
     for (auto* k : knobs)
         k->slider.setLookAndFeel(nullptr);   // detach before knobLnF is destroyed
+    drawerButton.setLookAndFeel(nullptr);
     theme->removeChangeListener(this);
 }
 
@@ -252,6 +260,18 @@ void KnobRow::applyTheme()
     modelBadge.ink    = pal.windowBg;
     modelBadge.border = pal.textDim;
     modelBadge.repaint();
+
+    // Same outline idiom as the header's follow / float-on-top buttons: transparent fill,
+    // dimmed ink normally, accent fill + windowBg ink once the drawer is open.
+    drawerButton.setColour(juce::TextButton::buttonColourId,   juce::Colours::transparentBlack);
+    drawerButton.setColour(juce::TextButton::buttonOnColourId, pal.accent);
+    drawerButton.setColour(juce::TextButton::textColourOffId,  pal.textDim);
+    drawerButton.setColour(juce::TextButton::textColourOnId,   pal.windowBg);
+}
+
+void KnobRow::setDrawerOpen(bool open)
+{
+    drawerButton.setToggleState(open, juce::dontSendNotification);
 }
 
 void KnobRow::syncModelBadge()
@@ -337,6 +357,14 @@ void KnobRow::timerCallback()
 void KnobRow::resized()
 {
     auto r = getLocalBounds().reduced(4, 2);
+
+    // Drawer chevron: pinned to the right edge, vertically centred, ahead of the knob layout
+    // below so it never competes with the auto-fit knob width.
+    constexpr int drawerW = 20;
+    auto drawerArea = r.removeFromRight(drawerW);
+    drawerButton.setBounds(drawerArea.withSizeKeepingCentre(drawerW, drawerW));
+    r.removeFromRight(6);
+
     const int gap      = 2;
     const int dotGap   = 16;   // the wider gap at a section-divider dot (before knob 7 / 9)
     const int badgeGap = 30;   // wider still before knob 3 -- the filter-model badge sits here

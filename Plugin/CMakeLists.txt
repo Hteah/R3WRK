@@ -104,6 +104,8 @@ target_sources(R3WRK
         Source/HeaderBar.cpp
         Source/EditorToolbar.cpp
         Source/KnobRow.cpp
+        Source/FxRow.cpp
+        Source/LfoPanel.cpp
         Source/R3WRKLookAndFeel.cpp
         Source/TimeRuler.cpp
         Source/Theme.cpp

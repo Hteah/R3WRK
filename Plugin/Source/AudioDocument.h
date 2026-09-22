@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include "LfoModule.h"
 
 /**
     The in-memory audio buffer being edited, plus selection, playhead,
@@ -326,6 +327,31 @@ public:
     // kMinGainDb reads as a true mute. Applied last on the playback/scrub output and baked
     // into Save/Export by renderWithPlaybackKnobs, same as the other playback knobs.
     std::atomic<double> playbackGainDb { 0.0 };
+
+    //==============================================================================
+    // LFO modulation slots. Fixed capacity so the audio thread can iterate every slot each
+    // block with no locking or resize hazard (see PluginProcessor::tickLfos()). numVisibleLfos
+    // is how many the FX drawer currently shows ("+ Add LFO" raises it, up to kMaxLfos); slots
+    // past that just sit at their defaults, unused.
+    //
+    // Each LFO drives exactly one target with one Amount -- not a many-to-many matrix (routing
+    // two LFOs onto the same knob is still possible; their offsets just add, same as two
+    // parallel signals into one summing node). Pitch/Speed (the real-time RubberBand stretch
+    // engine) are deliberately not in r3wrk::ModTarget yet -- that pipeline has its own history
+    // of click-storm bugs; modulating it is a later, isolated pass.
+    static constexpr int kMaxLfos = 8;
+    struct LfoSlot
+    {
+        std::atomic<bool>   enabled   { false };
+        std::atomic<int>    shape     { (int) r3wrk::LfoShape::sine };
+        std::atomic<int>    rateRange { (int) r3wrk::LfoRateRange::normal };
+        std::atomic<double> rate01    { 0.3 };
+        std::atomic<int>    target    { (int) r3wrk::ModTarget::none };
+        std::atomic<double> amount    { 0.0 };   // -1..+1
+        std::atomic<bool>   tempoSync { false };  // reserved -- not wired to host BPM yet
+    };
+    LfoSlot lfoSlots[kMaxLfos];
+    std::atomic<int> numVisibleLfos { 1 };
 
     static constexpr double kMinSpeed = 0.25, kMaxSpeed = 4.0;
     static constexpr double kMinPitch = -12.0, kMaxPitch = 12.0;

@@ -191,8 +191,15 @@ namespace r3wrk
             if (hpOn)
                 hp.setCoeffs (filterHP, juce::jmax (20.0, fLow), modelResonanceToQ (model, hpQ01), fs);
             if (lpOn)
-                lp.setCoeffs (filterLP, juce::jlimit (juce::jmax (30.0, fLow * 1.02), nyq, fHigh),
+            {
+                // lpLo can legitimately exceed nyq when fLow is close to/above it -- clamp it
+                // down to nyq first so jlimit always gets an ordered [lo, hi] range (found via
+                // ModulatedMultiModeFilter's offline stability test, which swept further than
+                // any knob normally would -- same latent edge case, fixed the same way there).
+                const double lpLo = juce::jmin (juce::jmax (30.0, fLow * 1.02), nyq);
+                lp.setCoeffs (filterLP, juce::jlimit (lpLo, nyq, fHigh),
                               modelResonanceToQ (model, lpQ01), fs);
+            }
 
             // A narrow, heavily-resonant band can stack both peaks and scream. Trim back
             // toward unity as the band narrows with Q up; unity by ~half Width or low Q.
@@ -214,6 +221,123 @@ namespace r3wrk
         {
             for (int i = 0; i < numSamples; ++i)
                 data[i] = processSample (data[i]);
+        }
+    };
+
+    /**
+        A 2-pole TPT (topology-preserving transform) state-variable filter stage -- Zavalishin's
+        form ("The Art of VA Filter Design"), built specifically for the LFO-modulated filter
+        path (see PluginProcessor::applyModulatedFilter()). r3wrk::Biquad above is a direct-form
+        biquad: its feedback coefficients are recomputed from scratch on every update, and its
+        delay-line state (z1/z2) doesn't relate to a coefficient change gracefully -- fine for a
+        human turning a knob (slow, infrequent changes), but changing it continuously and fast
+        (an LFO) can excite loud transients when old state meets new coefficients. A TPT SVF's
+        state (ic1eq/ic2eq) instead directly represents the two integrators of the underlying
+        analog prototype; recomputing g/k every sample and re-solving the implicit trapezoidal
+        integration is what it's built for, so it stays well-behaved under continuous fast
+        modulation -- that's the whole reason this exists alongside Biquad rather than replacing
+        it. Manual, knob-driven filtering keeps using MultiModeFilter/Biquad, unchanged.
+    */
+    struct TptSvfStage
+    {
+        double ic1eq = 0.0, ic2eq = 0.0;   // integrator state (the two capacitor voltages)
+
+        void reset() noexcept { ic1eq = ic2eq = 0.0; }
+
+        struct Coeffs { double g = 0.0, k = 1.0, a1 = 1.0, a2 = 0.0, a3 = 0.0; };
+
+        static Coeffs makeCoeffs (double fc, double q, double fs) noexcept
+        {
+            fs = juce::jmax (1.0, fs);
+            fc = juce::jlimit (10.0, fs * 0.49, fc);
+            q  = juce::jmax (0.05, q);
+
+            Coeffs c;
+            c.g  = std::tan (juce::MathConstants<double>::pi * fc / fs);
+            c.k  = 1.0 / q;
+            c.a1 = 1.0 / (1.0 + c.g * (c.g + c.k));
+            c.a2 = c.g * c.a1;
+            c.a3 = c.g * c.a2;
+            return c;
+        }
+
+        // `mode`: filterHP or filterLP (see the FilterMode enum above).
+        inline float processSample (float x, const Coeffs& c, int mode) noexcept
+        {
+            const double v0 = (double) x;
+            const double v3 = v0 - ic2eq;
+            const double v1 = c.a1 * ic1eq + c.a2 * v3;
+            const double v2 = ic2eq + c.a2 * ic1eq + c.a3 * v3;
+            ic1eq = 2.0 * v1 - ic1eq;
+            ic2eq = 2.0 * v2 - ic2eq;
+
+            return (float) (mode == filterHP ? (v0 - c.k * v1 - v2) : v2);
+        }
+    };
+
+    /**
+        Two TptSvfStage in series (HP at the Base corner, LP at the Base+Width corner) -- the
+        same signal flow and the same modelHpCutoffHz/modelLpCutoffHz/modelResonanceToQ curve
+        mapping as MultiModeFilter, so a given knob (or LFO) position means the same cutoff/
+        resonance either way; it should sound like the same filter, just modulation-stable. Used
+        ONLY by the LFO-modulated path -- see applyModulatedFilter()'s comment.
+
+        setParams() takes and recomputes coefficients every call, which this is designed to
+        tolerate at full per-sample rate (see TptSvfStage's comment) -- the caller (not this
+        struct) decides how often to actually call it.
+    */
+    struct ModulatedMultiModeFilter
+    {
+        TptSvfStage hp, lp;
+        TptSvfStage::Coeffs hpCoeffs, lpCoeffs;
+        bool hpOn = false, lpOn = false;
+        float outTrim = 1.0f;
+        FilterModel model = FilterModel::monomachine;
+
+        void reset() noexcept { hp.reset(); lp.reset(); }
+
+        void setParams (double base01, double width01, double hpQ01, double lpQ01, double fs) noexcept
+        {
+            base01  = juce::jlimit (0.0, 1.0, base01);
+            width01 = juce::jlimit (0.0, 1.0, width01);
+            hpQ01   = juce::jlimit (0.0, 1.0, hpQ01);
+            lpQ01   = juce::jlimit (0.0, 1.0, lpQ01);
+
+            const double fLow  = modelHpCutoffHz (model, base01);
+            const double fHigh = modelLpCutoffHz (model, base01, width01);
+            const double nyq   = juce::jmax (1.0, fs) * 0.49;
+
+            hpOn = fLow > 20.0 || hpQ01 > 0.02;
+            lpOn = fHigh < nyq || lpQ01 > 0.02;
+
+            if (hpOn)
+                hpCoeffs = TptSvfStage::makeCoeffs (juce::jmax (20.0, fLow), modelResonanceToQ (model, hpQ01), fs);
+            if (lpOn)
+            {
+                // lpLo can legitimately exceed nyq when fLow is swept close to/above it (fast
+                // modulation explores extremes a knob rarely would) -- clamp it down to nyq
+                // first so the jlimit below always gets an ordered [lo, hi] range. makeCoeffs()
+                // clamps fc again internally regardless, so this only avoids passing it an
+                // inverted range, not a correctness change to the resulting cutoff.
+                const double lpLo = juce::jmin (juce::jmax (30.0, fLow * 1.02), nyq);
+                lpCoeffs = TptSvfStage::makeCoeffs (juce::jlimit (lpLo, nyq, fHigh),
+                                                    modelResonanceToQ (model, lpQ01), fs);
+            }
+
+            // Same narrow-resonant-band trim as MultiModeFilter, for the same reason (a narrow,
+            // heavily-resonant band can stack both peaks and scream).
+            const double gap = juce::jlimit (0.0, 1.0, base01 + width01) - base01;
+            const double qMax = juce::jmax (hpQ01, lpQ01);
+            outTrim = (hpOn && lpOn)
+                ? (float) (1.0 / (1.0 + 6.0 * qMax * juce::jmax (0.0, 0.35 - gap)))
+                : (float) (1.0 / (1.0 + 1.5 * juce::jmax (0.0, qMax - 0.6)));
+        }
+
+        inline float processSample (float x) noexcept
+        {
+            if (hpOn) x = hp.processSample (x, hpCoeffs, filterHP);
+            if (lpOn) x = lp.processSample (x, lpCoeffs, filterLP);
+            return x * outTrim;
         }
     };
 }

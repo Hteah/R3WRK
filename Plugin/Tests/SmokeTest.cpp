@@ -834,6 +834,82 @@ int main()
         check(doc.getNumChannels() == 2, "undo of convertToMono returns to stereo");
     }
 
+    // --- LFO-modulated filter (TPT state-variable) stability ----------
+    // Verifies r3wrk::ModulatedMultiModeFilter (BiquadFilter.h) offline, BEFORE it's ever wired
+    // into live playback -- the direct-form r3wrk::Biquad produced genuinely dangerous, very
+    // loud output when continuously modulated fast during live testing (see the LFO design
+    // conversation / PROJECT_NOTES); this filter exists specifically to fix that, and the fix
+    // needs to be proven here, not by listening.
+    {
+        std::cout << "-- LFO-modulated filter (ModulatedMultiModeFilter) stability --" << std::endl;
+        const double fs = 48000.0;
+        const int numSamples = (int) fs;   // 1 second
+
+        // Continuously sweeps Base/Width at `lfoRateHz` while filtering a steady tone, using
+        // either the new TPT filter or the existing direct-form one -- the same stress shape
+        // (fast modulation + resonance up) that caused trouble live.
+        auto runModulated = [&](double lfoRateHz, double amount, double baseCentre, double widthCentre,
+                                double hpQ, double lpQ, float inputAmp, bool useTpt)
+        {
+            r3wrk::ModulatedMultiModeFilter tpt;
+            r3wrk::MultiModeFilter          biquad;
+            float peak = 0.0f;
+            bool hasNonFinite = false;
+            double phase = 0.0;
+            const double inc = lfoRateHz / fs;
+
+            for (int i = 0; i < numSamples; ++i)
+            {
+                const float in = inputAmp * (float) std::sin(2.0 * juce::MathConstants<double>::pi * 220.0 * (double) i / fs);
+
+                const double lfo = std::sin(phase * juce::MathConstants<double>::twoPi);
+                phase += inc;
+                if (phase >= 1.0) phase -= std::floor(phase);
+
+                const double base  = juce::jlimit(0.0, 1.0, baseCentre  + amount * lfo);
+                const double width = juce::jlimit(0.0, 1.0, widthCentre + amount * lfo);
+
+                float out;
+                if (useTpt) { tpt.setParams(base, width, hpQ, lpQ, fs);    out = tpt.processSample(in); }
+                else        { biquad.setParams(base, width, hpQ, lpQ, fs); out = biquad.processSample(in); }
+
+                if (! std::isfinite(out)) hasNonFinite = true;
+                peak = juce::jmax(peak, std::abs(out));
+            }
+            return std::make_pair(peak, hasNonFinite);
+        };
+
+        const double stressRate = 300.0;   // well into "audio rate", the scenario that failed live
+        const double amount = 0.4;
+        const double base0 = 0.4, width0 = 0.3, hpQ = 0.7, lpQ = 0.7;
+        const float inAmp = 0.5f;
+
+        const auto tptResult    = runModulated(stressRate, amount, base0, width0, hpQ, lpQ, inAmp, true);
+        const auto biquadResult = runModulated(stressRate, amount, base0, width0, hpQ, lpQ, inAmp, false);
+
+        std::cout << "  TPT peak: "    << tptResult.first
+                  << (tptResult.second    ? " (NON-FINITE!)" : "") << std::endl;
+        std::cout << "  Biquad peak (for comparison, NOT used live under modulation): " << biquadResult.first
+                  << (biquadResult.second ? " (NON-FINITE!)" : "") << std::endl;
+
+        check(! tptResult.second, "TPT filter output stays finite under fast (300Hz) modulation + resonance");
+        check(tptResult.first < inAmp * 4.0f, "TPT filter output peak stays bounded (< 4x input) under fast modulation");
+
+        // Sanity check: a fixed-cutoff TPT filter should behave like a real filter (attenuate a
+        // well-above-cutoff tone), not just a coincidentally-safe pass-through.
+        {
+            r3wrk::ModulatedMultiModeFilter fixedTpt;
+            fixedTpt.setParams(0.3, 0.05, 0.0, 0.0, fs);
+            float peak = 0.0f;
+            for (int i = 0; i < (int) fs; ++i)
+            {
+                const float in = 0.5f * (float) std::sin(2.0 * juce::MathConstants<double>::pi * 8000.0 * (double) i / fs);
+                peak = juce::jmax(peak, std::abs(fixedTpt.processSample(in)));
+            }
+            check(peak < 0.4f, "fixed-cutoff TPT filter attenuates a well-above-cutoff 8kHz tone");
+        }
+    }
+
     std::cout << "===========================================" << std::endl;
     if (failures == 0)
         std::cout << "ALL CHECKS PASSED" << std::endl;

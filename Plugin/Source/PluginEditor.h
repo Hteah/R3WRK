@@ -5,6 +5,7 @@
 #include "EditorToolbar.h"
 #include "StandaloneMenuBar.h"
 #include "KnobRow.h"
+#include "FxRow.h"
 #include "WaveformDisplay.h"
 #include "SpectrogramDisplay.h"
 #include "TimeRuler.h"
@@ -46,8 +47,17 @@ private:
     void applyHeaderButtonThemes();   // themes the follow + float-on-top header buttons
     void applyFloatOnTop(bool on);   // toggles the native window level + persists
     void maybeApplyPersistedFloatOnTop();   // once, as soon as the window peer exists
+    void toggleFxDrawer();   // KnobRow's chevron -- grows/shrinks the window by one row
 
     bool showingDropHighlight = false;
+
+    // FX drawer: closed by default, so the plugin's footprint is unchanged until the user asks
+    // for it. Not persisted yet -- reopens closed every time the editor is recreated.
+    // Two stacked rows (see FxRow's class comment) -- each the same strip height as KnobRow,
+    // plus FxRow's own internal gap between them.
+    static constexpr int kFxRowHeight = 83 * 2 + 4;
+    static constexpr int kFxRowGap    = 4;
+    bool fxDrawerOpen = false;
 
     // In the Standalone build the macOS traffic lights float over the top-left of our own UI
     // (native title bar, no strip -- see StandaloneWindowShape.mm), so reserve a thin band at
@@ -93,6 +103,7 @@ private:
     TimeRuler timeRuler;
     EditorToolbar toolbar;
     KnobRow knobRow;
+    FxRow fxRow;
 
     // Standalone only: the macOS application menu bar (File / Edit / Tools). nullptr in a
     // plugin (the host owns the menu bar). Installed via setMacMainMenu() in the ctor,

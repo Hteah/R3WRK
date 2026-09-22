@@ -363,6 +363,26 @@ namespace
                                                   juce::PathStrokeType::rounded));
     }
 
+    // Drawer toggle: a single chevron, pointing down when closed (more to reveal) and up when
+    // open (toggle state on -- collapse it back).
+    void drawChevronIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink, bool pointingUp)
+    {
+        auto a = bounds.reduced (bounds.getHeight() * 0.28f);
+        const float cx = a.getCentreX();
+        const float top = pointingUp ? a.getBottom() : a.getY();
+        const float bot = pointingUp ? a.getY()      : a.getBottom();
+        const float halfW = a.getWidth() * 0.5f;
+
+        juce::Path chev;
+        chev.startNewSubPath (cx - halfW, top);
+        chev.lineTo          (cx,         bot);
+        chev.lineTo          (cx + halfW, top);
+        g.setColour (ink);
+        g.strokePath (chev, juce::PathStrokeType (juce::jmax (1.4f, a.getHeight() * 0.16f),
+                                                  juce::PathStrokeType::curved,
+                                                  juce::PathStrokeType::rounded));
+    }
+
     // Record Desktop (Standalone only): a computer-monitor outline (rounded screen + a short
     // stand) with a filled record dot centred on the screen -- "capture what's playing on
     // this Mac".
@@ -559,7 +579,8 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
         && text != iconPlayFromStart && text != iconTools && text != iconScrub
         && text != iconReverse && text != iconClear && text != iconAutoRecord
         && text != iconSlice && text != iconFollow && text != iconDesktopRec
-        && text != iconFloatTop && text != iconCaptureOut && text != iconBlackBox)
+        && text != iconFloatTop && text != iconCaptureOut && text != iconBlackBox
+        && text != iconChevron)
     {
         juce::LookAndFeel_V4::drawButtonText(g, button, isMouseOverButton, isButtonDown);
         return;
@@ -624,6 +645,11 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     if (text == iconBlackBox)
     {
         drawBlackBoxIcon(g, bounds, ink);
+        return;
+    }
+    if (text == iconChevron)
+    {
+        drawChevronIcon(g, bounds, ink, button.getToggleState());
         return;
     }
     if (text == iconReverse)

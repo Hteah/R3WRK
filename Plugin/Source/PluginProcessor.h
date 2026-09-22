@@ -3,6 +3,7 @@
 #include "AudioDocument.h"
 #include "DesktopAudioCapture.h"
 #include "BiquadFilter.h"
+#include "LfoModule.h"
 
 namespace RubberBand { class RubberBandStretcher; }
 
@@ -269,22 +270,75 @@ private:
                         int64_t regionStart, int64_t regionEnd, bool loop, int fadeLen);
 
     // Modelled Monomachine multimode filter on the playback output (after the stretcher). One
-    // MultiModeFilter per channel; all four knob values are per-block-smoothed so a sweep
-    // doesn't zipper the coefficients. Reset on a fresh play pass and when the engaged line is
-    // crossed, so re-enabling doesn't thump.
+    // MultiModeFilter per channel; all four knob values are continuously smoothed (see
+    // applyPlaybackFilter()) so a manual sweep doesn't zipper the coefficients. This is ONLY
+    // used for manual, knob-driven filtering now -- an actively LFO-modulated filter runs
+    // through applyModulatedFilter()/modulatedFilter instead (below): this direct-form biquad
+    // isn't built to have its coefficients changed continuously and fast (proven non-finite
+    // offline under that stress -- see Tests/SmokeTest.cpp), so it's kept for the case it's
+    // actually good at instead of trying to make it handle both.
     r3wrk::MultiModeFilter playbackFilter[2];   // MnM Base/Width/HP Q/LP Q, per channel
     juce::SmoothedValue<double> smoothedFilterBase  { 0.0 };
     juce::SmoothedValue<double> smoothedFilterWidth { 1.0 };
     juce::SmoothedValue<double> smoothedFilterHpQ   { 0.0 };
     juce::SmoothedValue<double> smoothedFilterLpQ   { 0.0 };
-    bool lastFilterEngaged = false;
-    void applyPlaybackFilter (juce::AudioBuffer<float>& buffer, int numCh, int numSamples,
+    bool lastFilterEngaged = false;   // edge-detects disengaged->engaged, to clear stale filter memory (z1/z2) -- see applyPlaybackFilter()
+    void applyPlaybackFilter (juce::AudioBuffer<float>& buffer, int numCh, int startSample, int numSamples,
                               bool freshPlayPass);
 
+    // The LFO-modulated filter path: r3wrk::ModulatedMultiModeFilter (BiquadFilter.h) is a TPT
+    // state-variable filter, built to tolerate its cutoff/resonance being recomputed every
+    // sample -- unlike playbackFilter above. Reuses the exact same Base/Width/HP Q/LP Q -> Hz/Q
+    // curve mapping, so a given position means the same cutoff/resonance either way; it's meant
+    // to sound like the same filter, just modulation-stable. applyModulatedFilter() scans
+    // document.lfoSlots itself each block: if nothing is actively targeting a filter parameter
+    // it does nothing (returns false) and processBlock() falls back to the ordinary
+    // playbackFilter path above; if something is, it handles the ENTIRE block itself --
+    // ticking every filter-targeting LFO truly per-sample (not chunked -- see
+    // kLfoModUpdateSamples's comment on why chunking doesn't work here), recomputing
+    // coefficients every sample, and filtering -- so playbackFilter is skipped entirely for
+    // that block (no double filtering).
+    r3wrk::ModulatedMultiModeFilter modulatedFilter[2];
+    bool modulatedFilterWasActive = false;   // edge-detects the switch into/out of this path, to reset cleanly
+    bool applyModulatedFilter (juce::AudioBuffer<float>& buffer, int numCh, int numSamples, bool freshPlayPass);
+
+    // LFO modulation: one r3wrk::LfoModule per AudioDocument::LfoSlot, holding the phase/RNG
+    // state that's genuinely audio-thread-only (never read by the UI, so it doesn't need to
+    // live on `document` the way the slots' user-facing config does). Two separate ticking
+    // paths, so a slot's phase is only ever advanced by exactly one of them, never both:
+    // tickLfos() (below) handles Gain-targeting slots, chunked (see kLfoModUpdateSamples);
+    // applyModulatedFilter() handles filter-targeting slots itself, truly per-sample.
+    r3wrk::LfoModule lfoDsp[AudioDocument::kMaxLfos];
+    struct LfoModResult { double gainDb = 0.0; };
+    LfoModResult tickLfos (int numSamples);
+    // Gain has no natural 0..1 range the way the filter knobs do, so an Amount of 100% on a
+    // Gain-targeted LFO is defined to swing +/- this many dB. Filter targets ARE already 0..1,
+    // so applyModulatedFilter() just adds (LFO output * Amount) directly -- no dB scaling there.
+    static constexpr double kLfoGainModRangeDb = 24.0;
+
+    // LFO-driven Gain modulation is only as smooth as how often the gain ramp gets recomputed --
+    // once per host block was fine when only a knob drag moved it (many small steps already, at
+    // UI speed), but an LFO can swing the whole way across its range within a single large host
+    // block, which sounded like a discrete "staircase" (audible as crackle) rather than a sweep.
+    // processBlock() calls tickLfos()/applyPlaybackGain() once per kLfoModUpdateSamples-sized
+    // sub-chunk instead of once for the whole block, so the update rate no longer depends on
+    // whatever block size the host happens to use. (The filter path doesn't have this limit at
+    // all -- applyModulatedFilter() runs truly per-sample.)
+    //
+    // This update rate is itself a sample rate as far as the LFO's own waveform is concerned --
+    // an LFO faster than half of it (sampleRate / (2 * kLfoModUpdateSamples)) aliases: it folds
+    // back down and reappears as a garbled, slower-sounding rate instead of a real fast one. 64
+    // samples puts that ceiling around 350-375 Hz. Tried dropping this to 4 samples to chase
+    // Gain's full "audio" range -- DON'T: recomputing the gain ramp 12,000+ times a second
+    // turned out to be its own noise source. (This constant no longer affects the filter path,
+    // which is unconditionally per-sample now, so this limitation is Gain-only.)
+    static constexpr int kLfoModUpdateSamples = 64;
+
     // Output "Gain" knob -- applied last, as a per-block ramp so a knob drag doesn't zipper.
-    // 0 dB by default, so a no-op unless the Standalone's Gain knob is turned.
+    // 0 dB by default, so a no-op unless the Standalone's Gain knob is turned (or an LFO targets it).
     juce::SmoothedValue<float> smoothedGain { 1.0f };
-    void applyPlaybackGain (juce::AudioBuffer<float>& buffer, int numCh, int numSamples);
+    void applyPlaybackGain (juce::AudioBuffer<float>& buffer, int numCh, int startSample, int numSamples,
+                            const LfoModResult& lfoMod);
 
     static bool knobsEngaged(double speed, double pitch, double stretch);
     // Fills the playback branch of processBlock. `pos` is the doc read cursor (also the

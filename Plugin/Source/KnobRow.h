@@ -30,6 +30,12 @@ public:
     // waveform view to keep the selection markers on screen when zoomed in.
     std::function<void()> onSelectionKnobMoved;
 
+    // Fired on a click of the drawer chevron at the row's right edge. The editor owns whether
+    // the FX drawer is actually open (it resizes the window), so this only reports the click;
+    // call setDrawerOpen() back once the editor has decided the new state.
+    std::function<void()> onDrawerToggle;
+    void setDrawerOpen(bool open);
+
     void resized() override;
     void paint(juce::Graphics&) override;   // faint group dividers between the knob sections
 
@@ -121,6 +127,11 @@ private:
     Knob* startKnob = nullptr;
     Knob* endKnob   = nullptr;
     ModelBadge modelBadge;
+
+    // FX drawer toggle -- small chevron pinned to the row's right edge, reusing the same
+    // small-rect icon look the header's follow / float-on-top buttons use.
+    R3WRKIconRectLookAndFeel drawerLnF;
+    juce::TextButton drawerButton { R3WRKLookAndFeel::iconChevron };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(KnobRow)
 };

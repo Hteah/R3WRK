@@ -22,7 +22,7 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
       processorRef(p),
       header(p.document), waveformDisplay(p.document), spectrogramDisplay(p.document),
       timeRuler(waveformDisplay, p.document), toolbar(p, p.document),
-      knobRow(p.document, standaloneWindow)
+      knobRow(p.document, standaloneWindow), fxRow(p.document, standaloneWindow)
 {
     juce::LookAndFeel::setDefaultLookAndFeel(&fontLnf);
 
@@ -32,6 +32,9 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
     addAndMakeVisible(timeRuler);
     addAndMakeVisible(toolbar);
     addAndMakeVisible(knobRow);
+    addChildComponent(fxRow);   // hidden until the drawer is opened -- see toggleFxDrawer()
+
+    knobRow.onDrawerToggle = [this] { toggleFxDrawer(); };
 
     toolbar.onSourceNameChanged = [this](juce::String name)
     {
@@ -109,7 +112,12 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
 
     const int topInset = standaloneWindow ? kMacTrafficLightInset : 0;
     setWantsKeyboardFocus(true);
-    setResizable(true, true);
+    // false = don't draw JUCE's own bottom-right resize grip (the diagonal Windows-style
+    // lines) -- the Standalone window already gets real native macOS edge/corner resizing
+    // (see StandaloneWindowShape.mm: it's a real NSWindow with a native title bar under the
+    // hood, just visually hidden), so the drawn grip was a redundant, non-native-looking
+    // extra. Window is still resizable either way -- this only removes the drawn handle.
+    setResizable(true, false);
     setResizeLimits(680, 473 + topInset, 2200, 1300 + topInset);
     setSize(1000, 639 + topInset);
 }
@@ -144,6 +152,22 @@ void R3WRKAudioProcessorEditor::applyHeaderButtonThemes()
         b->setColour(juce::TextButton::textColourOffId,  pal.text);
         b->setColour(juce::TextButton::textColourOnId,   pal.windowBg);
     }
+}
+
+void R3WRKAudioProcessorEditor::toggleFxDrawer()
+{
+    fxDrawerOpen = ! fxDrawerOpen;
+    knobRow.setDrawerOpen(fxDrawerOpen);
+    fxRow.setVisible(fxDrawerOpen);
+
+    const int topInset = standaloneWindow ? kMacTrafficLightInset : 0;
+    const int delta = kFxRowHeight + kFxRowGap;
+    // The drawer only ever adds to the plugin's normal footprint -- min/max both shift by the
+    // same delta so a host that clamps to the reported limits can't crush the open drawer, and
+    // the user can't manually resize below the closed-row minimum either way.
+    setResizeLimits(680, (fxDrawerOpen ? 473 + delta : 473) + topInset,
+                     2200, (fxDrawerOpen ? 1300 + delta : 1300) + topInset);
+    setSize(getWidth(), getHeight() + (fxDrawerOpen ? delta : -delta));
 }
 
 void R3WRKAudioProcessorEditor::applyFloatOnTop(bool on)
@@ -300,6 +324,16 @@ void R3WRKAudioProcessorEditor::resized()
         header.setBounds(headerRow);
     }
     area.removeFromTop(6);
+
+    // FX drawer, when open, sits under the main knob row -- removed from the bottom first so it
+    // lands below knobRow rather than displacing it. The window itself grew by this same
+    // (height + gap) when the drawer opened (see toggleFxDrawer()), so nothing above has to
+    // shrink to make room for it.
+    if (fxDrawerOpen)
+    {
+        fxRow.setBounds(area.removeFromBottom(kFxRowHeight));
+        area.removeFromBottom(kFxRowGap);
+    }
 
     knobRow.setBounds(area.removeFromBottom(83));   // knob strip, under the transport bar --
         // 74 + 9 for the bigger caption/readout fonts (experiment/space-mono-font), so the

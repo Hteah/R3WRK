@@ -58,6 +58,7 @@ public:
     static constexpr const char* iconFloatTop      = "icon:floatTop";       // pip.enter -- window + corner box + arrow (float on top)
     static constexpr const char* iconCaptureOut    = "icon:captureOut";     // record dot + down arrow (capture the output to a file)
     static constexpr const char* iconBlackBox      = "icon:blackBox";       // rounded box + record dot (VST/AU always-on background capture)
+    static constexpr const char* iconChevron       = "icon:chevron";        // down when off / up when toggled on (a collapsible drawer)
 
     void drawButtonText(juce::Graphics&, juce::TextButton&,
                        bool isMouseOverButton, bool isButtonDown) override;

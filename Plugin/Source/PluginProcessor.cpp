@@ -7,7 +7,8 @@
 
 namespace
 {
-    constexpr int kStateMagic     = 0x52335748;   // 'R3WH' - adds loopReverse
+    constexpr int kStateMagic     = 0x52335749;   // 'R3WI' - adds LFO modulation slots
+    constexpr int kStateMagicR3WH = 0x52335748;   // 'R3WH' - adds loopReverse
     constexpr int kStateMagicR3WG = 0x52335747;   // 'R3WG' - adds the source file path
     constexpr int kStateMagicR3WF = 0x52335746;   // 'R3WF' - adds bakeLoopCrossfadeOnExport
     constexpr int kStateMagicR3WE = 0x52335745;   // 'R3WE' - adds loopCrossfadeMs
@@ -88,6 +89,9 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     playbackFilter[0].reset();
     playbackFilter[1].reset();
     lastFilterEngaged = false;
+    modulatedFilter[0].reset();
+    modulatedFilter[1].reset();
+    modulatedFilterWasActive = false;
 
     smoothedGain.reset(sampleRate, 0.02);
     smoothedGain.setCurrentAndTargetValue(
@@ -584,7 +588,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             }
         }
 
-        applyPlaybackGain(buffer, numCh, numSamples);   // Gain knob rides scrub monitoring too
+        applyPlaybackGain(buffer, numCh, 0, numSamples, {});   // Gain knob rides scrub monitoring too; LFOs don't run while scrubbing
         captureOutput(buffer, numCh, numSamples);
         // R3WRK has taken the buffer over to scrub -- Black Box follows that, not the (now
         // irrelevant) input snapshot; see blackBoxInputScratch's header comment.
@@ -905,8 +909,47 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
 
         // Multi-mode filter, last in the chain -- applied whether the try-lock was held or not
         // (a filtered near-silent block is still correct), and to both direct + stretched paths.
-        applyPlaybackFilter(buffer, numCh, numSamples, ! wasPlaying);
-        applyPlaybackGain(buffer, numCh, numSamples);
+        //
+        // Two different filter paths, chosen once per block: ordinary knob-driven filtering runs
+        // through the existing direct-form biquad (applyPlaybackFilter(), chunked below); an
+        // actively LFO-modulated filter runs through applyModulatedFilter() instead -- a TPT
+        // state-variable filter, ticked and recomputed truly per-sample for the whole block, in
+        // ModulatedMultiModeFilter (BiquadFilter.h). The direct-form biquad isn't built to have
+        // its coefficients changed continuously and fast (verified offline: it produces non-
+        // finite output under exactly this kind of stress -- see the LFO-modulated filter
+        // section of Tests/SmokeTest.cpp); the TPT filter is. applyModulatedFilter() scans for
+        // an active filter-targeting LFO itself and returns whether it handled the block, so
+        // whichever path ran, the other is skipped entirely -- no double filtering.
+        //
+        // Every LFO's phase resets here, once, on a fresh play pass -- before
+        // applyModulatedFilter() (which ticks filter-targeting slots itself, per-sample) or
+        // tickLfos() (Gain-targeting slots, chunked) touch any of them, so neither path can ever
+        // tick from a stale leftover phase on the first block of a new play pass.
+        if (! wasPlaying)
+        {
+            const int n = juce::jlimit(0, AudioDocument::kMaxLfos, document.numVisibleLfos.load(std::memory_order_relaxed));
+            for (int i = 0; i < n; ++i)
+                lfoDsp[i].reset();
+        }
+        const bool filterLfoActive = applyModulatedFilter(buffer, numCh, numSamples, ! wasPlaying);
+
+        // Ticked/applied in fixed-size sub-chunks, not once for the whole (host-chosen) block:
+        // an LFO can swing all the way across its range within a single large host block, and
+        // updating the filter/gain coefficients only once for that whole span turns a sweep into
+        // an audible staircase (heard as crackle, most noticeably modulating Filter Width) --
+        // see kLfoModUpdateSamples's comment. freshPlayPass only applies to the very first chunk;
+        // later chunks in the same processBlock() call must not re-trigger that reset.
+        int lfoModDone = 0;
+        while (lfoModDone < numSamples)
+        {
+            const int chunk = juce::jmin(kLfoModUpdateSamples, numSamples - lfoModDone);
+            const bool freshPlayPass = (! wasPlaying) && lfoModDone == 0;
+            const auto lfoMod = tickLfos(chunk);
+            if (! filterLfoActive)
+                applyPlaybackFilter(buffer, numCh, lfoModDone, chunk, freshPlayPass);
+            applyPlaybackGain(buffer, numCh, lfoModDone, chunk, lfoMod);
+            lfoModDone += chunk;
+        }
         captureOutput(buffer, numCh, numSamples);
         // R3WRK has taken the buffer over to play/loop -- Black Box follows that, not the (now
         // irrelevant) input snapshot; see blackBoxInputScratch's header comment.
@@ -949,75 +992,275 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         appendToBlackBox(blackBoxInputScratch, numCh, numSamples);
 }
 
-void R3WRKAudioProcessor::applyPlaybackFilter(juce::AudioBuffer<float>& buffer, int numCh, int numSamples,
+R3WRKAudioProcessor::LfoModResult R3WRKAudioProcessor::tickLfos(int numSamples)
+{
+    LfoModResult r;
+    const int n = juce::jlimit(0, AudioDocument::kMaxLfos, document.numVisibleLfos.load(std::memory_order_relaxed));
+
+    // Every slot's phase is reset centrally in processBlock() on a fresh play pass, before this
+    // or applyModulatedFilter() runs.
+    for (int i = 0; i < n; ++i)
+    {
+        auto& slot = document.lfoSlots[i];
+        if (! slot.enabled.load(std::memory_order_relaxed))
+            continue;
+
+        const auto target = (r3wrk::ModTarget) juce::jlimit(0, r3wrk::kNumModTargets - 1,
+                                                             slot.target.load(std::memory_order_relaxed));
+
+        // Filter targets (Base/Width/HP Q/LP Q) are ticked per-sample by applyModulatedFilter()
+        // instead -- see its comment. Skip them here entirely, including the tickBlock() call
+        // that advances lfoDsp[i]'s phase, so a filter-targeting slot's phase is only ever
+        // advanced by one mechanism, never both (which would double-advance it).
+        if (target != r3wrk::ModTarget::gain)
+            continue;
+
+        const auto shape = (r3wrk::LfoShape) juce::jlimit(0, (int) r3wrk::LfoShape::sampleHold,
+                                                           slot.shape.load(std::memory_order_relaxed));
+        const auto range = (r3wrk::LfoRateRange) juce::jlimit(0, (int) r3wrk::LfoRateRange::audio,
+                                                               slot.rateRange.load(std::memory_order_relaxed));
+        const double rate01 = juce::jlimit(0.0, 1.0, slot.rate01.load(std::memory_order_relaxed));
+        const double amount = juce::jlimit(-1.0, 1.0, slot.amount.load(std::memory_order_relaxed));
+
+        const double hz  = r3wrk::lfoRateHz(rate01, range);
+        const double out = lfoDsp[i].tickBlock(hz, shape, currentSampleRate, numSamples);   // -1..+1
+        r.gainDb += out * amount * kLfoGainModRangeDb;
+    }
+    return r;
+}
+
+namespace
+{
+    bool isFilterModTarget(r3wrk::ModTarget t)
+    {
+        return t == r3wrk::ModTarget::filterBase || t == r3wrk::ModTarget::filterWidth
+            || t == r3wrk::ModTarget::filterHpQ  || t == r3wrk::ModTarget::filterLpQ;
+    }
+}
+
+bool R3WRKAudioProcessor::applyModulatedFilter(juce::AudioBuffer<float>& buffer, int numCh, int numSamples, bool freshPlayPass)
+{
+    const int n = juce::jlimit(0, AudioDocument::kMaxLfos, document.numVisibleLfos.load(std::memory_order_relaxed));
+
+    bool anyActive = false;
+    for (int i = 0; i < n; ++i)
+    {
+        auto& slot = document.lfoSlots[i];
+        if (slot.enabled.load(std::memory_order_relaxed)
+            && isFilterModTarget((r3wrk::ModTarget) juce::jlimit(0, r3wrk::kNumModTargets - 1,
+                                                                  slot.target.load(std::memory_order_relaxed))))
+        {
+            anyActive = true;
+            break;
+        }
+    }
+
+    if (! anyActive)
+    {
+        // Wasn't active last block either -- nothing to clean up, common case.
+        if (modulatedFilterWasActive)
+        {
+            modulatedFilter[0].reset();
+            modulatedFilter[1].reset();
+            modulatedFilterWasActive = false;
+        }
+        return false;
+    }
+
+    const double baseKnob  = juce::jlimit(0.0, 1.0, document.filterBase.load(std::memory_order_relaxed));
+    const double widthKnob = juce::jlimit(0.0, 1.0, document.filterWidth.load(std::memory_order_relaxed));
+    const double hpQKnob   = juce::jlimit(0.0, 1.0, document.filterHpQ.load(std::memory_order_relaxed));
+    const double lpQKnob   = juce::jlimit(0.0, 1.0, document.filterLpQ.load(std::memory_order_relaxed));
+
+    if (freshPlayPass || ! modulatedFilterWasActive)
+    {
+        modulatedFilter[0].reset();
+        modulatedFilter[1].reset();
+        smoothedFilterBase.setCurrentAndTargetValue(baseKnob);
+        smoothedFilterWidth.setCurrentAndTargetValue(widthKnob);
+        smoothedFilterHpQ.setCurrentAndTargetValue(hpQKnob);
+        smoothedFilterLpQ.setCurrentAndTargetValue(lpQKnob);
+    }
+    modulatedFilterWasActive = true;
+
+    const auto fm = (r3wrk::FilterModel) juce::jlimit(0, 1, document.filterModel.load(std::memory_order_relaxed));
+    modulatedFilter[0].model = fm;
+    modulatedFilter[1].model = fm;
+
+    smoothedFilterBase.setTargetValue(baseKnob);
+    smoothedFilterWidth.setTargetValue(widthKnob);
+    smoothedFilterHpQ.setTargetValue(hpQKnob);
+    smoothedFilterLpQ.setTargetValue(lpQKnob);
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        // Every filter-targeting LFO is ticked exactly one sample here (not chunked -- see
+        // kLfoModUpdateSamples's comment on why that doesn't work for this path), and their
+        // offsets onto the same target simply add, same as two signals into one summing node.
+        double offBase = 0.0, offWidth = 0.0, offHpQ = 0.0, offLpQ = 0.0;
+        for (int s = 0; s < n; ++s)
+        {
+            auto& slot = document.lfoSlots[s];
+            if (! slot.enabled.load(std::memory_order_relaxed))
+                continue;
+            const auto target = (r3wrk::ModTarget) juce::jlimit(0, r3wrk::kNumModTargets - 1,
+                                                                 slot.target.load(std::memory_order_relaxed));
+            if (! isFilterModTarget(target))
+                continue;
+
+            const auto shape = (r3wrk::LfoShape) juce::jlimit(0, (int) r3wrk::LfoShape::sampleHold,
+                                                               slot.shape.load(std::memory_order_relaxed));
+            const auto range = (r3wrk::LfoRateRange) juce::jlimit(0, (int) r3wrk::LfoRateRange::audio,
+                                                                   slot.rateRange.load(std::memory_order_relaxed));
+            const double rate01 = juce::jlimit(0.0, 1.0, slot.rate01.load(std::memory_order_relaxed));
+            const double amount = juce::jlimit(-1.0, 1.0, slot.amount.load(std::memory_order_relaxed));
+
+            const double hz     = r3wrk::lfoRateHz(rate01, range);
+            const double out    = lfoDsp[s].tickBlock(hz, shape, currentSampleRate, 1);   // one sample
+            const double offset = out * amount;
+
+            switch (target)
+            {
+                case r3wrk::ModTarget::filterBase:  offBase  += offset; break;
+                case r3wrk::ModTarget::filterWidth: offWidth += offset; break;
+                case r3wrk::ModTarget::filterHpQ:   offHpQ   += offset; break;
+                case r3wrk::ModTarget::filterLpQ:   offLpQ   += offset; break;
+                default: break;
+            }
+        }
+
+        const double b  = juce::jlimit(0.0, 1.0, smoothedFilterBase.getNextValue()  + offBase);
+        const double w  = juce::jlimit(0.0, 1.0, smoothedFilterWidth.getNextValue() + offWidth);
+        const double hq = juce::jlimit(0.0, 1.0, smoothedFilterHpQ.getNextValue()   + offHpQ);
+        const double lq = juce::jlimit(0.0, 1.0, smoothedFilterLpQ.getNextValue()   + offLpQ);
+
+        modulatedFilter[0].setParams(b, w, hq, lq, currentSampleRate);
+        if (numCh > 1)
+            modulatedFilter[1].setParams(b, w, hq, lq, currentSampleRate);
+
+        for (int ch = 0; ch < juce::jmin(numCh, 2); ++ch)
+        {
+            auto* data = buffer.getWritePointer(ch);
+            // Same safety backstop as the other LFO-modulated paths (see applyPlaybackGain()'s
+            // comment) -- offline testing (Tests/SmokeTest.cpp) shows this filter staying well
+            // within this bound under stress, but it costs nothing to keep the backstop anyway.
+            data[i] = juce::jlimit(-2.0f, 2.0f, modulatedFilter[ch].processSample(data[i]));
+        }
+    }
+
+    return true;
+}
+
+void R3WRKAudioProcessor::applyPlaybackFilter(juce::AudioBuffer<float>& buffer, int numCh, int startSample, int numSamples,
                                               bool freshPlayPass)
 {
-    const double base01  = juce::jlimit(0.0, 1.0, document.filterBase.load(std::memory_order_relaxed));
-    const double width01 = juce::jlimit(0.0, 1.0, document.filterWidth.load(std::memory_order_relaxed));
-    const double hpQ01   = juce::jlimit(0.0, 1.0, document.filterHpQ.load(std::memory_order_relaxed));
-    const double lpQ01   = juce::jlimit(0.0, 1.0, document.filterLpQ.load(std::memory_order_relaxed));
-    const auto   fm      = (r3wrk::FilterModel) juce::jlimit(0, 1, document.filterModel.load(std::memory_order_relaxed));
-    const bool   engaged = r3wrk::filterEngaged(fm, base01, width01, hpQ01, lpQ01);
+    const double baseKnob  = juce::jlimit(0.0, 1.0, document.filterBase.load(std::memory_order_relaxed));
+    const double widthKnob = juce::jlimit(0.0, 1.0, document.filterWidth.load(std::memory_order_relaxed));
+    const double hpQKnob   = juce::jlimit(0.0, 1.0, document.filterHpQ.load(std::memory_order_relaxed));
+    const double lpQKnob   = juce::jlimit(0.0, 1.0, document.filterLpQ.load(std::memory_order_relaxed));
+    const auto   fm        = (r3wrk::FilterModel) juce::jlimit(0, 1, document.filterModel.load(std::memory_order_relaxed));
 
-    if (freshPlayPass || engaged != lastFilterEngaged)
+    if (freshPlayPass)
     {
         playbackFilter[0].reset();
         playbackFilter[1].reset();
+        smoothedFilterBase.setCurrentAndTargetValue(baseKnob);
+        smoothedFilterWidth.setCurrentAndTargetValue(widthKnob);
+        smoothedFilterHpQ.setCurrentAndTargetValue(hpQKnob);
+        smoothedFilterLpQ.setCurrentAndTargetValue(lpQKnob);
+    }
 
-        if (freshPlayPass)
-        {
-            smoothedFilterBase.setCurrentAndTargetValue(base01);
-            smoothedFilterWidth.setCurrentAndTargetValue(width01);
-            smoothedFilterHpQ.setCurrentAndTargetValue(hpQ01);
-            smoothedFilterLpQ.setCurrentAndTargetValue(lpQ01);
-        }
-        else if (engaged && ! lastFilterEngaged)
-        {
-            // Switched on mid-playback: ramp in from "wide open, no resonance" so it eases in.
-            smoothedFilterBase.setCurrentAndTargetValue(0.0);
-            smoothedFilterWidth.setCurrentAndTargetValue(1.0);
-            smoothedFilterHpQ.setCurrentAndTargetValue(0.0);
-            smoothedFilterLpQ.setCurrentAndTargetValue(0.0);
-        }
+    // Only the knob's own (slow, human-driven) value goes through the de-zippering smoother.
+    // This function is now ONLY ever called for that manual, non-modulated case -- see
+    // processBlock()'s comment: an actively LFO-modulated filter runs entirely through
+    // applyModulatedFilter() instead, a separate TPT state-variable filter built to tolerate
+    // continuous fast coefficient changes, which this direct-form biquad structurally isn't
+    // (proven non-finite offline under that stress -- see Tests/SmokeTest.cpp).
+    smoothedFilterBase.setTargetValue(baseKnob);
+    smoothedFilterWidth.setTargetValue(widthKnob);
+    smoothedFilterHpQ.setTargetValue(hpQKnob);
+    smoothedFilterLpQ.setTargetValue(lpQKnob);
+    const double b  = smoothedFilterBase.skip(numSamples);
+    const double w  = smoothedFilterWidth.skip(numSamples);
+    const double hq = smoothedFilterHpQ.skip(numSamples);
+    const double lq = smoothedFilterLpQ.skip(numSamples);
+
+    const bool engaged = r3wrk::filterEngaged(fm, b, w, hq, lq);
+
+    // Re-engaging after a stretch bypassed leaves stale filter memory (z1/z2) computed under old,
+    // possibly very different coefficients; feeding that straight into freshly recomputed
+    // coefficients -- especially with resonance (Q) up -- can excite a loud transient "ping".
+    // Clear it on every disengaged->engaged transition (cheap: a manual knob move is rare, not
+    // per-cycle the way LFO modulation would be -- which is exactly why that case runs through
+    // applyModulatedFilter() instead of here).
+    if (engaged && ! lastFilterEngaged)
+    {
+        playbackFilter[0].reset();
+        playbackFilter[1].reset();
     }
     lastFilterEngaged = engaged;
 
     if (! engaged)
         return;
 
-    smoothedFilterBase.setTargetValue(base01);
-    smoothedFilterWidth.setTargetValue(width01);
-    smoothedFilterHpQ.setTargetValue(hpQ01);
-    smoothedFilterLpQ.setTargetValue(lpQ01);
-    const double b = smoothedFilterBase.skip(numSamples);    // one coefficient set per block
-    const double w = smoothedFilterWidth.skip(numSamples);
-    const double hq = smoothedFilterHpQ.skip(numSamples);
-    const double lq = smoothedFilterLpQ.skip(numSamples);
-
     for (int ch = 0; ch < juce::jmin(numCh, 2); ++ch)
     {
         playbackFilter[ch].model = fm;
         playbackFilter[ch].setParams(b, w, hq, lq, currentSampleRate);
-        playbackFilter[ch].processBlock(buffer.getWritePointer(ch), numSamples);
+        playbackFilter[ch].processBlock(buffer.getWritePointer(ch) + startSample, numSamples);
+
+        // Safety backstop: this LFO-modulated filter path has produced genuinely dangerous,
+        // very loud output twice already while this feature was being built (a stale-state
+        // transient, and a too-frequent coefficient recompute both did it before either was
+        // diagnosed). A time-varying resonant biquad can in principle still overshoot in ways
+        // not yet caught -- hard-clamp its output as a last line of defence so a future surprise
+        // is a clipped/ugly sound, never an ear- or speaker-endangering spike.
+        auto* out = buffer.getWritePointer(ch) + startSample;
+        for (int i = 0; i < numSamples; ++i)
+            out[i] = juce::jlimit(-2.0f, 2.0f, out[i]);
     }
 }
 
-void R3WRKAudioProcessor::applyPlaybackGain(juce::AudioBuffer<float>& buffer, int numCh, int numSamples)
+void R3WRKAudioProcessor::applyPlaybackGain(juce::AudioBuffer<float>& buffer, int numCh, int startSample, int numSamples,
+                                            const LfoModResult& lfoMod)
 {
-    const double gainDb = document.playbackGainDb.load(std::memory_order_relaxed);
-    const float target = std::abs(gainDb) > 1.0e-3
-        ? juce::Decibels::decibelsToGain((float) juce::jlimit(AudioDocument::kMinGainDb, AudioDocument::kMaxGainDb, gainDb),
+    const double gainKnobDb = document.playbackGainDb.load(std::memory_order_relaxed);
+    const float knobTarget = std::abs(gainKnobDb) > 1.0e-3
+        ? juce::Decibels::decibelsToGain((float) juce::jlimit(AudioDocument::kMinGainDb, AudioDocument::kMaxGainDb, gainKnobDb),
                                          (float) AudioDocument::kMinGainDb)
         : 1.0f;
 
-    smoothedGain.setTargetValue(target);
-    const float g0 = smoothedGain.getCurrentValue();
-    const float g1 = smoothedGain.skip(numSamples);
+    // Only the knob's own (slow, human-driven) value goes through the de-zippering smoother --
+    // an LFO's contribution is applied AFTER smoothing, completely unsmoothed. Same bug,
+    // independently found here, as applyPlaybackFilter() had: routing the LFO's offset THROUGH
+    // this ~20ms ramp meant it couldn't keep re-targeting fast enough past a few Hz, so the
+    // audible depth collapsed well below the "audio" rate band's advertised ceiling (heard as
+    // "seems to work until around 28-30 Hz").
+    smoothedGain.setTargetValue(knobTarget);
+    const float g0knob = smoothedGain.getCurrentValue();
+    const float g1knob = smoothedGain.skip(numSamples);
+
+    // Held flat across this whole (kLfoModUpdateSamples-sized) chunk rather than also ramped --
+    // matches the filter path's update granularity; fine at Gain's currently-usable rates.
+    const float lfoGainLinear = lfoMod.gainDb != 0.0
+        ? juce::Decibels::decibelsToGain((float) juce::jlimit(-60.0, 60.0, lfoMod.gainDb))
+        : 1.0f;
+    const float g0 = g0knob * lfoGainLinear;
+    const float g1 = g1knob * lfoGainLinear;
     if (g0 == 1.0f && g1 == 1.0f)
         return;
 
     for (int ch = 0; ch < numCh; ++ch)
-        buffer.applyGainRamp(ch, 0, numSamples, g0, g1);
+    {
+        buffer.applyGainRamp(ch, startSample, numSamples, g0, g1);
+
+        // Safety backstop, same reasoning as applyPlaybackFilter()'s: several LFOs could in
+        // principle all target Gain at once and stack enough dB to be genuinely loud. Hard-clamp
+        // so that's a clipped/ugly sound at worst, never an ear- or speaker-endangering spike.
+        auto* out = buffer.getWritePointer(ch) + startSample;
+        for (int i = 0; i < numSamples; ++i)
+            out[i] = juce::jlimit(-2.0f, 2.0f, out[i]);
+    }
 }
 
 void R3WRKAudioProcessor::captureOutput(const juce::AudioBuffer<float>& out, int numCh, int numSamples)
@@ -1430,6 +1673,20 @@ void R3WRKAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     out.writeBool(document.bakeLoopCrossfadeOnExport.load());
     out.writeString(document.getSourceFilePath());   // R3WG+ -- see EditorToolbar::setCurrentFile()
 
+    const int numLfos = juce::jlimit(0, AudioDocument::kMaxLfos, document.numVisibleLfos.load());   // R3WI+
+    out.writeInt(numLfos);
+    for (int i = 0; i < numLfos; ++i)
+    {
+        auto& s = document.lfoSlots[i];
+        out.writeBool(s.enabled.load());
+        out.writeInt(s.shape.load());
+        out.writeInt(s.rateRange.load());
+        out.writeDouble(s.rate01.load());
+        out.writeInt(s.target.load());
+        out.writeDouble(s.amount.load());
+        out.writeBool(s.tempoSync.load());
+    }
+
     auto& buf = document.getBuffer();
     for (int ch = 0; ch < buf.getNumChannels(); ++ch)
         out.write(buf.getReadPointer(ch), (size_t) buf.getNumSamples() * sizeof(float));
@@ -1444,12 +1701,13 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     juce::MemoryInputStream in(data, (size_t) sizeInBytes, false);
     const int magic = in.readInt();
-    if (magic != kStateMagic && magic != kStateMagicR3WG && magic != kStateMagicR3WF && magic != kStateMagicR3WE && magic != kStateMagicR3WD
+    if (magic != kStateMagic && magic != kStateMagicR3WH && magic != kStateMagicR3WG && magic != kStateMagicR3WF && magic != kStateMagicR3WE && magic != kStateMagicR3WD
         && magic != kStateMagicR3WC && magic != kStateMagicR3WB && magic != kStateMagicR3WA
         && magic != kStateMagicR3W9 && magic != kStateMagicR3W8 && magic != kStateMagicR3W7
         && magic != kStateMagicR3W6 && magic != kStateMagicR3W5)
         return;
-    // R3WH: adds the loopReverse flag after loopPingPong. R3WG: adds the source file path
+    // R3WI: adds the LFO modulation slots after the source file path. R3WH: adds the
+    // loopReverse flag after loopPingPong. R3WG: adds the source file path
     // after bakeLoopCrossfadeOnExport. R3WF: adds
     // bakeLoopCrossfadeOnExport after loopCrossfadeMs. R3WE: adds loopCrossfadeMs
     // after filterModel. R3WD: adds filterModel (MnM / Octatrack) after playbackGainDb. R3WC:
@@ -1457,7 +1715,8 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     // MnM model). R3W8..R3WA: the old OT-style Base/Width filter with a single resonance
     // (+ later Drive, + later 12/24 slope). R3W6/R3W7: the even older mode/cutoff filter.
     // R3W5: none.
-    const bool hasReverseLoop     = (magic == kStateMagic);                                  // R3WH
+    const bool hasLfoSlots        = (magic == kStateMagic);                                  // R3WI
+    const bool hasReverseLoop     = (hasLfoSlots || magic == kStateMagicR3WH);                // R3WH+
     const bool hasSourceFilePath  = (hasReverseLoop || magic == kStateMagicR3WG);             // R3WG+
     const bool hasLoopXfadeBake   = (hasSourceFilePath || magic == kStateMagicR3WF);          // R3WF+
     const bool hasLoopXfade       = (hasLoopXfadeBake || magic == kStateMagicR3WE);           // R3WE+
@@ -1530,6 +1789,31 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     const bool loopXfadeBake = hasLoopXfadeBake ? in.readBool() : false;
     const juce::String sourceFilePath = hasSourceFilePath ? in.readString() : juce::String();
 
+    struct LoadedLfo
+    {
+        bool enabled = false;
+        int shape = (int) r3wrk::LfoShape::sine, rateRange = (int) r3wrk::LfoRateRange::normal, target = (int) r3wrk::ModTarget::none;
+        double rate01 = 0.3, amount = 0.0;
+        bool tempoSync = false;
+    };
+    LoadedLfo loadedLfos[AudioDocument::kMaxLfos];
+    int loadedNumLfos = 1;   // an older state blob has no LFOs -- restore to one default (disabled) slot
+    if (hasLfoSlots)
+    {
+        loadedNumLfos = juce::jlimit(0, AudioDocument::kMaxLfos, in.readInt());
+        for (int i = 0; i < loadedNumLfos; ++i)
+        {
+            auto& s = loadedLfos[i];
+            s.enabled   = in.readBool();
+            s.shape     = in.readInt();
+            s.rateRange = in.readInt();
+            s.rate01    = in.readDouble();
+            s.target    = in.readInt();
+            s.amount    = in.readDouble();
+            s.tempoSync = in.readBool();
+        }
+    }
+
     if (numCh <= 0 || numCh > kMaxStateChannels || numSamples < 0 || numSamples > 0x7fffffff)
         return;
 
@@ -1566,6 +1850,20 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     document.filterModel.store(juce::jlimit(0, 1, fModel));
     document.loopCrossfadeMs.store(juce::jlimit(0.0, 200.0, loopXfadeMs));
     document.bakeLoopCrossfadeOnExport.store(loopXfadeBake);
+
+    document.numVisibleLfos.store(juce::jmax(1, loadedNumLfos));
+    for (int i = 0; i < AudioDocument::kMaxLfos; ++i)
+    {
+        auto& dst = document.lfoSlots[i];
+        const LoadedLfo s = (i < loadedNumLfos) ? loadedLfos[i] : LoadedLfo{};   // beyond loadedNumLfos: reset to defaults
+        dst.enabled.store(s.enabled);
+        dst.shape.store(juce::jlimit(0, (int) r3wrk::LfoShape::sampleHold, s.shape));
+        dst.rateRange.store(juce::jlimit(0, (int) r3wrk::LfoRateRange::audio, s.rateRange));
+        dst.rate01.store(juce::jlimit(0.0, 1.0, s.rate01));
+        dst.target.store(juce::jlimit(0, r3wrk::kNumModTargets - 1, s.target));
+        dst.amount.store(juce::jlimit(-1.0, 1.0, s.amount));
+        dst.tempoSync.store(s.tempoSync);
+    }
     document.setSourceFilePath(sourceFilePath);   // "" on an older state blob -- header shows "Untitled"
 
     document.clearSliceMarkers();   // session-only; a restored document starts with no markers
