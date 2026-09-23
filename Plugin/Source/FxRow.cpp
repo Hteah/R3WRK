@@ -3,8 +3,10 @@
 FxRow::FxRow(AudioDocument& document, bool standalone)
     : lfoPanel(document, standalone), reverbPanel(document), plexPanel(document)
 {
-    addAndMakeVisible(lfoPanel);
-    addAndMakeVisible(reverbPanel);
+    // lfoPanel/reverbPanel are SHELVED (see class comment) -- constructed and fully wired
+    // (their PluginProcessor/AudioDocument side is untouched), just not shown or laid out here.
+    // Deliberately no addAndMakeVisible() for either -- bringing them back is exactly those two
+    // lines plus their old slot in resized()/paint() below.
     addAndMakeVisible(plexPanel);
 
     // Placeholder ranges/formatting -- every knob here reads 0-100% until its effect gets real
@@ -94,25 +96,20 @@ void FxRow::EnablePill::paint(juce::Graphics& g)
 
 void FxRow::resized()
 {
-    // One row, four slots: LFO | Delay | Reverb | Plexiphon. LFO/Reverb/Plexiphon are real
-    // Components standing in for what would otherwise be a Section; Delay still is one.
+    // One row, two slots: Delay | Plexiphon. (LFO/Reverb are shelved -- see class comment --
+    // and take no space here.) Plexiphon is a real Component standing in for what would
+    // otherwise be a Section; Delay still is one.
     auto full = getLocalBounds().reduced(4, 2);
     constexpr int sectionGap = 16;   // matches KnobRow's dotGap between its own sections
-    constexpr int n = 4;
+    constexpr int n = 2;
 
     const int totalGaps = sectionGap * (n - 1);
     const int slotW = juce::jmax(0, (full.getWidth() - totalGaps) / n);
-
-    lfoPanel.setBounds(full.removeFromLeft(slotW));
-    full.removeFromLeft(sectionGap);
 
     if (sections.size() > 0)
         layoutOneSection(*sections[0], full.removeFromLeft(slotW));   // DELAY
     else
         full.removeFromLeft(slotW);
-    full.removeFromLeft(sectionGap);
-
-    reverbPanel.setBounds(full.removeFromLeft(slotW));
     full.removeFromLeft(sectionGap);
 
     plexPanel.setBounds(full);   // Plexiphon -- takes whatever's left
@@ -144,17 +141,15 @@ void FxRow::layoutOneSection(Section& s, juce::Rectangle<int> col)
 void FxRow::paint(juce::Graphics& g)
 {
     // Same three-dot divider KnobRow uses between its own sections, centred in the gap between
-    // each pair of adjacent effect slots (LFO | Delay | Reverb | Plexiphon) -- built from a
-    // uniform list of all four slots' bounds, not just the one placeholder Section's, since
-    // LFO/Reverb/Plexiphon (real Components, not Sections) sit among them in the row.
+    // each pair of adjacent effect slots (Delay | Plexiphon) -- built from a uniform list of
+    // both slots' bounds, not just the placeholder Section's, since Plexiphon (a real
+    // Component, not a Section) sits next to it in the row.
     constexpr int   count = 3;
     constexpr float radius = 1.5f, spacing = 5.0f;
     g.setColour(theme->palette().text.withAlpha(0.4f));
 
     juce::Array<juce::Rectangle<int>> slots;
-    slots.add(lfoPanel.getBounds());
     if (sections.size() > 0) slots.add(sections[0]->outerBounds);   // DELAY
-    slots.add(reverbPanel.getBounds());
     slots.add(plexPanel.getBounds());
 
     for (int i = 1; i < slots.size(); ++i)
