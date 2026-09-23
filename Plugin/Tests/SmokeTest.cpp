@@ -8,6 +8,7 @@
 #include "../Source/BiquadFilter.h"
 #include "../Source/ReverbEngine.h"
 #include "../Source/PlexiphonEngine.h"
+#include "../Source/MimeophonEngine.h"
 
 namespace
 {
@@ -1151,6 +1152,131 @@ int main()
 
         check(energyEarly > 0.0f, "Plexiphon tail/echo has arrived and has energy by 0.2-0.4s after the impulse");
         check(energyLate < energyEarly, "Plexiphon tail has decayed by the end of a 3s window at a moderate Decay setting");
+    }
+
+    // --- Mimeophon Zone table (r3wrk::mimeoZoneRangeMs) -------------------------
+    // The doc this was built from explicitly asks for the derived Zone-range formula to be
+    // checked against the manual's own published table before anything else depends on it.
+    // The manual's own numbers are already rounded to ~4 significant figures, so a small
+    // relative tolerance (not exact-to-the-digit) is the right bar.
+    {
+        std::cout << "-- Mimeophon Zone table --" << std::endl;
+
+        struct Row { int zone; double minMs, maxMs; };
+        const Row table[] = {
+            { 0, 1.33,   20.4   },
+            { 1, 20.4,   81.6   },
+            { 2, 81.6,   326.5  },
+            { 3, 163.3,  653.1  },
+            { 4, 326.5,  1306.0 },
+            { 5, 653.1,  2612.0 },
+            { 6, 1306.0, 5225.0 },
+            { 7, 2612.0, 41796.0 },
+        };
+
+        bool allWithinTolerance = true;
+        for (const auto& row : table)
+        {
+            const auto got = r3wrk::mimeoZoneRangeMs(row.zone);
+            const double minErr = std::abs(got.minMs - row.minMs) / row.minMs;
+            const double maxErr = std::abs(got.maxMs - row.maxMs) / row.maxMs;
+            std::cout << "  zone " << row.zone << ": got [" << got.minMs << ", " << got.maxMs
+                      << "], table [" << row.minMs << ", " << row.maxMs << "]"
+                      << ", rel err [" << minErr << ", " << maxErr << "]" << std::endl;
+            if (minErr > 0.01 || maxErr > 0.01)
+                allWithinTolerance = false;
+        }
+
+        check(allWithinTolerance, "mimeoZoneRangeMs() reproduces all 8 published Zone rows within 1%");
+    }
+
+    // --- Mimeophon engine stability at max Repeats, sweeping Zone ---------------
+    // Repeats pinned at its true max is the case the saturator specifically exists to catch --
+    // designed for self-oscillation, so this block only asserts safety (finite, bounded), never
+    // that the tail decays (same reasoning as the other two engines' equivalent tests).
+    {
+        std::cout << "-- Mimeophon engine stability at max Repeats, sweeping Zone --" << std::endl;
+        const double fs = 48000.0;
+        const int numSamples = (int) (fs * 3.0);
+
+        r3wrk::MimeophonEngine engine;
+        engine.prepare(fs);
+
+        float peak = 0.0f;
+        bool hasNonFinite = false;
+
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const double zone01 = (double) i / (double) numSamples;
+            engine.setParams(zone01, /*rate*/ 0.5, /*repeats*/ 1.0, /*color*/ 0.5,
+                             /*halo*/ 0.5, /*mix*/ 1.0);
+
+            const float in = (i == 0) ? 1.0f : 0.0f;   // a single-sample impulse
+            float outL, outR;
+            engine.processSample(in, in, outL, outR);
+
+            if (! std::isfinite(outL) || ! std::isfinite(outR)) hasNonFinite = true;
+            peak = juce::jmax(peak, std::abs(outL), std::abs(outR));
+        }
+
+        std::cout << "  peak: " << peak << (hasNonFinite ? " (NON-FINITE!)" : "") << std::endl;
+
+        check(! hasNonFinite, "Mimeophon output stays finite under an impulse with Repeats pinned at max + a full Zone sweep");
+        check(peak < 4.0f, "Mimeophon output peak stays within the safety clamp (< 4.0) under stress");
+    }
+
+    // --- Mimeophon engine: real echo timing + decay at a moderate setting -------
+    // Unlike Erbe-Verb/Plexiphon (reverbs, no single "the echo"), a delay's correctness can be
+    // checked more directly: confirm a distinct echo actually arrives close to the Zone/Rate-
+    // implied delay time, and that Repeats well under max actually decays rather than sustains.
+    {
+        std::cout << "-- Mimeophon engine: echo arrives on time and decays at moderate Repeats --" << std::endl;
+        const double fs = 48000.0;
+        const int numSamples = (int) (fs * 3.0);
+
+        r3wrk::MimeophonEngine engine;
+        engine.prepare(fs);
+        // Zone 3 (163.3-653.1ms), Rate at the zone's geometric centre -> expected delay ~ that
+        // zone's midpoint; Repeats moderate (well under the self-oscillation cap).
+        engine.setParams(/*zone*/ 3.0 / 7.0, /*rate*/ 0.5, /*repeats*/ 0.5, /*color*/ 0.5,
+                         /*halo*/ 0.3, /*mix*/ 1.0);
+        const auto zoneRange = r3wrk::mimeoZoneRangeMs(3);
+        const double expectedMs = std::sqrt(zoneRange.minMs * zoneRange.maxMs);   // geometric centre, matches Rate's own log mapping
+
+        int firstEchoSample = -1;
+        float peakBeforeExpected = 0.0f, peakNearExpected = 0.0f;
+        float energyEarly = 0.0f, energyLate = 0.0f;
+        const int expectedSample = (int) (expectedMs * 0.001 * fs);
+        const int windowStart = juce::jmax(0, expectedSample - (int) (fs * 0.05));
+        const int windowEnd   = expectedSample + (int) (fs * 0.05);
+        const int lateStart = numSamples - (int) (fs * 0.2);
+
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const float in = (i == 0) ? 1.0f : 0.0f;
+            float outL, outR;
+            engine.processSample(in, in, outL, outR);
+            const float mono = 0.5f * (outL + outR);
+            const float absMono = std::abs(mono);
+
+            if (i < windowStart) peakBeforeExpected = juce::jmax(peakBeforeExpected, absMono);
+            if (i >= windowStart && i < windowEnd)
+            {
+                peakNearExpected = juce::jmax(peakNearExpected, absMono);
+                if (firstEchoSample < 0 && absMono > 0.05f) firstEchoSample = i;
+            }
+            if (i >= windowStart && i < windowStart + (int) (fs * 0.1)) energyEarly += mono * mono;
+            if (i >= lateStart) energyLate += mono * mono;
+        }
+
+        std::cout << "  expected echo at " << expectedMs << " ms (sample " << expectedSample << ")"
+                  << ", first echo detected at sample " << firstEchoSample
+                  << ", peak before window: " << peakBeforeExpected
+                  << ", peak in window: " << peakNearExpected << std::endl;
+
+        check(firstEchoSample >= 0, "a distinct echo arrives within 50ms of the Zone/Rate-implied delay time");
+        check(peakBeforeExpected < 0.05f, "nothing echoes back before the expected delay time (no premature leakage)");
+        check(energyLate < energyEarly, "Mimeophon tail decays by the end of a 3s window at a moderate Repeats setting");
     }
 
     std::cout << "===========================================" << std::endl;

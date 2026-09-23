@@ -7,7 +7,8 @@
 
 namespace
 {
-    constexpr int kStateMagic     = 0x5233574C;   // 'R3WL' - adds Plexiphon params
+    constexpr int kStateMagic     = 0x5233574D;   // 'R3WM' - adds Mimeophon params
+    constexpr int kStateMagicR3WL = 0x5233574C;   // 'R3WL' - adds Plexiphon params
     constexpr int kStateMagicR3WK = 0x5233574B;   // 'R3WK' - adds reverb Width
     constexpr int kStateMagicR3WJ = 0x5233574A;   // 'R3WJ' - adds reverb params
     constexpr int kStateMagicR3WI = 0x52335749;   // 'R3WI' - adds LFO modulation slots
@@ -141,6 +142,24 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     plexTailSamplesLeft = 0;
     plexTailSilentSamples = 0;
     lastPlexEngaged = false;
+
+    mimeoDsp.prepare(sampleRate);
+    constexpr double mimeoRampSeconds = 0.05;
+    smoothedMimeoZone.reset(sampleRate, mimeoRampSeconds);
+    smoothedMimeoRate.reset(sampleRate, mimeoRampSeconds);
+    smoothedMimeoRepeats.reset(sampleRate, mimeoRampSeconds);
+    smoothedMimeoColor.reset(sampleRate, mimeoRampSeconds);
+    smoothedMimeoHalo.reset(sampleRate, mimeoRampSeconds);
+    smoothedMimeoMix.reset(sampleRate, mimeoRampSeconds);
+    smoothedMimeoZone.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.mimeoZone.load()));
+    smoothedMimeoRate.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.mimeoRate.load()));
+    smoothedMimeoRepeats.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.mimeoRepeats.load()));
+    smoothedMimeoColor.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.mimeoColor.load()));
+    smoothedMimeoHalo.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.mimeoHalo.load()));
+    smoothedMimeoMix.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.mimeoMix.load()));
+    mimeoTailSamplesLeft = 0;
+    mimeoTailSilentSamples = 0;
+    lastMimeoEngaged = false;
 }
 
 void R3WRKAudioProcessor::releaseResources()
@@ -994,9 +1013,14 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             lfoModDone += chunk;
         }
 
-        // Reverb, after filter and gain -- like a send on the end of the strip. Unchunked: not
-        // LFO-modulated in phase 1, so nothing here needs kLfoModUpdateSamples's finer update
-        // rate. freshPlayPass primes it the same way the filter/gain above do.
+        // Mimeophon, after filter and gain, before Reverb/Plexiphon -- a conventional "delay
+        // before reverb" chain position, and matches the FX drawer's own left-to-right slot
+        // order (Delay is the leftmost slot). Unchunked: not LFO-modulated in phase 1.
+        applyMimeophon(buffer, numCh, numSamples, ! wasPlaying);
+
+        // Reverb, after filter/gain/Mimeophon -- like a send on the end of the strip. Unchunked:
+        // not LFO-modulated in phase 1, so nothing here needs kLfoModUpdateSamples's finer
+        // update rate. freshPlayPass primes it the same way the filter/gain above do.
         applyReverb(buffer, numCh, numSamples, ! wasPlaying);
 
         // Plexiphon, after Reverb -- an arbitrary but reasonable "read the FX drawer left to
@@ -1034,6 +1058,11 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                                  && document.plexMix.load(std::memory_order_relaxed) > 0.001;
         plexTailSamplesLeft = plexEngaged ? (int) (currentSampleRate * 300.0) : 0;
         plexTailSilentSamples = 0;
+
+        const bool mimeoEngaged = document.mimeoEnabled.load(std::memory_order_relaxed)
+                                  && document.mimeoMix.load(std::memory_order_relaxed) > 0.001;
+        mimeoTailSamplesLeft = mimeoEngaged ? (int) (currentSampleRate * 300.0) : 0;
+        mimeoTailSilentSamples = 0;
     }
 
     // Neither recording nor playing back: leave `buffer` untouched so the host's input
@@ -1094,6 +1123,22 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             plexTailSilentSamples += n;
         if (plexTailSilentSamples > (int) (currentSampleRate * 2.0))
             plexTailSamplesLeft = 0;
+    }
+
+    // Same idle tail-ring-out treatment for Mimeophon -- see the reverb block above.
+    if (mimeoTailSamplesLeft > 0)
+    {
+        const int n = juce::jmin(mimeoTailSamplesLeft, numSamples);
+        const float wetPeak = applyMimeophon(buffer, numCh, n, false, true);
+        mimeoTailSamplesLeft -= n;
+
+        constexpr float kSilenceThreshold = 0.0005f;
+        if (wetPeak > kSilenceThreshold)
+            mimeoTailSilentSamples = 0;
+        else
+            mimeoTailSilentSamples += n;
+        if (mimeoTailSilentSamples > (int) (currentSampleRate * 2.0))
+            mimeoTailSamplesLeft = 0;
     }
 
     // Keep the captured timeline continuous through idle gaps (in the Standalone the input is
@@ -1557,6 +1602,86 @@ float R3WRKAudioProcessor::applyPlexiphon(juce::AudioBuffer<float>& buffer, int 
     return peak;
 }
 
+float R3WRKAudioProcessor::applyMimeophon(juce::AudioBuffer<float>& buffer, int numCh, int numSamples,
+                                          bool freshPlayPass, bool tailOnly)
+{
+    const double zone01    = juce::jlimit(0.0, 1.0, document.mimeoZone.load(std::memory_order_relaxed));
+    const double rate01    = juce::jlimit(0.0, 1.0, document.mimeoRate.load(std::memory_order_relaxed));
+    const double repeats01 = juce::jlimit(0.0, 1.0, document.mimeoRepeats.load(std::memory_order_relaxed));
+    const double color01   = juce::jlimit(0.0, 1.0, document.mimeoColor.load(std::memory_order_relaxed));
+    const double halo01    = juce::jlimit(0.0, 1.0, document.mimeoHalo.load(std::memory_order_relaxed));
+    const double mix01     = juce::jlimit(0.0, 1.0, document.mimeoMix.load(std::memory_order_relaxed));
+
+    if (freshPlayPass)
+    {
+        // Deliberately does NOT reset mimeoDsp here -- same reasoning as applyReverb()'s/
+        // applyPlexiphon()'s comment: Repeats can be pushed to self-oscillation, and that tail
+        // has no business being wiped by an incidental wasPlaying flip (Scrub Mode, etc.) that
+        // isn't a deliberate stop. Only the enable/disable edge below resets it.
+        smoothedMimeoZone.setCurrentAndTargetValue(zone01);
+        smoothedMimeoRate.setCurrentAndTargetValue(rate01);
+        smoothedMimeoRepeats.setCurrentAndTargetValue(repeats01);
+        smoothedMimeoColor.setCurrentAndTargetValue(color01);
+        smoothedMimeoHalo.setCurrentAndTargetValue(halo01);
+        smoothedMimeoMix.setCurrentAndTargetValue(mix01);
+    }
+
+    smoothedMimeoZone.setTargetValue(zone01);
+    smoothedMimeoRate.setTargetValue(rate01);
+    smoothedMimeoRepeats.setTargetValue(repeats01);
+    smoothedMimeoColor.setTargetValue(color01);
+    smoothedMimeoHalo.setTargetValue(halo01);
+    smoothedMimeoMix.setTargetValue(mix01);
+    const double zone    = smoothedMimeoZone.skip(numSamples);
+    const double rate    = smoothedMimeoRate.skip(numSamples);
+    const double repeats = smoothedMimeoRepeats.skip(numSamples);
+    const double color   = smoothedMimeoColor.skip(numSamples);
+    const double halo    = smoothedMimeoHalo.skip(numSamples);
+    const double mix     = smoothedMimeoMix.skip(numSamples);
+
+    const bool engaged = document.mimeoEnabled.load(std::memory_order_relaxed) && mix > 0.001;
+
+    if (engaged && ! lastMimeoEngaged)
+        mimeoDsp.reset();
+    lastMimeoEngaged = engaged;
+
+    if (! engaged)
+        return 0.0f;
+
+    mimeoDsp.setParams(zone, rate, repeats, color, halo, mix);
+
+    float peak = 0.0f;
+    if (numCh <= 1)
+    {
+        auto* data = buffer.getWritePointer(0);
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const float in = tailOnly ? 0.0f : data[i];
+            float outL, outR;
+            mimeoDsp.processSample(in, in, outL, outR);
+            const float mono = 0.5f * (outL + outR);
+            peak = juce::jmax(peak, std::abs(mono));
+            data[i] = tailOnly ? (data[i] + mono) : mono;
+        }
+    }
+    else
+    {
+        auto* left  = buffer.getWritePointer(0);
+        auto* right = buffer.getWritePointer(1);
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const float inL = tailOnly ? 0.0f : left[i];
+            const float inR = tailOnly ? 0.0f : right[i];
+            float outL, outR;
+            mimeoDsp.processSample(inL, inR, outL, outR);
+            peak = juce::jmax(peak, std::abs(outL), std::abs(outR));
+            left[i]  = tailOnly ? (left[i]  + outL) : outL;
+            right[i] = tailOnly ? (right[i] + outR) : outR;
+        }
+    }
+    return peak;
+}
+
 void R3WRKAudioProcessor::captureOutput(const juce::AudioBuffer<float>& out, int numCh, int numSamples)
 {
     if (! capturingOutput.load(std::memory_order_relaxed) || numSamples <= 0 || numCh <= 0)
@@ -1999,6 +2124,14 @@ void R3WRKAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     out.writeDouble(document.plexColor.load());
     out.writeDouble(document.plexMix.load());
 
+    out.writeBool(document.mimeoEnabled.load());   // R3WM+
+    out.writeDouble(document.mimeoZone.load());
+    out.writeDouble(document.mimeoRate.load());
+    out.writeDouble(document.mimeoRepeats.load());
+    out.writeDouble(document.mimeoColor.load());
+    out.writeDouble(document.mimeoHalo.load());
+    out.writeDouble(document.mimeoMix.load());
+
     auto& buf = document.getBuffer();
     for (int ch = 0; ch < buf.getNumChannels(); ++ch)
         out.write(buf.getReadPointer(ch), (size_t) buf.getNumSamples() * sizeof(float));
@@ -2013,12 +2146,13 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     juce::MemoryInputStream in(data, (size_t) sizeInBytes, false);
     const int magic = in.readInt();
-    if (magic != kStateMagic && magic != kStateMagicR3WK && magic != kStateMagicR3WJ && magic != kStateMagicR3WI && magic != kStateMagicR3WH && magic != kStateMagicR3WG && magic != kStateMagicR3WF && magic != kStateMagicR3WE && magic != kStateMagicR3WD
+    if (magic != kStateMagic && magic != kStateMagicR3WL && magic != kStateMagicR3WK && magic != kStateMagicR3WJ && magic != kStateMagicR3WI && magic != kStateMagicR3WH && magic != kStateMagicR3WG && magic != kStateMagicR3WF && magic != kStateMagicR3WE && magic != kStateMagicR3WD
         && magic != kStateMagicR3WC && magic != kStateMagicR3WB && magic != kStateMagicR3WA
         && magic != kStateMagicR3W9 && magic != kStateMagicR3W8 && magic != kStateMagicR3W7
         && magic != kStateMagicR3W6 && magic != kStateMagicR3W5)
         return;
-    // R3WL: adds the Plexiphon params after reverb Width. R3WK: adds reverb Width after Pre-
+    // R3WM: adds the Mimeophon params after the Plexiphon params. R3WL: adds the Plexiphon
+    // params after reverb Width. R3WK: adds reverb Width after Pre-
     // delay. R3WJ: adds the reverb params after the LFO
     // modulation slots. R3WI: adds the LFO
     // modulation slots after the source file path. R3WH: adds the
@@ -2030,7 +2164,8 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     // MnM model). R3W8..R3WA: the old OT-style Base/Width filter with a single resonance
     // (+ later Drive, + later 12/24 slope). R3W6/R3W7: the even older mode/cutoff filter.
     // R3W5: none.
-    const bool hasPlex             = (magic == kStateMagic);                                  // R3WL
+    const bool hasMimeo            = (magic == kStateMagic);                                  // R3WM
+    const bool hasPlex             = (hasMimeo || magic == kStateMagicR3WL);                  // R3WL+
     const bool hasReverbWidth      = (hasPlex || magic == kStateMagicR3WK);                   // R3WK+
     const bool hasReverb           = (hasReverbWidth || magic == kStateMagicR3WJ);            // R3WJ+
     const bool hasLfoSlots        = (hasReverb || magic == kStateMagicR3WI);                  // R3WI+
@@ -2173,6 +2308,21 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
         pxMix     = in.readDouble();
     }
 
+    // An older state blob has no Mimeophon -- same non-destructive defaults AudioDocument
+    // itself declares (enabled=false, mix=0).
+    bool   mxEnabled = false;
+    double mxZone = 3.0 / 7.0, mxRate = 0.5, mxRepeats = 0.3, mxColor = 0.5, mxHalo = 0.0, mxMix = 0.0;
+    if (hasMimeo)
+    {
+        mxEnabled = in.readBool();
+        mxZone    = in.readDouble();
+        mxRate    = in.readDouble();
+        mxRepeats = in.readDouble();
+        mxColor   = in.readDouble();
+        mxHalo    = in.readDouble();
+        mxMix     = in.readDouble();
+    }
+
     if (numCh <= 0 || numCh > kMaxStateChannels || numSamples < 0 || numSamples > 0x7fffffff)
         return;
 
@@ -2240,6 +2390,14 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     document.plexDecay.store(juce::jlimit(0.0, 1.0, pxDecay));
     document.plexColor.store(juce::jlimit(0.0, 1.0, pxColor));
     document.plexMix.store(juce::jlimit(0.0, 1.0, pxMix));
+
+    document.mimeoEnabled.store(mxEnabled);
+    document.mimeoZone.store(juce::jlimit(0.0, 1.0, mxZone));
+    document.mimeoRate.store(juce::jlimit(0.0, 1.0, mxRate));
+    document.mimeoRepeats.store(juce::jlimit(0.0, 1.0, mxRepeats));
+    document.mimeoColor.store(juce::jlimit(0.0, 1.0, mxColor));
+    document.mimeoHalo.store(juce::jlimit(0.0, 1.0, mxHalo));
+    document.mimeoMix.store(juce::jlimit(0.0, 1.0, mxMix));
 
     document.setSourceFilePath(sourceFilePath);   // "" on an older state blob -- header shows "Untitled"
 

@@ -55,6 +55,24 @@ namespace r3wrk
             if (idx < 0) idx += n;
             return buf[(size_t) idx];
         }
+
+        // Linearly interpolated read between the two nearest integer samples -- purely
+        // additive alongside read() above (which stays integer-only, unchanged, so this can't
+        // affect any existing caller). Added for MimeophonEngine.h: unlike Erbe-Verb/Plexiphon,
+        // where delay time only ever changes via a slow knob turn (smoothed at block-rate,
+        // integer-sample precision was fine), the Mimeophon's Rate is a genuinely continuous
+        // sweep, and chorus/flange-style modulation needs sub-sample-accurate reads to sound
+        // smooth rather than zipper-stepped.
+        inline float readInterpolated(double delaySamples) const noexcept
+        {
+            const int n = (int) buf.size();
+            delaySamples = juce::jlimit(0.0, (double) (n - 1), delaySamples);
+            const int lo = (int) delaySamples;
+            const int hi = juce::jmin(n - 1, lo + 1);
+            const float frac = (float) (delaySamples - (double) lo);
+            return read(lo) + frac * (read(hi) - read(lo));
+        }
+
         inline void write(float x) noexcept
         {
             buf[(size_t) writePos] = x;

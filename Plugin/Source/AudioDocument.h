@@ -364,6 +364,22 @@ public:
     std::atomic<double> plexMix     { 0.0 };
 
     //==============================================================================
+    // Mimeophon (r3wrk::MimeophonEngine, MimeophonEngine.h) -- phase 1: core delay engine
+    // (Zone/Rate/Repeats/Color/Halo/Mix), live monitoring only, same not-yet-baked-into-Save/
+    // Export caveat as the reverb/Plexiphon above. Flip/Freeze/Skew/uRate/Tempo sync are
+    // deferred to a later pass. All 0..1 -- Zone stays a 0..1 knob that snaps to one of 8
+    // positions at the DSP layer (see mimeoZoneRangeMs()), same convention as every other
+    // knob here rather than a raw discrete int. Mix defaults to 0, enabled defaults to false --
+    // same non-destructive-default convention as every other effect here.
+    std::atomic<bool>   mimeoEnabled { false };
+    std::atomic<double> mimeoZone    { 3.0 / 7.0 };   // a middle-ish zone by default
+    std::atomic<double> mimeoRate    { 0.5 };
+    std::atomic<double> mimeoRepeats { 0.3 };
+    std::atomic<double> mimeoColor   { 0.5 };
+    std::atomic<double> mimeoHalo    { 0.0 };
+    std::atomic<double> mimeoMix     { 0.0 };
+
+    //==============================================================================
     // LFO modulation slots. Fixed capacity so the audio thread can iterate every slot each
     // block with no locking or resize hazard (see PluginProcessor::tickLfos()). numVisibleLfos
     // is how many the FX drawer currently shows ("+ Add LFO" raises it, up to kMaxLfos); slots

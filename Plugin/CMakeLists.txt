@@ -108,6 +108,7 @@ target_sources(R3WRK
         Source/LfoPanel.cpp
         Source/ReverbPanel.cpp
         Source/PlexiphonPanel.cpp
+        Source/MimeophonPanel.cpp
         Source/R3WRKLookAndFeel.cpp
         Source/DotMatrixLCD.cpp
         Source/TimeRuler.cpp

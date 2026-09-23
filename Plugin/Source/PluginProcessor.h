@@ -6,6 +6,7 @@
 #include "LfoModule.h"
 #include "ReverbEngine.h"
 #include "PlexiphonEngine.h"
+#include "MimeophonEngine.h"
 
 namespace RubberBand { class RubberBandStretcher; }
 
@@ -392,6 +393,23 @@ private:
     int  plexTailSilentSamples = 0;
     bool lastPlexEngaged = false;
     float applyPlexiphon (juce::AudioBuffer<float>& buffer, int numCh, int numSamples, bool freshPlayPass,
+                         bool tailOnly = false);
+
+    // Mimeophon (r3wrk::MimeophonEngine, MimeophonEngine.h) -- phase 1: core delay engine, live
+    // monitoring, not baked into Save/Export. Exact structural mirror of the Reverb/Plexiphon
+    // wiring above, including the lesson learned building Reverb's: does NOT reset mimeoDsp on
+    // freshPlayPass (see applyMimeophon()'s comment) -- built in correctly here from the start.
+    r3wrk::MimeophonEngine mimeoDsp;
+    juce::SmoothedValue<double> smoothedMimeoZone    { 3.0 / 7.0 };
+    juce::SmoothedValue<double> smoothedMimeoRate    { 0.5 };
+    juce::SmoothedValue<double> smoothedMimeoRepeats { 0.3 };
+    juce::SmoothedValue<double> smoothedMimeoColor   { 0.5 };
+    juce::SmoothedValue<double> smoothedMimeoHalo    { 0.0 };
+    juce::SmoothedValue<double> smoothedMimeoMix     { 0.0 };
+    int  mimeoTailSamplesLeft   = 0;
+    int  mimeoTailSilentSamples = 0;
+    bool lastMimeoEngaged = false;
+    float applyMimeophon (juce::AudioBuffer<float>& buffer, int numCh, int numSamples, bool freshPlayPass,
                          bool tailOnly = false);
 
     static bool knobsEngaged(double speed, double pitch, double stretch);
