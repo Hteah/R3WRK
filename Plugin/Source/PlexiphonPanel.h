@@ -1,0 +1,58 @@
+#pragma once
+#include <JuceHeader.h>
+#include "AudioDocument.h"
+#include "Theme.h"
+
+/**
+    The PLEXIPHON cell of the FX drawer (4th slot, replacing GRANULAR's old placeholder -- see
+    FxRow::resized()): a real Plexiphon (PlexiphonEngine.h / PluginProcessor::applyPlexiphon()),
+    not a placeholder Section. Two primary knobs -- Plexus (the central control per the manual)
+    and Mix -- sit directly in the drawer, the same footprint the placeholder Section used to
+    occupy there; a "..." button opens the full control set (Level, Plexus, Size, Diffuse,
+    Decay, Color, Mix) in a popup, the same juce::CallOutBox pattern ReverbPanel/LfoPanel use
+    for their own editors.
+*/
+class PlexiphonPanel : public juce::Component,
+                       private juce::Timer,
+                       private juce::ChangeListener
+{
+public:
+    explicit PlexiphonPanel(AudioDocument& document);
+    ~PlexiphonPanel() override;
+
+    void resized() override;
+    void paint(juce::Graphics&) override;
+
+private:
+    void timerCallback() override;   // low-rate re-sync from external changes (state load, undo)
+    void changeListenerCallback(juce::ChangeBroadcaster*) override { applyTheme(); }
+    void applyTheme();
+    void openFullEditor();
+
+    AudioDocument& document;
+    juce::SharedResourcePointer<ThemeManager> theme;
+
+    // Small enable pill -- same visual language as ReverbPanel/LfoPanel's own (each place draws
+    // its own rather than sharing one component -- established precedent).
+    struct EnablePill : juce::Component
+    {
+        juce::Colour fill, ink, border;
+        bool on = false, hovered = false;
+        std::function<void()> onClick;
+        void paint(juce::Graphics&) override;
+        void mouseUp(const juce::MouseEvent&) override { if (onClick) onClick(); }
+        void mouseEnter(const juce::MouseEvent&) override { hovered = true; repaint(); }
+        void mouseExit(const juce::MouseEvent&) override { hovered = false; repaint(); }
+    };
+    EnablePill enablePill;
+
+    struct Knob
+    {
+        juce::Label caption;
+        juce::Slider slider { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow };
+    };
+    Knob plexusKnob, mixKnob;
+    juce::TextButton moreButton { "..." };
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PlexiphonPanel)
+};

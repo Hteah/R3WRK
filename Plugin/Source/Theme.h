@@ -14,6 +14,14 @@ struct Palette
 {
     juce::Colour windowBg     { 0xff14161a };
     juce::Colour panelBg      { 0xff17191e };
+    juce::Colour popupBg      { 0xffada56a };   // the CallOutBox "bubble" background (LFO/Reverb
+                                                 // editors, Theme panel itself, ...) -- see
+                                                 // R3WRKLookAndFeel::drawCallOutBoxBackground.
+                                                 // Olive/amber by default -- a monochrome-LCD
+                                                 // look (see popupInk, DotMatrixLCD.h).
+    juce::Colour popupInk     { 0xff3f3416 };   // the "pixel" colour on that screen -- dot-
+                                                 // matrix text/knobs (DotMatrixLCD.h) and the
+                                                 // popup's own faint background texture/border.
     juce::Colour waveform     { 0xff5ec2ff };
     juce::Colour accent       { 0xff5ec2ff };   // selection brackets, knob fills
     juce::Colour zeroLine     { 0x29ffffff };

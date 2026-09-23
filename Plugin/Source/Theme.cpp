@@ -6,6 +6,8 @@ const PaletteField kPaletteFields[] =
 {
     { "windowBg",     "window background", &Palette::windowBg },
     { "panelBg",      "panel background",  &Palette::panelBg },
+    { "popupBg",      "popup background",  &Palette::popupBg },
+    { "popupInk",     "popup ink",         &Palette::popupInk },
     { "waveform",     "waveform",          &Palette::waveform },
     { "accent",       "accent",            &Palette::accent },
     { "zeroLine",     "zero line",         &Palette::zeroLine },

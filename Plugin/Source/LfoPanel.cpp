@@ -1,4 +1,5 @@
 #include "LfoPanel.h"
+#include "DotMatrixLCD.h"
 
 namespace
 {
@@ -37,6 +38,44 @@ namespace
         }
     }
 
+    // "LFO 1" or, once routed, "LFO 1  ->  Filter Width" -- shared by Row::paint (what's drawn)
+    // and Row::preferredWidth (how much room that text needs), so a row's clickable width always
+    // matches its own label instead of stretching to fill the panel.
+    juce::String lfoRowLabel(const AudioDocument::LfoSlot& slot, int index)
+    {
+        juce::String label = "LFO " + juce::String(index + 1);
+        const bool on = slot.enabled.load(std::memory_order_relaxed);
+        const auto target = (r3wrk::ModTarget) slot.target.load(std::memory_order_relaxed);
+        if (on && target != r3wrk::ModTarget::none)
+            label << "  " << juce::String::fromUTF8("\xe2\x86\x92") << "  " << targetName(target);   // "->"
+        return label;
+    }
+
+    // Field-by-field copy/reset for AudioDocument::LfoSlot -- its members are std::atomic, so
+    // the struct itself isn't copy-assignable. Used by LfoPanel::removeSlot to shift later
+    // slots down over a deleted one.
+    void copyLfoSlot(AudioDocument::LfoSlot& dst, const AudioDocument::LfoSlot& src)
+    {
+        dst.enabled.store(src.enabled.load());
+        dst.shape.store(src.shape.load());
+        dst.rateRange.store(src.rateRange.load());
+        dst.rate01.store(src.rate01.load());
+        dst.target.store(src.target.load());
+        dst.amount.store(src.amount.load());
+        dst.tempoSync.store(src.tempoSync.load());
+    }
+
+    void resetLfoSlot(AudioDocument::LfoSlot& s)
+    {
+        s.enabled.store(false);
+        s.shape.store((int) r3wrk::LfoShape::sine);
+        s.rateRange.store((int) r3wrk::LfoRateRange::normal);
+        s.rate01.store(0.3);
+        s.target.store((int) r3wrk::ModTarget::none);
+        s.amount.store(0.0);
+        s.tempoSync.store(false);
+    }
+
     juce::String rateReadout(double rate01, r3wrk::LfoRateRange range)
     {
         const double hz = r3wrk::lfoRateHz(rate01, range);
@@ -57,6 +96,10 @@ namespace
     {
         LfoEditorPanel(AudioDocument& doc, int slot, bool standalone) : document(doc), slotIndex(slot)
         {
+            // Hardware-LCD look (dot-matrix text/knobs/buttons) for this popup -- see
+            // DotMatrixLCD.h. Applied to the panel itself so every child inherits it.
+            setLookAndFeel(&lnf);
+
             auto& s = document.lfoSlots[slotIndex];
 
             title.setText("LFO " + juce::String(slotIndex + 1), juce::dontSendNotification);
@@ -158,6 +201,8 @@ namespace
             setSize(300, 256);
         }
 
+        ~LfoEditorPanel() override { setLookAndFeel(nullptr); }   // detach before lnf is destroyed
+
         void showTargetMenu(bool standalone)
         {
             // Filter targets route through a TPT state-variable filter (r3wrk::
@@ -234,6 +279,7 @@ namespace
         juce::OwnedArray<juce::TextButton> shapeButtons, rangeButtons;
         juce::Slider rate, amount;
         juce::TextButton targetButton, syncButton { "SYNC" };
+        lcd::HardwareLcdLookAndFeel lnf;
     };
 }
 
@@ -281,8 +327,9 @@ void LfoPanel::rebuildRows()
 void LfoPanel::timerCallback()
 {
     rebuildRows();   // picks up numVisibleLfos changing from a state load while this is on screen
+    resized();       // a row's width tracks its label -- re-fit it if enable/target changed too
     for (auto* r : rows)
-        r->repaint();   // enable/target can also change from the popup editor
+        r->repaint();
 }
 
 void LfoPanel::applyTheme()
@@ -306,23 +353,45 @@ void LfoPanel::openEditorFor(int slotIndex, juce::Component& anchor)
                                            anchor.getScreenBounds(), nullptr);
 }
 
+void LfoPanel::removeSlot(int slotIndex)
+{
+    const int n = document.numVisibleLfos.load();
+    if (slotIndex < 0 || slotIndex >= n)
+        return;
+
+    for (int k = slotIndex; k < n - 1; ++k)
+        copyLfoSlot(document.lfoSlots[k], document.lfoSlots[k + 1]);
+    resetLfoSlot(document.lfoSlots[n - 1]);
+
+    document.numVisibleLfos.store(n - 1);
+    rebuildRows();
+}
+
 void LfoPanel::resized()
 {
+    // Rows, then the Add button, packed as one contiguous block from the top -- any leftover
+    // height (the cell matches DELAY's, which is usually taller than a short LFO list) collects
+    // below the button instead of sitting between the list and the button.
     auto r = getLocalBounds().reduced(2);
     const bool canAdd = document.numVisibleLfos.load() < AudioDocument::kMaxLfos;
     addButton.setVisible(canAdd);
 
-    juce::Rectangle<int> addArea;
-    if (canAdd)
-        addArea = r.removeFromBottom(18);
-
     const int n = juce::jmax(1, rows.size());
     const int rowH = juce::jlimit(14, 20, r.getHeight() / n);
     for (auto* row : rows)
-        row->setBounds(r.removeFromTop(rowH));
+    {
+        auto rowArea = r.removeFromTop(rowH);
+        row->setBounds(rowArea.removeFromLeft(juce::jmin(rowArea.getWidth(), row->preferredWidth())));
+    }
 
     if (canAdd)
-        addButton.setBounds(addArea);
+    {
+        auto addArea = r.removeFromTop(18);
+        const auto& font = addButton.getLookAndFeel().getTextButtonFont(addButton, addArea.getHeight());
+        const int w = juce::jmin(addArea.getWidth(),
+                                  juce::GlyphArrangement::getStringWidthInt(font, addButton.getButtonText()) + 20);
+        addButton.setBounds(addArea.removeFromLeft(w));
+    }
 }
 
 void LfoPanel::paint(juce::Graphics&) {}
@@ -331,6 +400,7 @@ void LfoPanel::Row::paint(juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat();
     auto pillArea = r.removeFromLeft((float) kPillW).reduced(2.0f, 4.0f);
+    auto deleteArea = r.removeFromRight((float) kDeleteW);
 
     auto& slot = owner.document.lfoSlots[index];
     const bool on = slot.enabled.load(std::memory_order_relaxed);
@@ -340,20 +410,27 @@ void LfoPanel::Row::paint(juce::Graphics& g)
     g.setColour(border.withAlpha(on || hovered ? 0.9f : 0.5f));
     g.drawRoundedRectangle(pillArea, 3.0f, 1.0f);
 
-    juce::String label = "LFO " + juce::String(index + 1);
-    const auto target = (r3wrk::ModTarget) slot.target.load(std::memory_order_relaxed);
-    if (on && target != r3wrk::ModTarget::none)
-        label << "  " << juce::String::fromUTF8("\xe2\x86\x92") << "  " << targetName(target);   // "->"
-
     g.setColour(textDim);
     g.setFont(juce::FontOptions(12.0f));
-    g.drawText(label, r.reduced(4.0f, 0.0f), juce::Justification::centredLeft);
+    g.drawText(lfoRowLabel(slot, index), r.reduced(4.0f, 0.0f), juce::Justification::centredLeft);
 
     if (hovered)
     {
         g.setColour(textDim.withAlpha(0.35f));
         g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(0.5f), 3.0f, 1.0f);
+
+        g.setColour(textDim.withAlpha(0.8f));
+        g.setFont(juce::FontOptions(13.0f, juce::Font::bold));
+        g.drawText(juce::String::fromUTF8("\xc3\x97"), deleteArea, juce::Justification::centred);   // "x"
     }
+}
+
+int LfoPanel::Row::preferredWidth() const
+{
+    const auto& slot = owner.document.lfoSlots[index];
+    const juce::Font font (juce::FontOptions(12.0f));
+    const int textW = juce::GlyphArrangement::getStringWidthInt(font, lfoRowLabel(slot, index));
+    return kPillW + textW + 10 + kDeleteW;
 }
 
 void LfoPanel::Row::mouseUp(const juce::MouseEvent& e)
@@ -363,6 +440,10 @@ void LfoPanel::Row::mouseUp(const juce::MouseEvent& e)
         auto& slot = owner.document.lfoSlots[index];
         slot.enabled.store(! slot.enabled.load(std::memory_order_relaxed));
         repaint();
+    }
+    else if (e.position.x > (float) (getWidth() - kDeleteW))
+    {
+        owner.removeSlot(index);
     }
     else
     {

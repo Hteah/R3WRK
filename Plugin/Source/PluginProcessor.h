@@ -4,6 +4,8 @@
 #include "DesktopAudioCapture.h"
 #include "BiquadFilter.h"
 #include "LfoModule.h"
+#include "ReverbEngine.h"
+#include "PlexiphonEngine.h"
 
 namespace RubberBand { class RubberBandStretcher; }
 
@@ -339,6 +341,58 @@ private:
     juce::SmoothedValue<float> smoothedGain { 1.0f };
     void applyPlaybackGain (juce::AudioBuffer<float>& buffer, int numCh, int startSample, int numSamples,
                             const LfoModResult& lfoMod);
+
+    // Erbe-Verb reverb (r3wrk::ErbeVerbReverb, ReverbEngine.h) -- phase 1: core engine only, live
+    // monitoring, not baked into Save/Export. One instance (the algorithm is inherently stereo).
+    // Params aren't LFO-modulated in phase 1, so applied once per whole block, unchunked -- unlike
+    // the filter/gain above. reverbTailSamplesLeft counts down while playback is stopped so the
+    // tail keeps ringing out on host passthrough audio, then stops -- see applyReverb()'s comment
+    // for why an unconditional idle-block call would be a standing, surprising side effect on a
+    // DAW channel that isn't even using R3WRK's own playback. It's seeded with a generous ceiling
+    // (not a real prediction of tail length -- near-max Decay is *designed* for near-infinite
+    // sustain, matching the real hardware) purely to bound worst-case background CPU if it's left
+    // running unattended; reverbTailSilentSamples is what actually ends it once the tail is
+    // genuinely inaudible, however long that takes for the current Decay setting.
+    r3wrk::ErbeVerbReverb reverbDsp;
+    juce::SmoothedValue<double> smoothedReverbSize     { 0.5 };
+    juce::SmoothedValue<double> smoothedReverbAbsorb   { 0.5 };
+    juce::SmoothedValue<double> smoothedReverbDecay    { 0.5 };
+    juce::SmoothedValue<double> smoothedReverbTilt     { 0.5 };
+    juce::SmoothedValue<double> smoothedReverbMix      { 0.0 };
+    juce::SmoothedValue<double> smoothedReverbPredelay { 0.1 };
+    juce::SmoothedValue<double> smoothedReverbWidth    { 0.5 };
+    int  reverbTailSamplesLeft   = 0;
+    int  reverbTailSilentSamples = 0;
+    bool lastReverbEngaged = false;
+    // tailOnly: false (the playing path) feeds the buffer's real content in and replaces it with
+    // the dry/wet mix, same as the filter/gain do. true (the idle tail-ring-out path) feeds
+    // silence in instead -- so only whatever's still recirculating in the delay lines comes back
+    // out -- and ADDS that to the buffer rather than replacing it, since idle-block `buffer` is
+    // live host passthrough (or silence) that must stay intact underneath the decaying tail.
+    // Returns the peak absolute sample value the reverb itself produced this call -- meaningful
+    // (and used by the caller to track reverbTailSilentSamples) only for tailOnly calls; the
+    // live path's caller ignores it.
+    float applyReverb (juce::AudioBuffer<float>& buffer, int numCh, int numSamples, bool freshPlayPass,
+                       bool tailOnly = false);
+
+    // Plexiphon (r3wrk::PlexiphonEngine, PlexiphonEngine.h) -- phase 1: mono core network, live
+    // monitoring, not baked into Save/Export. Exact structural mirror of the Reverb wiring
+    // above, including the lesson learned building it: does NOT reset plexDsp on freshPlayPass
+    // (see applyPlexiphon()'s comment) -- only ErbeVerbReverb ever had that bug, caught live
+    // after shipping; built in correctly here from the start instead.
+    r3wrk::PlexiphonEngine plexDsp;
+    juce::SmoothedValue<double> smoothedPlexLevel   { 0.5 };
+    juce::SmoothedValue<double> smoothedPlexPlexus  { 0.5 };
+    juce::SmoothedValue<double> smoothedPlexSize    { 0.5 };
+    juce::SmoothedValue<double> smoothedPlexDiffuse { 0.5 };
+    juce::SmoothedValue<double> smoothedPlexDecay   { 0.5 };
+    juce::SmoothedValue<double> smoothedPlexColor   { 0.5 };
+    juce::SmoothedValue<double> smoothedPlexMix     { 0.0 };
+    int  plexTailSamplesLeft   = 0;
+    int  plexTailSilentSamples = 0;
+    bool lastPlexEngaged = false;
+    float applyPlexiphon (juce::AudioBuffer<float>& buffer, int numCh, int numSamples, bool freshPlayPass,
+                         bool tailOnly = false);
 
     static bool knobsEngaged(double speed, double pitch, double stretch);
     // Fills the playback branch of processBlock. `pos` is the doc read cursor (also the

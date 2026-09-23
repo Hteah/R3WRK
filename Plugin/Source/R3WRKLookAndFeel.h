@@ -63,6 +63,12 @@ public:
     void drawButtonText(juce::Graphics&, juce::TextButton&,
                        bool isMouseOverButton, bool isButtonDown) override;
 
+    // The CallOutBox "bubble" (LFO/Reverb editors, the Theme panel itself, AutoRecordThreshold-
+    // Panel, ...) otherwise inherits LookAndFeel_V4's default -- JUCE's own generic colour
+    // scheme, not this app's theme -- so it never matched a theme's actual palette.
+    void drawCallOutBoxBackground(juce::CallOutBox&, juce::Graphics&,
+                                  const juce::Path&, juce::Image&) override;
+
 private:
     juce::SharedResourcePointer<ThemeManager> theme;
 };

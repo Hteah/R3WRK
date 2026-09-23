@@ -30,6 +30,7 @@ private:
     void changeListenerCallback(juce::ChangeBroadcaster*) override { applyTheme(); }
     void applyTheme();
     void openEditorFor(int slotIndex, juce::Component& anchor);
+    void removeSlot(int slotIndex);   // shifts later slots down, decrements numVisibleLfos
 
     struct Row : juce::Component
     {
@@ -40,11 +41,13 @@ private:
         explicit Row(LfoPanel& o, int i) : owner(o), index(i) {}
         void paint(juce::Graphics&) override;
         void mouseUp(const juce::MouseEvent& e) override;
+        int preferredWidth() const;   // pill + current label text + delete glyph, no stretch
         void mouseEnter(const juce::MouseEvent&) override { hovered = true;  repaint(); }
         void mouseExit (const juce::MouseEvent&) override { hovered = false; repaint(); }
         bool hovered = false;
 
         static constexpr int kPillW = 20;
+        static constexpr int kDeleteW = 18;   // "x" hit area, right edge, hover-only
     };
 
     AudioDocument& document;

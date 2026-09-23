@@ -106,7 +106,10 @@ target_sources(R3WRK
         Source/KnobRow.cpp
         Source/FxRow.cpp
         Source/LfoPanel.cpp
+        Source/ReverbPanel.cpp
+        Source/PlexiphonPanel.cpp
         Source/R3WRKLookAndFeel.cpp
+        Source/DotMatrixLCD.cpp
         Source/TimeRuler.cpp
         Source/Theme.cpp
         Source/ThemeEditor.cpp

@@ -6,6 +6,8 @@
 #include "../Source/EditActions.h"
 #include "../Source/TimeStretchEngine.h"
 #include "../Source/BiquadFilter.h"
+#include "../Source/ReverbEngine.h"
+#include "../Source/PlexiphonEngine.h"
 
 namespace
 {
@@ -908,6 +910,247 @@ int main()
             }
             check(peak < 0.4f, "fixed-cutoff TPT filter attenuates a well-above-cutoff 8kHz tone");
         }
+    }
+
+    // --- Erbe-Verb reverb (r3wrk::ErbeVerbReverb) stability ---------------------
+    // A feedback delay network is exactly the kind of DSP that can misbehave under an untested
+    // parameter combination (see the LFO-modulated filter test above for why this project
+    // proves new feedback-based DSP offline before it's ever wired into live playback). Decay
+    // pinned at its true max is the case the saturator specifically exists to catch -- that
+    // setting is *designed* for near-infinite sustain (the paper's own description), so this
+    // block only asserts safety (finite, bounded), never that the tail decays -- a separate
+    // block below checks real decay at a moderate Decay setting instead.
+    {
+        std::cout << "-- Erbe-Verb reverb (ErbeVerbReverb) stability at max Decay --" << std::endl;
+        const double fs = 48000.0;
+        const int numSamples = (int) (fs * 3.0);   // 3 seconds
+
+        r3wrk::ErbeVerbReverb reverb;
+        reverb.prepare(fs);
+
+        float peak = 0.0f;
+        bool hasNonFinite = false;
+
+        for (int i = 0; i < numSamples; ++i)
+        {
+            // Sweep Absorb across its full range over the test; pin Decay at its true max (the
+            // saturator's active zone) and Size/Tilt/Mix at fixed, non-trivial values.
+            const double absorb01 = (double) i / (double) numSamples;
+            reverb.setParams(/*size*/ 0.6, absorb01, /*decay*/ 1.0, /*tilt*/ 0.5,
+                             /*mix*/ 1.0, /*predelayMs*/ 20.0);
+
+            const float in = (i == 0) ? 1.0f : 0.0f;   // a single-sample impulse
+            float outL, outR;
+            reverb.processSample(in, in, outL, outR);
+
+            if (! std::isfinite(outL) || ! std::isfinite(outR)) hasNonFinite = true;
+            peak = juce::jmax(peak, std::abs(outL), std::abs(outR));
+        }
+
+        std::cout << "  peak: " << peak << (hasNonFinite ? " (NON-FINITE!)" : "") << std::endl;
+
+        check(! hasNonFinite, "reverb output stays finite under an impulse with Decay pinned at max + a full Absorb sweep");
+        check(peak < 4.0f, "reverb output peak stays within the safety clamp (< 4.0) under stress");
+    }
+
+    // --- Erbe-Verb reverb: real reverberation + decay at a moderate setting ----
+    {
+        std::cout << "-- Erbe-Verb reverb: reverberates and decays at moderate Decay --" << std::endl;
+        const double fs = 48000.0;
+        const int numSamples = (int) (fs * 3.0);   // 3 seconds
+
+        r3wrk::ErbeVerbReverb reverb;
+        reverb.prepare(fs);
+        // A small room (Size low) so the tail arrives well within the early window regardless
+        // of predelay/diffusion transit time, and a moderate Decay (well under the saturator's
+        // near-infinite-sustain extreme above) so it's expected to audibly decay within a few
+        // seconds, not sustain indefinitely.
+        reverb.setParams(/*size*/ 0.1, /*absorb*/ 0.5, /*decay*/ 0.5, /*tilt*/ 0.5,
+                         /*mix*/ 1.0, /*predelayMs*/ 10.0);
+
+        float energyEarly = 0.0f;   // 0.2-0.4s after the impulse -- after predelay+network transit
+        float energyLate  = 0.0f;   // last 0.2s of the 3s test
+        const int earlyStart = (int) (fs * 0.2), earlyEnd = (int) (fs * 0.4);
+        const int lateStart  = numSamples - (int) (fs * 0.2);
+
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const float in = (i == 0) ? 1.0f : 0.0f;
+            float outL, outR;
+            reverb.processSample(in, in, outL, outR);
+            const float mono = 0.5f * (outL + outR);
+            if (i >= earlyStart && i < earlyEnd) energyEarly += mono * mono;
+            if (i >= lateStart) energyLate += mono * mono;
+        }
+
+        std::cout << "  early energy (0.2-0.4s): " << energyEarly
+                  << ", late energy (last 0.2s of 3s): " << energyLate << std::endl;
+
+        check(energyEarly > 0.0f, "reverb tail has arrived and has energy by 0.2-0.4s after the impulse");
+        check(energyLate < energyEarly, "reverb tail has decayed by the end of a 3s window at a moderate Decay setting");
+    }
+
+    // --- Erbe-Verb Hadamard feedback matrix ------------------------------------
+    // Exercises r3wrk::hadamardFeedback() directly (the same function ErbeVerbReverb::
+    // processSample() calls, not a hand-copied duplicate) against the architecture doc's exact
+    // row formulas, so a future edit to the matrix math itself would be caught here.
+    {
+        std::cout << "-- Erbe-Verb Hadamard matrix --" << std::endl;
+
+        const double decayGain = 0.06;
+        const float fdn[4] = { 1.0f, 2.0f, 3.0f, 4.0f };
+        double f[4];
+        r3wrk::hadamardFeedback(fdn, decayGain, f);
+
+        // By hand: row1=[1,-1,-1,1]->1-2-3+4=0; row2=[1,1,-1,-1]->1+2-3-4=-4;
+        // row3=[1,-1,1,-1]->1-2+3-4=-2; row4=[1,1,1,1]->1+2+3+4=10 -- each * decayGain.
+        checkNear(f[0], decayGain * 0.0,  1e-9, "Hadamard row 1 ([1,-1,-1,1]) matches by hand");
+        checkNear(f[1], decayGain * -4.0, 1e-9, "Hadamard row 2 ([1,1,-1,-1]) matches by hand");
+        checkNear(f[2], decayGain * -2.0, 1e-9, "Hadamard row 3 ([1,-1,1,-1]) matches by hand");
+        checkNear(f[3], decayGain * 10.0, 1e-9, "Hadamard row 4 ([1,1,1,1]) matches by hand");
+    }
+
+    // --- Plexus matrix interpolation (r3wrk::PlexusMatrix) stability ------------
+    // The one genuinely novel piece of DSP in the Plexiphon build (see PlexiphonEngine.h's
+    // header comment and ~/Downloads/PLEXIPHON_PLAN.md): naively blending two orthogonal
+    // matrices isn't guaranteed to stay energy-preserving at intermediate blend amounts. Proven
+    // here, offline, in isolation (no delay lines, no damping, no saturator, no decay-gain
+    // scalar -- just the matrix repeatedly bouncing a vector off itself), BEFORE it's wired
+    // into the full engine -- the same discipline that caught the Erbe-Verb saturator bug.
+    //
+    // Measures the matrix's own per-bounce amplitude growth rate at each Plexus setting --
+    // PlexiphonEngine's Decay gain cap needs to stay comfortably under 1/growthRate for the
+    // combined (matrix * decayGain) loop to be asymptotically stable, so this number is a
+    // direct input to that design, not just a pass/fail gate.
+    {
+        std::cout << "-- Plexus matrix interpolation (PlexusMatrix) stability --" << std::endl;
+
+        bool anyNonFinite = false;
+        double worstGrowthPerBounce = 0.0;   // furthest growth/bounce strays from 1.0, either direction
+        double worstLogEnergyRatio = 0.0;    // furthest the 500-bounce energy ratio strays from 1.0, in log space
+
+        for (int step = 0; step <= 10; ++step)
+        {
+            const double amount = (double) step / 10.0;   // Plexus 0..1
+            r3wrk::PlexusMatrix m;
+            m.setAmount(amount);
+
+            // One line excited (an impulse landing on one delay line), then repeatedly bounced
+            // through the matrix alone.
+            double v[r3wrk::PlexusMatrix::N] = { 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
+            double startEnergy = 0.0;
+            for (double x : v) startEnergy += x * x;
+
+            constexpr int kBounces = 500;   // far more than a real decay tail needs per line
+            for (int b = 0; b < kBounces; ++b)
+            {
+                double out[r3wrk::PlexusMatrix::N];
+                m.apply(v, out);
+                for (int i = 0; i < r3wrk::PlexusMatrix::N; ++i)
+                {
+                    if (! std::isfinite(out[i])) anyNonFinite = true;
+                    v[i] = out[i];
+                }
+            }
+
+            double endEnergy = 0.0;
+            for (double x : v) endEnergy += x * x;
+            const double energyRatio = endEnergy / juce::jmax(1.0e-15, startEnergy);
+            // Energy is amplitude-squared; sqrt of the per-bounce energy ratio is the per-bounce
+            // amplitude growth rate.
+            const double growthPerBounce = std::isfinite(energyRatio)
+                ? std::pow(juce::jmax(1.0e-15, energyRatio), 1.0 / (2.0 * (double) kBounces))
+                : std::numeric_limits<double>::infinity();
+            worstGrowthPerBounce = juce::jmax(worstGrowthPerBounce, std::abs(growthPerBounce - 1.0));
+            worstLogEnergyRatio = juce::jmax(worstLogEnergyRatio,
+                                             std::abs(std::log(juce::jmax(1.0e-15, energyRatio))));
+
+            std::cout << "  plexus=" << amount << "  growth/bounce=" << growthPerBounce
+                      << "  (energy ratio after " << kBounces << " bounces: " << energyRatio << ")"
+                      << std::endl;
+        }
+
+        check(! anyNonFinite, "Plexus matrix output stays finite across the full Plexus sweep");
+        // Tight: measured (after the spectral-radius fix) within +/-0.3% across the sweep --
+        // 1% leaves real headroom while still catching a regression back toward the pre-fix
+        // behavior (up to +7.6%/bounce, i.e. worse than 75x this bound).
+        check(worstGrowthPerBounce < 0.01,
+             "Plexus matrix's own per-bounce growth stays within 1% of neutral across the sweep");
+        // Direct, intuitive safety property: after 500 bounces (far more than a real decay tail
+        // needs), energy should be neither vanished nor exploded -- bounded within a generous
+        // 1000x either direction (measured: well within 10x).
+        check(worstLogEnergyRatio < std::log(1000.0),
+             "Plexus matrix energy after 500 bounces stays within 1000x of where it started, either direction");
+    }
+
+    // --- Plexiphon engine (r3wrk::PlexiphonEngine) stability at max Decay, sweeping Plexus ----
+    // Decay pinned at its true max is the case the saturator specifically exists to catch (same
+    // reasoning as ErbeVerbReverb's equivalent test) -- that setting is *designed* for near-
+    // infinite sustain, so this block only asserts safety (finite, bounded), never that the tail
+    // decays. Plexus is swept across its full range over the test, since the matrix topology
+    // itself is what's actually novel here.
+    {
+        std::cout << "-- Plexiphon engine stability at max Decay, sweeping Plexus --" << std::endl;
+        const double fs = 48000.0;
+        const int numSamples = (int) (fs * 3.0);
+
+        r3wrk::PlexiphonEngine engine;
+        engine.prepare(fs);
+
+        float peak = 0.0f;
+        bool hasNonFinite = false;
+
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const double plexus01 = (double) i / (double) numSamples;
+            engine.setParams(/*level*/ 0.5, plexus01, /*size*/ 0.4, /*diffuse*/ 0.5,
+                             /*decay*/ 1.0, /*color*/ 0.5, /*mix*/ 1.0, /*blockNumSamples*/ 1);
+
+            const float in = (i == 0) ? 1.0f : 0.0f;   // a single-sample impulse
+            float outL, outR;
+            engine.processSample(in, in, outL, outR);
+
+            if (! std::isfinite(outL) || ! std::isfinite(outR)) hasNonFinite = true;
+            peak = juce::jmax(peak, std::abs(outL), std::abs(outR));
+        }
+
+        std::cout << "  peak: " << peak << (hasNonFinite ? " (NON-FINITE!)" : "") << std::endl;
+
+        check(! hasNonFinite, "Plexiphon output stays finite under an impulse with Decay pinned at max + a full Plexus sweep");
+        check(peak < 4.0f, "Plexiphon output peak stays within the safety clamp (< 4.0) under stress");
+    }
+
+    // --- Plexiphon engine: real reverberation/echo + decay at a moderate setting -------------
+    {
+        std::cout << "-- Plexiphon engine: reverberates and decays at moderate Decay --" << std::endl;
+        const double fs = 48000.0;
+        const int numSamples = (int) (fs * 3.0);
+
+        r3wrk::PlexiphonEngine engine;
+        engine.prepare(fs);
+        engine.setParams(/*level*/ 0.5, /*plexus*/ 0.5, /*size*/ 0.1, /*diffuse*/ 0.5,
+                         /*decay*/ 0.5, /*color*/ 0.5, /*mix*/ 1.0, /*blockNumSamples*/ numSamples);
+
+        float energyEarly = 0.0f;   // 0.2-0.4s after the impulse
+        float energyLate  = 0.0f;   // last 0.2s of the 3s test
+        const int earlyStart = (int) (fs * 0.2), earlyEnd = (int) (fs * 0.4);
+        const int lateStart  = numSamples - (int) (fs * 0.2);
+
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const float in = (i == 0) ? 1.0f : 0.0f;
+            float outL, outR;
+            engine.processSample(in, in, outL, outR);
+            const float mono = 0.5f * (outL + outR);
+            if (i >= earlyStart && i < earlyEnd) energyEarly += mono * mono;
+            if (i >= lateStart) energyLate += mono * mono;
+        }
+
+        std::cout << "  early energy (0.2-0.4s): " << energyEarly
+                  << ", late energy (last 0.2s of 3s): " << energyLate << std::endl;
+
+        check(energyEarly > 0.0f, "Plexiphon tail/echo has arrived and has energy by 0.2-0.4s after the impulse");
+        check(energyLate < energyEarly, "Plexiphon tail has decayed by the end of a 3s window at a moderate Decay setting");
     }
 
     std::cout << "===========================================" << std::endl;

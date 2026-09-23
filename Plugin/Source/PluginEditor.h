@@ -53,9 +53,10 @@ private:
 
     // FX drawer: closed by default, so the plugin's footprint is unchanged until the user asks
     // for it. Not persisted yet -- reopens closed every time the editor is recreated.
-    // Two stacked rows (see FxRow's class comment) -- each the same strip height as KnobRow,
-    // plus FxRow's own internal gap between them.
-    static constexpr int kFxRowHeight = 83 * 2 + 4;
+    // One row (see FxRow's class comment) -- the same strip height as KnobRow. Used to be two
+    // stacked rows, but LFO and Reverb moved their real controls behind a popup editor rather
+    // than needing inline space, so all four effects fit across one row now.
+    static constexpr int kFxRowHeight = 83;
     static constexpr int kFxRowGap    = 4;
     bool fxDrawerOpen = false;
 

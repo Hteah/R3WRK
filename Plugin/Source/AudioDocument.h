@@ -329,6 +329,41 @@ public:
     std::atomic<double> playbackGainDb { 0.0 };
 
     //==============================================================================
+    // Erbe-Verb reverb (r3wrk::ErbeVerbReverb, ReverbEngine.h) -- phase 1: live monitoring only,
+    // not yet baked into Save/Export by renderWithPlaybackKnobs (unlike the filter/gain above,
+    // a reverb's tail extends past the source audio's own length, which needs export logic this
+    // phase doesn't add yet). All 0..1 except reverbPredelay, which maps to 7-500ms the same way
+    // FxRow reads out any other ms-ranged knob. Mix defaults to 0 (inert until touched), same
+    // non-destructive-default convention as the filter/gain knobs above.
+    std::atomic<bool>   reverbEnabled  { false };
+    std::atomic<double> reverbSize     { 0.5 };
+    std::atomic<double> reverbAbsorb   { 0.5 };
+    std::atomic<double> reverbDecay    { 0.5 };
+    std::atomic<double> reverbTilt     { 0.5 };
+    std::atomic<double> reverbMix      { 0.0 };
+    std::atomic<double> reverbPredelay { 0.1 };
+    // Mid-side widening on the wet signal only (dry stays untouched). 0.5 = unity (today's
+    // fixed tap-weight width, unchanged), 0 = mono, 1.0 = double-wide. Same non-destructive-
+    // default convention as the others -- adding this knob doesn't retroactively change the
+    // sound of an existing saved session until it's actually turned.
+    std::atomic<double> reverbWidth { 0.5 };
+
+    //==============================================================================
+    // Plexiphon (r3wrk::PlexiphonEngine, PlexiphonEngine.h) -- phase 1: mono core network
+    // (Level/Mix/Plexus/Size/Diffuse/Decay/Color), live monitoring only, same not-yet-baked-
+    // into-Save/Export caveat as the reverb above. Couple/Skew/Send are deferred to a later
+    // pass. All 0..1. Mix defaults to 0, enabled defaults to false -- same non-destructive-
+    // default convention as every other effect here.
+    std::atomic<bool>   plexEnabled { false };
+    std::atomic<double> plexLevel   { 0.5 };
+    std::atomic<double> plexPlexus  { 0.5 };
+    std::atomic<double> plexSize    { 0.5 };
+    std::atomic<double> plexDiffuse { 0.5 };
+    std::atomic<double> plexDecay   { 0.5 };
+    std::atomic<double> plexColor   { 0.5 };
+    std::atomic<double> plexMix     { 0.0 };
+
+    //==============================================================================
     // LFO modulation slots. Fixed capacity so the audio thread can iterate every slot each
     // block with no locking or resize hazard (see PluginProcessor::tickLfos()). numVisibleLfos
     // is how many the FX drawer currently shows ("+ Add LFO" raises it, up to kMaxLfos); slots
@@ -339,7 +374,7 @@ public:
     // parallel signals into one summing node). Pitch/Speed (the real-time RubberBand stretch
     // engine) are deliberately not in r3wrk::ModTarget yet -- that pipeline has its own history
     // of click-storm bugs; modulating it is a later, isolated pass.
-    static constexpr int kMaxLfos = 8;
+    static constexpr int kMaxLfos = 4;
     struct LfoSlot
     {
         std::atomic<bool>   enabled   { false };

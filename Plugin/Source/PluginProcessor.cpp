@@ -7,7 +7,10 @@
 
 namespace
 {
-    constexpr int kStateMagic     = 0x52335749;   // 'R3WI' - adds LFO modulation slots
+    constexpr int kStateMagic     = 0x5233574C;   // 'R3WL' - adds Plexiphon params
+    constexpr int kStateMagicR3WK = 0x5233574B;   // 'R3WK' - adds reverb Width
+    constexpr int kStateMagicR3WJ = 0x5233574A;   // 'R3WJ' - adds reverb params
+    constexpr int kStateMagicR3WI = 0x52335749;   // 'R3WI' - adds LFO modulation slots
     constexpr int kStateMagicR3WH = 0x52335748;   // 'R3WH' - adds loopReverse
     constexpr int kStateMagicR3WG = 0x52335747;   // 'R3WG' - adds the source file path
     constexpr int kStateMagicR3WF = 0x52335746;   // 'R3WF' - adds bakeLoopCrossfadeOnExport
@@ -98,6 +101,46 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
         juce::Decibels::decibelsToGain((float) juce::jlimit(AudioDocument::kMinGainDb, AudioDocument::kMaxGainDb,
                                                             document.playbackGainDb.load()),
                                        (float) AudioDocument::kMinGainDb));
+
+    reverbDsp.prepare(sampleRate);
+    constexpr double reverbRampSeconds = 0.05;
+    smoothedReverbSize.reset(sampleRate, reverbRampSeconds);
+    smoothedReverbAbsorb.reset(sampleRate, reverbRampSeconds);
+    smoothedReverbDecay.reset(sampleRate, reverbRampSeconds);
+    smoothedReverbTilt.reset(sampleRate, reverbRampSeconds);
+    smoothedReverbMix.reset(sampleRate, reverbRampSeconds);
+    smoothedReverbPredelay.reset(sampleRate, reverbRampSeconds);
+    smoothedReverbWidth.reset(sampleRate, reverbRampSeconds);
+    smoothedReverbSize.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.reverbSize.load()));
+    smoothedReverbAbsorb.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.reverbAbsorb.load()));
+    smoothedReverbDecay.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.reverbDecay.load()));
+    smoothedReverbTilt.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.reverbTilt.load()));
+    smoothedReverbMix.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.reverbMix.load()));
+    smoothedReverbPredelay.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.reverbPredelay.load()));
+    smoothedReverbWidth.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.reverbWidth.load()));
+    reverbTailSamplesLeft = 0;
+    reverbTailSilentSamples = 0;
+    lastReverbEngaged = false;
+
+    plexDsp.prepare(sampleRate);
+    constexpr double plexRampSeconds = 0.05;
+    smoothedPlexLevel.reset(sampleRate, plexRampSeconds);
+    smoothedPlexPlexus.reset(sampleRate, plexRampSeconds);
+    smoothedPlexSize.reset(sampleRate, plexRampSeconds);
+    smoothedPlexDiffuse.reset(sampleRate, plexRampSeconds);
+    smoothedPlexDecay.reset(sampleRate, plexRampSeconds);
+    smoothedPlexColor.reset(sampleRate, plexRampSeconds);
+    smoothedPlexMix.reset(sampleRate, plexRampSeconds);
+    smoothedPlexLevel.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.plexLevel.load()));
+    smoothedPlexPlexus.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.plexPlexus.load()));
+    smoothedPlexSize.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.plexSize.load()));
+    smoothedPlexDiffuse.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.plexDiffuse.load()));
+    smoothedPlexDecay.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.plexDecay.load()));
+    smoothedPlexColor.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.plexColor.load()));
+    smoothedPlexMix.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.plexMix.load()));
+    plexTailSamplesLeft = 0;
+    plexTailSilentSamples = 0;
+    lastPlexEngaged = false;
 }
 
 void R3WRKAudioProcessor::releaseResources()
@@ -950,6 +993,16 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             applyPlaybackGain(buffer, numCh, lfoModDone, chunk, lfoMod);
             lfoModDone += chunk;
         }
+
+        // Reverb, after filter and gain -- like a send on the end of the strip. Unchunked: not
+        // LFO-modulated in phase 1, so nothing here needs kLfoModUpdateSamples's finer update
+        // rate. freshPlayPass primes it the same way the filter/gain above do.
+        applyReverb(buffer, numCh, numSamples, ! wasPlaying);
+
+        // Plexiphon, after Reverb -- an arbitrary but reasonable "read the FX drawer left to
+        // right" chain order (LFO | Delay | Reverb | Plexiphon), not a hard requirement.
+        applyPlexiphon(buffer, numCh, numSamples, ! wasPlaying);
+
         captureOutput(buffer, numCh, numSamples);
         // R3WRK has taken the buffer over to play/loop -- Black Box follows that, not the (now
         // irrelevant) input snapshot; see blackBoxInputScratch's header comment.
@@ -960,7 +1013,28 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         return;
     }
 
+    const bool justStoppedPlaying = wasPlaying;
     wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false; dragScanActive = false;
+
+    // A reverb tail outlives the signal that made it -- start a countdown the instant playback
+    // stops (if the reverb was actually engaged), so applyReverb() keeps ticking with silence as
+    // its "input" for a while after, letting only the already-recirculating tail ring out instead
+    // of cutting it off dead. The ceiling here is generous (5 minutes), not a real prediction of
+    // tail length -- near-max Decay is *designed* for near-infinite sustain (matches the real
+    // hardware); what actually ends it at a normal, finite Decay setting is the energy check
+    // below (reverbTailSilentSamples), once the tail's genuinely gone quiet.
+    if (justStoppedPlaying)
+    {
+        const bool reverbEngaged = document.reverbEnabled.load(std::memory_order_relaxed)
+                                    && document.reverbMix.load(std::memory_order_relaxed) > 0.001;
+        reverbTailSamplesLeft = reverbEngaged ? (int) (currentSampleRate * 300.0) : 0;
+        reverbTailSilentSamples = 0;
+
+        const bool plexEngaged = document.plexEnabled.load(std::memory_order_relaxed)
+                                 && document.plexMix.load(std::memory_order_relaxed) > 0.001;
+        plexTailSamplesLeft = plexEngaged ? (int) (currentSampleRate * 300.0) : 0;
+        plexTailSilentSamples = 0;
+    }
 
     // Neither recording nor playing back: leave `buffer` untouched so the host's input
     // passes straight through -- except Auto-Record standby, which watches that same
@@ -979,6 +1053,47 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         const float peakDb = juce::Decibels::gainToDecibels(peak, -100.0f);
         if (peakDb >= (float) document.autoRecordThresholdDb.load(std::memory_order_relaxed))
             document.autoRecordTriggered.store(true, std::memory_order_relaxed);
+    }
+
+    // Let a still-ringing reverb tail continue decaying over host passthrough (or silence in the
+    // Standalone), additively -- NOT unconditionally on every idle block, which would mean
+    // R3WRK reverberating any live signal passing through any time it isn't actively playing its
+    // own buffer, a standing side effect on whatever a DAW channel happens to be carrying. Feeds
+    // the engine silence (see applyReverb()'s tailOnly parameter), so only what's already
+    // recirculating in its delay lines comes back out.
+    if (reverbTailSamplesLeft > 0)
+    {
+        const int n = juce::jmin(reverbTailSamplesLeft, numSamples);
+        const float wetPeak = applyReverb(buffer, numCh, n, false, true);
+        reverbTailSamplesLeft -= n;
+
+        // Ends the tail once it's genuinely inaudible, however long that takes -- rather than
+        // waiting out the full (deliberately generous) ceiling above every time. A single quiet
+        // moment doesn't end it early: the tail has to stay below threshold for a full 2 seconds
+        // straight, so an ordinary lull mid-decay can't be mistaken for the tail being over.
+        constexpr float kSilenceThreshold = 0.0005f;   // roughly -66dBFS, well under audible
+        if (wetPeak > kSilenceThreshold)
+            reverbTailSilentSamples = 0;
+        else
+            reverbTailSilentSamples += n;
+        if (reverbTailSilentSamples > (int) (currentSampleRate * 2.0))
+            reverbTailSamplesLeft = 0;
+    }
+
+    // Same idle tail-ring-out treatment for Plexiphon -- see the block above.
+    if (plexTailSamplesLeft > 0)
+    {
+        const int n = juce::jmin(plexTailSamplesLeft, numSamples);
+        const float wetPeak = applyPlexiphon(buffer, numCh, n, false, true);
+        plexTailSamplesLeft -= n;
+
+        constexpr float kSilenceThreshold = 0.0005f;
+        if (wetPeak > kSilenceThreshold)
+            plexTailSilentSamples = 0;
+        else
+            plexTailSilentSamples += n;
+        if (plexTailSilentSamples > (int) (currentSampleRate * 2.0))
+            plexTailSamplesLeft = 0;
     }
 
     // Keep the captured timeline continuous through idle gaps (in the Standalone the input is
@@ -1261,6 +1376,185 @@ void R3WRKAudioProcessor::applyPlaybackGain(juce::AudioBuffer<float>& buffer, in
         for (int i = 0; i < numSamples; ++i)
             out[i] = juce::jlimit(-2.0f, 2.0f, out[i]);
     }
+}
+
+float R3WRKAudioProcessor::applyReverb(juce::AudioBuffer<float>& buffer, int numCh, int numSamples,
+                                       bool freshPlayPass, bool tailOnly)
+{
+    const double size01     = juce::jlimit(0.0, 1.0, document.reverbSize.load(std::memory_order_relaxed));
+    const double absorb01   = juce::jlimit(0.0, 1.0, document.reverbAbsorb.load(std::memory_order_relaxed));
+    const double decay01    = juce::jlimit(0.0, 1.0, document.reverbDecay.load(std::memory_order_relaxed));
+    const double tilt01     = juce::jlimit(0.0, 1.0, document.reverbTilt.load(std::memory_order_relaxed));
+    const double mix01      = juce::jlimit(0.0, 1.0, document.reverbMix.load(std::memory_order_relaxed));
+    const double predelay01 = juce::jlimit(0.0, 1.0, document.reverbPredelay.load(std::memory_order_relaxed));
+    const double width01    = juce::jlimit(0.0, 1.0, document.reverbWidth.load(std::memory_order_relaxed));
+
+    if (freshPlayPass)
+    {
+        // Deliberately does NOT reset reverbDsp here, unlike the filter's equivalent fresh-
+        // play-pass handling (applyPlaybackFilter): a filter's z1/z2 state has no musical value
+        // worth keeping across a stop (and old state meeting new coefficients can even produce
+        // a transient), so clearing it is pure upside. A reverb's delay-line content is the
+        // OPPOSITE -- it's a still-decaying tail, and wiping it here would silence it dead any
+        // time wasPlaying flips false->true, including transiently (e.g. Scrub Mode's mousedown
+        // sets isPlaying false for the scrub's duration) even though the user never asked the
+        // reverb to stop. The only place reverbDsp is (correctly) reset is the enable/disable
+        // edge below (lastReverbEngaged) -- an explicit user action, not an incidental one.
+        smoothedReverbSize.setCurrentAndTargetValue(size01);
+        smoothedReverbAbsorb.setCurrentAndTargetValue(absorb01);
+        smoothedReverbDecay.setCurrentAndTargetValue(decay01);
+        smoothedReverbTilt.setCurrentAndTargetValue(tilt01);
+        smoothedReverbMix.setCurrentAndTargetValue(mix01);
+        smoothedReverbPredelay.setCurrentAndTargetValue(predelay01);
+        smoothedReverbWidth.setCurrentAndTargetValue(width01);
+    }
+
+    smoothedReverbSize.setTargetValue(size01);
+    smoothedReverbAbsorb.setTargetValue(absorb01);
+    smoothedReverbDecay.setTargetValue(decay01);
+    smoothedReverbTilt.setTargetValue(tilt01);
+    smoothedReverbMix.setTargetValue(mix01);
+    smoothedReverbPredelay.setTargetValue(predelay01);
+    smoothedReverbWidth.setTargetValue(width01);
+    const double size     = smoothedReverbSize.skip(numSamples);
+    const double absorb   = smoothedReverbAbsorb.skip(numSamples);
+    const double decay    = smoothedReverbDecay.skip(numSamples);
+    const double tilt     = smoothedReverbTilt.skip(numSamples);
+    const double mix      = smoothedReverbMix.skip(numSamples);
+    const double predelay = smoothedReverbPredelay.skip(numSamples);
+    const double width    = smoothedReverbWidth.skip(numSamples);
+
+    const bool engaged = document.reverbEnabled.load(std::memory_order_relaxed) && mix > 0.001;
+
+    // Same reasoning as applyPlaybackFilter()'s: stale delay-line content computed under very
+    // different parameters, suddenly fed fresh coefficients, can behave surprisingly. A manual
+    // knob/enable move is rare (not per-cycle), so clearing on every disengaged->engaged edge is
+    // cheap and the safer default -- unlike a filter, this does mean re-engaging drops whatever
+    // tail was ringing from a previous engaged pass; acceptable for phase 1.
+    if (engaged && ! lastReverbEngaged)
+        reverbDsp.reset();
+    lastReverbEngaged = engaged;
+
+    if (! engaged)
+        return 0.0f;
+
+    const double predelayMs = juce::jmap(predelay, 7.0, 500.0);
+    reverbDsp.setParams(size, absorb, decay, tilt, mix, predelayMs, width);
+
+    float peak = 0.0f;
+    if (numCh <= 1)
+    {
+        auto* data = buffer.getWritePointer(0);
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const float in = tailOnly ? 0.0f : data[i];
+            float outL, outR;
+            reverbDsp.processSample(in, in, outL, outR);
+            const float mono = 0.5f * (outL + outR);
+            peak = juce::jmax(peak, std::abs(mono));
+            data[i] = tailOnly ? (data[i] + mono) : mono;
+        }
+    }
+    else
+    {
+        auto* left  = buffer.getWritePointer(0);
+        auto* right = buffer.getWritePointer(1);
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const float inL = tailOnly ? 0.0f : left[i];
+            const float inR = tailOnly ? 0.0f : right[i];
+            float outL, outR;
+            reverbDsp.processSample(inL, inR, outL, outR);
+            peak = juce::jmax(peak, std::abs(outL), std::abs(outR));
+            left[i]  = tailOnly ? (left[i]  + outL) : outL;
+            right[i] = tailOnly ? (right[i] + outR) : outR;
+        }
+    }
+    return peak;
+}
+
+float R3WRKAudioProcessor::applyPlexiphon(juce::AudioBuffer<float>& buffer, int numCh, int numSamples,
+                                          bool freshPlayPass, bool tailOnly)
+{
+    const double level01   = juce::jlimit(0.0, 1.0, document.plexLevel.load(std::memory_order_relaxed));
+    const double plexus01  = juce::jlimit(0.0, 1.0, document.plexPlexus.load(std::memory_order_relaxed));
+    const double size01    = juce::jlimit(0.0, 1.0, document.plexSize.load(std::memory_order_relaxed));
+    const double diffuse01 = juce::jlimit(0.0, 1.0, document.plexDiffuse.load(std::memory_order_relaxed));
+    const double decay01   = juce::jlimit(0.0, 1.0, document.plexDecay.load(std::memory_order_relaxed));
+    const double color01   = juce::jlimit(0.0, 1.0, document.plexColor.load(std::memory_order_relaxed));
+    const double mix01     = juce::jlimit(0.0, 1.0, document.plexMix.load(std::memory_order_relaxed));
+
+    if (freshPlayPass)
+    {
+        // Deliberately does NOT reset plexDsp here -- same reasoning as applyReverb()'s
+        // comment: a long-sustaining tail (this module's whole "super-infinite" identity) has
+        // no business being wiped by an incidental wasPlaying flip (Scrub Mode, etc.) that
+        // isn't a deliberate stop. Only the enable/disable edge below resets it.
+        smoothedPlexLevel.setCurrentAndTargetValue(level01);
+        smoothedPlexPlexus.setCurrentAndTargetValue(plexus01);
+        smoothedPlexSize.setCurrentAndTargetValue(size01);
+        smoothedPlexDiffuse.setCurrentAndTargetValue(diffuse01);
+        smoothedPlexDecay.setCurrentAndTargetValue(decay01);
+        smoothedPlexColor.setCurrentAndTargetValue(color01);
+        smoothedPlexMix.setCurrentAndTargetValue(mix01);
+    }
+
+    smoothedPlexLevel.setTargetValue(level01);
+    smoothedPlexPlexus.setTargetValue(plexus01);
+    smoothedPlexSize.setTargetValue(size01);
+    smoothedPlexDiffuse.setTargetValue(diffuse01);
+    smoothedPlexDecay.setTargetValue(decay01);
+    smoothedPlexColor.setTargetValue(color01);
+    smoothedPlexMix.setTargetValue(mix01);
+    const double level   = smoothedPlexLevel.skip(numSamples);
+    const double plexus  = smoothedPlexPlexus.skip(numSamples);
+    const double size    = smoothedPlexSize.skip(numSamples);
+    const double diffuse = smoothedPlexDiffuse.skip(numSamples);
+    const double decay   = smoothedPlexDecay.skip(numSamples);
+    const double color   = smoothedPlexColor.skip(numSamples);
+    const double mix     = smoothedPlexMix.skip(numSamples);
+
+    const bool engaged = document.plexEnabled.load(std::memory_order_relaxed) && mix > 0.001;
+
+    if (engaged && ! lastPlexEngaged)
+        plexDsp.reset();
+    lastPlexEngaged = engaged;
+
+    if (! engaged)
+        return 0.0f;
+
+    plexDsp.setParams(level, plexus, size, diffuse, decay, color, mix, numSamples);
+
+    float peak = 0.0f;
+    if (numCh <= 1)
+    {
+        auto* data = buffer.getWritePointer(0);
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const float in = tailOnly ? 0.0f : data[i];
+            float outL, outR;
+            plexDsp.processSample(in, in, outL, outR);
+            const float mono = 0.5f * (outL + outR);
+            peak = juce::jmax(peak, std::abs(mono));
+            data[i] = tailOnly ? (data[i] + mono) : mono;
+        }
+    }
+    else
+    {
+        auto* left  = buffer.getWritePointer(0);
+        auto* right = buffer.getWritePointer(1);
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const float inL = tailOnly ? 0.0f : left[i];
+            const float inR = tailOnly ? 0.0f : right[i];
+            float outL, outR;
+            plexDsp.processSample(inL, inR, outL, outR);
+            peak = juce::jmax(peak, std::abs(outL), std::abs(outR));
+            left[i]  = tailOnly ? (left[i]  + outL) : outL;
+            right[i] = tailOnly ? (right[i] + outR) : outR;
+        }
+    }
+    return peak;
 }
 
 void R3WRKAudioProcessor::captureOutput(const juce::AudioBuffer<float>& out, int numCh, int numSamples)
@@ -1687,6 +1981,24 @@ void R3WRKAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
         out.writeBool(s.tempoSync.load());
     }
 
+    out.writeBool(document.reverbEnabled.load());   // R3WJ+
+    out.writeDouble(document.reverbSize.load());
+    out.writeDouble(document.reverbAbsorb.load());
+    out.writeDouble(document.reverbDecay.load());
+    out.writeDouble(document.reverbTilt.load());
+    out.writeDouble(document.reverbMix.load());
+    out.writeDouble(document.reverbPredelay.load());
+    out.writeDouble(document.reverbWidth.load());   // R3WK+
+
+    out.writeBool(document.plexEnabled.load());   // R3WL+
+    out.writeDouble(document.plexLevel.load());
+    out.writeDouble(document.plexPlexus.load());
+    out.writeDouble(document.plexSize.load());
+    out.writeDouble(document.plexDiffuse.load());
+    out.writeDouble(document.plexDecay.load());
+    out.writeDouble(document.plexColor.load());
+    out.writeDouble(document.plexMix.load());
+
     auto& buf = document.getBuffer();
     for (int ch = 0; ch < buf.getNumChannels(); ++ch)
         out.write(buf.getReadPointer(ch), (size_t) buf.getNumSamples() * sizeof(float));
@@ -1701,12 +2013,15 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     juce::MemoryInputStream in(data, (size_t) sizeInBytes, false);
     const int magic = in.readInt();
-    if (magic != kStateMagic && magic != kStateMagicR3WH && magic != kStateMagicR3WG && magic != kStateMagicR3WF && magic != kStateMagicR3WE && magic != kStateMagicR3WD
+    if (magic != kStateMagic && magic != kStateMagicR3WK && magic != kStateMagicR3WJ && magic != kStateMagicR3WI && magic != kStateMagicR3WH && magic != kStateMagicR3WG && magic != kStateMagicR3WF && magic != kStateMagicR3WE && magic != kStateMagicR3WD
         && magic != kStateMagicR3WC && magic != kStateMagicR3WB && magic != kStateMagicR3WA
         && magic != kStateMagicR3W9 && magic != kStateMagicR3W8 && magic != kStateMagicR3W7
         && magic != kStateMagicR3W6 && magic != kStateMagicR3W5)
         return;
-    // R3WI: adds the LFO modulation slots after the source file path. R3WH: adds the
+    // R3WL: adds the Plexiphon params after reverb Width. R3WK: adds reverb Width after Pre-
+    // delay. R3WJ: adds the reverb params after the LFO
+    // modulation slots. R3WI: adds the LFO
+    // modulation slots after the source file path. R3WH: adds the
     // loopReverse flag after loopPingPong. R3WG: adds the source file path
     // after bakeLoopCrossfadeOnExport. R3WF: adds
     // bakeLoopCrossfadeOnExport after loopCrossfadeMs. R3WE: adds loopCrossfadeMs
@@ -1715,7 +2030,10 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     // MnM model). R3W8..R3WA: the old OT-style Base/Width filter with a single resonance
     // (+ later Drive, + later 12/24 slope). R3W6/R3W7: the even older mode/cutoff filter.
     // R3W5: none.
-    const bool hasLfoSlots        = (magic == kStateMagic);                                  // R3WI
+    const bool hasPlex             = (magic == kStateMagic);                                  // R3WL
+    const bool hasReverbWidth      = (hasPlex || magic == kStateMagicR3WK);                   // R3WK+
+    const bool hasReverb           = (hasReverbWidth || magic == kStateMagicR3WJ);            // R3WJ+
+    const bool hasLfoSlots        = (hasReverb || magic == kStateMagicR3WI);                  // R3WI+
     const bool hasReverseLoop     = (hasLfoSlots || magic == kStateMagicR3WH);                // R3WH+
     const bool hasSourceFilePath  = (hasReverseLoop || magic == kStateMagicR3WG);             // R3WG+
     const bool hasLoopXfadeBake   = (hasSourceFilePath || magic == kStateMagicR3WF);          // R3WF+
@@ -1800,10 +2118,13 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     int loadedNumLfos = 1;   // an older state blob has no LFOs -- restore to one default (disabled) slot
     if (hasLfoSlots)
     {
-        loadedNumLfos = juce::jlimit(0, AudioDocument::kMaxLfos, in.readInt());
-        for (int i = 0; i < loadedNumLfos; ++i)
+        // The blob's own count can exceed today's kMaxLfos (e.g. a project saved by a build that
+        // allowed more slots) -- read every one it says it wrote, so the stream stays byte-aligned
+        // for whatever follows, and just don't keep the ones past kMaxLfos.
+        const int rawNumLfos = in.readInt();
+        for (int i = 0; i < rawNumLfos; ++i)
         {
-            auto& s = loadedLfos[i];
+            LoadedLfo s;
             s.enabled   = in.readBool();
             s.shape     = in.readInt();
             s.rateRange = in.readInt();
@@ -1811,7 +2132,45 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
             s.target    = in.readInt();
             s.amount    = in.readDouble();
             s.tempoSync = in.readBool();
+            if (i < AudioDocument::kMaxLfos)
+                loadedLfos[i] = s;
         }
+        loadedNumLfos = juce::jlimit(0, AudioDocument::kMaxLfos, rawNumLfos);
+    }
+
+    // An older state blob has no reverb -- restore the same non-destructive defaults
+    // AudioDocument itself declares (enabled=false, mix=0), so loading one doesn't retroactively
+    // turn a reverb on that was never there.
+    bool   rvEnabled  = false;
+    double rvSize     = 0.5, rvAbsorb = 0.5, rvDecay = 0.5, rvTilt = 0.5, rvMix = 0.0, rvPredelay = 0.1, rvWidth = 0.5;
+    if (hasReverb)
+    {
+        rvEnabled  = in.readBool();
+        rvSize     = in.readDouble();
+        rvAbsorb   = in.readDouble();
+        rvDecay    = in.readDouble();
+        rvTilt     = in.readDouble();
+        rvMix      = in.readDouble();
+        rvPredelay = in.readDouble();
+    }
+    if (hasReverbWidth)
+        rvWidth = in.readDouble();
+
+    // An older state blob has no Plexiphon -- same non-destructive defaults AudioDocument
+    // itself declares (enabled=false, mix=0).
+    bool   pxEnabled = false;
+    double pxLevel = 0.5, pxPlexus = 0.5, pxSize = 0.5, pxDiffuse = 0.5, pxDecay = 0.5,
+           pxColor = 0.5, pxMix = 0.0;
+    if (hasPlex)
+    {
+        pxEnabled = in.readBool();
+        pxLevel   = in.readDouble();
+        pxPlexus  = in.readDouble();
+        pxSize    = in.readDouble();
+        pxDiffuse = in.readDouble();
+        pxDecay   = in.readDouble();
+        pxColor   = in.readDouble();
+        pxMix     = in.readDouble();
     }
 
     if (numCh <= 0 || numCh > kMaxStateChannels || numSamples < 0 || numSamples > 0x7fffffff)
@@ -1864,6 +2223,24 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
         dst.amount.store(juce::jlimit(-1.0, 1.0, s.amount));
         dst.tempoSync.store(s.tempoSync);
     }
+    document.reverbEnabled.store(rvEnabled);
+    document.reverbSize.store(juce::jlimit(0.0, 1.0, rvSize));
+    document.reverbAbsorb.store(juce::jlimit(0.0, 1.0, rvAbsorb));
+    document.reverbDecay.store(juce::jlimit(0.0, 1.0, rvDecay));
+    document.reverbTilt.store(juce::jlimit(0.0, 1.0, rvTilt));
+    document.reverbMix.store(juce::jlimit(0.0, 1.0, rvMix));
+    document.reverbPredelay.store(juce::jlimit(0.0, 1.0, rvPredelay));
+    document.reverbWidth.store(juce::jlimit(0.0, 1.0, rvWidth));
+
+    document.plexEnabled.store(pxEnabled);
+    document.plexLevel.store(juce::jlimit(0.0, 1.0, pxLevel));
+    document.plexPlexus.store(juce::jlimit(0.0, 1.0, pxPlexus));
+    document.plexSize.store(juce::jlimit(0.0, 1.0, pxSize));
+    document.plexDiffuse.store(juce::jlimit(0.0, 1.0, pxDiffuse));
+    document.plexDecay.store(juce::jlimit(0.0, 1.0, pxDecay));
+    document.plexColor.store(juce::jlimit(0.0, 1.0, pxColor));
+    document.plexMix.store(juce::jlimit(0.0, 1.0, pxMix));
+
     document.setSourceFilePath(sourceFilePath);   // "" on an older state blob -- header shows "Untitled"
 
     document.clearSliceMarkers();   // session-only; a restored document starts with no markers

@@ -1,5 +1,6 @@
 #include "R3WRKLookAndFeel.h"
 #include "BinaryData.h"
+#include "DotMatrixLCD.h"
 #include <cmath>
 
 juce::Typeface::Ptr R3WRKLookAndFeel::getTypefaceForFont(const juce::Font& font)
@@ -696,4 +697,38 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
         auto r = bounds.reduced(bounds.getHeight() * 0.34f);
         g.fillRoundedRectangle(r, 2.0f);
     }
+}
+
+void R3WRKLookAndFeel::drawCallOutBoxBackground(juce::CallOutBox& box, juce::Graphics& g,
+                                                const juce::Path& path, juce::Image& cachedImage)
+{
+    // Same drop-shadow caching LookAndFeel_V4's default uses; only the fill/outline colours
+    // change, from JUCE's generic ColourScheme to this app's own theme.
+    if (cachedImage.isNull())
+    {
+        cachedImage = juce::Image(juce::Image::ARGB, box.getWidth(), box.getHeight(), true,
+                                  *g.getInternalContext().getPreferredImageTypeForTemporaryImages());
+        cachedImage.setBackupEnabled(false);
+
+        juce::Graphics g2(cachedImage);
+        juce::DropShadow(juce::Colours::black.withAlpha(0.7f), 8, { 0, 2 }).drawForPath(g2, path);
+    }
+
+    g.setColour(juce::Colours::black);
+    g.drawImageAt(cachedImage, 0, 0);
+
+    const auto& pal = theme->palette();
+    g.setColour(pal.popupBg.withAlpha(0.95f));
+    g.fillPath(path);
+
+    // The faint all-over dot grid visible in "blank" areas of a real LCD -- clipped to the
+    // bubble's own path so it doesn't spill past the rounded corners.
+    {
+        juce::Graphics::ScopedSaveState save(g);
+        g.reduceClipRegion(path);
+        lcd::drawScreenTexture(g, path.getBounds().toNearestInt(), pal.popupInk.withAlpha(0.10f));
+    }
+
+    g.setColour(pal.popupInk.withAlpha(0.6f));
+    g.strokePath(path, juce::PathStrokeType(2.0f));
 }
