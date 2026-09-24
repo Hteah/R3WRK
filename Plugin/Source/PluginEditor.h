@@ -76,8 +76,9 @@ private:
     juce::SharedResourcePointer<ThemeManager> theme;
     juce::SharedResourcePointer<OutputSettings> outputSettings;
 
-    // Header-row corner buttons, both small rounded rects (their own shape, not the
-    // pill/circle the transport strip uses) sharing one look-and-feel:
+    // Header-row corner buttons, boxless (no background at all, on or off -- per the user's
+    // request to remove the brace/box around them, same treatment KnobRow's drawer toggle
+    // already got) sharing one look-and-feel:
     //   followButton     -- Follow-playhead toggle (drives document.followPlayheadEnabled;
     //                        WaveformDisplay's 30 Hz timer does the actual view-following).
     //                        Every build. Moved here from the transport strip.
@@ -93,7 +94,7 @@ private:
     // covers plain Labels too (HeaderBar, KnobRow captions, ...) that never get an
     // explicit setLookAndFeel() of their own.
     R3WRKLookAndFeel fontLnf;
-    R3WRKIconRectLookAndFeel cornerButtonLnF;
+    R3WRKIconOnlyLookAndFeel cornerButtonLnF;
     juce::TextButton followButton    { R3WRKLookAndFeel::iconFollow };
     juce::TextButton floatOnTopButton { R3WRKLookAndFeel::iconFloatTop };
     bool floatStateApplied = false;

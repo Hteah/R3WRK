@@ -143,14 +143,13 @@ void R3WRKAudioProcessorEditor::changeListenerCallback(juce::ChangeBroadcaster*)
 void R3WRKAudioProcessorEditor::applyHeaderButtonThemes()
 {
     const auto& pal = theme->palette();
-    // The header row sits on windowBg (chrome), not the dark screen band -- so chrome ink,
-    // accent fill while the toggle is on. Same outline/fill idiom as the toolbar's Loop pill.
+    // Boxless (see cornerButtonLnF) -- on/off reads purely through the icon's own ink colour,
+    // same idiom as KnobRow's drawer toggle: accent while on, plain text ink while off.
     for (auto* b : { &followButton, &floatOnTopButton })
     {
-        b->setColour(juce::TextButton::buttonColourId,   juce::Colours::transparentBlack);
-        b->setColour(juce::TextButton::buttonOnColourId, pal.accent);
-        b->setColour(juce::TextButton::textColourOffId,  pal.text);
-        b->setColour(juce::TextButton::textColourOnId,   pal.windowBg);
+        b->setColour(juce::TextButton::buttonColourId,  juce::Colours::transparentBlack);
+        b->setColour(juce::TextButton::textColourOffId, pal.text);
+        b->setColour(juce::TextButton::textColourOnId,  pal.accent);
     }
 }
 
