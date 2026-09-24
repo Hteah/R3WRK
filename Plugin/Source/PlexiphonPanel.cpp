@@ -116,6 +116,8 @@ PlexiphonPanel::PlexiphonPanel(AudioDocument& doc) : document(doc)
     };
     setUpKnob(plexusKnob, "PLEXUS", document.plexPlexus);
     setUpKnob(mixKnob,    "MIX",    document.plexMix);
+    plexusKnob.slider.setLookAndFeel(&knobLnF);
+    mixKnob.slider.setLookAndFeel(&knobLnF);
 
     moreButton.setTooltip("Level / Size / Diffuse / Decay / Color");
     moreButton.onClick = [this] { openFullEditor(); };
@@ -129,6 +131,8 @@ PlexiphonPanel::PlexiphonPanel(AudioDocument& doc) : document(doc)
 
 PlexiphonPanel::~PlexiphonPanel()
 {
+    plexusKnob.slider.setLookAndFeel(nullptr);
+    mixKnob.slider.setLookAndFeel(nullptr);
     moreButton.setLookAndFeel(nullptr);   // detach before moreButtonLnf is destroyed
     theme->removeChangeListener(this);
 }

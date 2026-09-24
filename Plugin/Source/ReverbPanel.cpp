@@ -118,6 +118,8 @@ ReverbPanel::ReverbPanel(AudioDocument& doc) : document(doc)
     };
     setUpKnob(decayKnob, "DECAY", document.reverbDecay);
     setUpKnob(mixKnob,   "MIX",   document.reverbMix);
+    decayKnob.slider.setLookAndFeel(&knobLnF);
+    mixKnob.slider.setLookAndFeel(&knobLnF);
 
     moreButton.setTooltip("Size / Absorb / Tilt / Pre-delay");
     moreButton.onClick = [this] { openFullEditor(); };
@@ -131,6 +133,8 @@ ReverbPanel::ReverbPanel(AudioDocument& doc) : document(doc)
 
 ReverbPanel::~ReverbPanel()
 {
+    decayKnob.slider.setLookAndFeel(nullptr);
+    mixKnob.slider.setLookAndFeel(nullptr);
     moreButton.setLookAndFeel(nullptr);   // detach before moreButtonLnf is destroyed
     theme->removeChangeListener(this);
 }

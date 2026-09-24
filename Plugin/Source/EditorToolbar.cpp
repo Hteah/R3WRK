@@ -757,10 +757,15 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     addAndMakeVisible(timeLabel);
     addAndMakeVisible(recordButton);
     addAndMakeVisible(toolsButton);
+    // Named so R3WRKLookAndFeel::drawButtonBackground can give this (and desktopRec/captureOut
+    // below) a thicker red outline ring -- see its own comment.
+    clearButton.setName("clear");
     addAndMakeVisible(clearButton);
     addAndMakeVisible(autoRecordButton);
     if (standaloneApp)
     {
+        desktopRecButton.setName("desktopRec");
+        captureOutButton.setName("captureOut");
         addAndMakeVisible(desktopRecButton);
         addAndMakeVisible(captureOutButton);
     }

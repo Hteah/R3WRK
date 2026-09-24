@@ -152,6 +152,8 @@ MimeophonPanel::MimeophonPanel(AudioDocument& doc) : document(doc)
     };
     setUpKnob(rateKnob, "RATE", document.mimeoRate);
     setUpKnob(mixKnob,  "MIX",  document.mimeoMix);
+    rateKnob.slider.setLookAndFeel(&knobLnF);
+    mixKnob.slider.setLookAndFeel(&knobLnF);
 
     moreButton.setTooltip("Zone / Repeats / Skew / Color / Halo / Ping-Pong");
     moreButton.onClick = [this] { openFullEditor(); };
@@ -165,6 +167,8 @@ MimeophonPanel::MimeophonPanel(AudioDocument& doc) : document(doc)
 
 MimeophonPanel::~MimeophonPanel()
 {
+    rateKnob.slider.setLookAndFeel(nullptr);
+    mixKnob.slider.setLookAndFeel(nullptr);
     moreButton.setLookAndFeel(nullptr);   // detach before moreButtonLnf is destroyed
     theme->removeChangeListener(this);
 }

@@ -645,8 +645,15 @@ void R3WRKLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Button& but
             g.setColour(ink.withAlpha(isDown ? 0.16f : 0.08f));
             g.fillRoundedRectangle(bounds, radius);
         }
+        // Record Desktop / Capture Output's red ring reads thicker than the other outline
+        // buttons -- per the user's request, once their icons went white against it. Matched by
+        // name (set in EditorToolbar's ctor) rather than icon text, since both buttons swap
+        // their text to iconStop while active and text alone can't tell them apart from the
+        // main transport's own Stop button.
+        const bool thickRing = button.getName() == "desktopRec" || button.getName() == "captureOut"
+                             || button.getName() == "clear";
         g.setColour(ink.withAlpha(0.45f));
-        g.drawRoundedRectangle(bounds, radius, 1.2f);
+        g.drawRoundedRectangle(bounds, radius, thickRing ? 2.2f : 1.2f);
         return;
     }
 
@@ -718,7 +725,10 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     }
     if (text == iconDesktopRec)
     {
-        drawDesktopRecIcon(g, bounds, ink);
+        // White icon inside the red outline (drawButtonBackground's own outline still reads
+        // textColourOffId/OnId, so the circle stays red) -- per the user's request, so the glyph
+        // reads clearly against the button's own red ring instead of blending into it.
+        drawDesktopRecIcon(g, bounds, juce::Colours::white.withMultipliedAlpha(button.isEnabled() ? 1.0f : 0.5f));
         return;
     }
     if (text == iconFloatTop)
@@ -728,7 +738,8 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     }
     if (text == iconCaptureOut)
     {
-        drawCaptureOutIcon(g, bounds, ink);
+        // See iconDesktopRec above -- same white-icon-in-red-ring treatment.
+        drawCaptureOutIcon(g, bounds, juce::Colours::white.withMultipliedAlpha(button.isEnabled() ? 1.0f : 0.5f));
         return;
     }
     if (text == iconBlackBox)

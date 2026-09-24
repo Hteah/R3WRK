@@ -54,6 +54,13 @@ private:
         juce::Slider slider { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow };
     };
     Knob decayKnob, mixKnob;
+    // decayKnob/mixKnob's sliders are constructed as a PluginEditor member before its ctor body
+    // installs fontLnf as the app-wide default LookAndFeel (see PluginEditor.cpp), so each
+    // slider's textbox Label would otherwise get created (and cached) against JUCE's own stock
+    // default rather than R3WRKLookAndFeel's Space Mono override -- explicit attach, same
+    // pattern KnobRow's own knobs already use, makes the readout font match regardless of that
+    // construction-order timing.
+    R3WRKLookAndFeel knobLnF;
     // Boxless (see R3WRKIconOnlyLookAndFeel) -- the icon already has its own ring; the ordinary
     // transparent-background pill outline every other TextButton gets drew a second, redundant
     // oval around it.
