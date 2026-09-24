@@ -398,10 +398,9 @@ namespace
     // the r3wrk Component Library's solar-system glyph, picked by the user to replace the old
     // plain chevron. Geometry lifted proportionally from the reference sheet's 100x100 viewBox:
     // centre dot r=6, inner ring r=20 (dash 3/4) with a dot at 0deg, outer ring r=34 (dash 3/5)
-    // with a dot at -90deg (top). While the drawer is OPEN, the rings/planets drop out and only
-    // the centre dot (enlarged, so it still reads clearly on its own) is drawn -- per the user's
-    // request, so there's an obvious single target to click to close it again, rather than
-    // hunting for which part of a full orbit still does the same thing.
+    // with a dot at -90deg (top). While the drawer is OPEN, the outer ring and its planet drop
+    // out -- same glyph, just the outermost element removed -- per the user's request, so the
+    // closed-state icon reads as a clear subset of the open one instead of an unrelated plain dot.
     void drawOrbitIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink, bool open)
     {
         // The glyph's own extent (outer ring r=34 plus its planet dot) is a ~72-diameter circle,
@@ -416,14 +415,6 @@ namespace
 
         g.setColour (ink);
 
-        if (open)
-        {
-            const float r = 12.0f;   // bigger than the closed state's r=6 -- it's the whole
-                                     // glyph now, not one element among several.
-            g.fillEllipse (cx - r * s, cy - r * s, 2.0f * r * s, 2.0f * r * s);
-            return;
-        }
-
         g.fillEllipse (cx - 6.0f * s, cy - 6.0f * s, 12.0f * s, 12.0f * s);   // centre dot, r=6
 
         auto strokeDashedRing = [&] (float r, float dashOn, float dashOff)
@@ -436,9 +427,12 @@ namespace
             g.fillPath (dashed);
         };
         strokeDashedRing (20.0f, 3.0f, 4.0f);   // inner orbit, r=20
-        strokeDashedRing (34.0f, 3.0f, 5.0f);   // outer orbit, r=34
-
         g.fillEllipse (cx + 20.0f * s - 3.4f * s, cy - 3.4f * s, 6.8f * s, 6.8f * s);   // planet on inner orbit (0deg)
+
+        if (open)
+            return;   // outer orbit is the "more effects available" affordance -- dropped once open
+
+        strokeDashedRing (34.0f, 3.0f, 5.0f);   // outer orbit, r=34
         g.fillEllipse (cx - 2.6f * s, cy - 34.0f * s - 2.6f * s, 5.2f * s, 5.2f * s);   // planet on outer orbit (-90deg/top)
     }
 
@@ -525,11 +519,11 @@ namespace
         };
 
         // Left ring (cx=34,cy=50,r=20): shaft + head pointing right.
-        ringWithArrow (34.0f, 50.0f, 20.0f, 4.0f,
+        ringWithArrow (34.0f, 50.0f, 20.0f, 2.5f,
                        { 30.0f, 50.0f }, { 42.0f, 50.0f },
                        { 37.0f, 44.0f }, { 42.0f, 50.0f }, { 37.0f, 56.0f });
         // Right ring (cx=72,cy=50,r=15): shaft + head pointing up.
-        ringWithArrow (72.0f, 50.0f, 15.0f, 4.0f,
+        ringWithArrow (72.0f, 50.0f, 15.0f, 2.5f,
                        { 72.0f, 58.0f }, { 72.0f, 42.0f },
                        { 67.0f, 47.0f }, { 72.0f, 42.0f }, { 77.0f, 47.0f });
     }

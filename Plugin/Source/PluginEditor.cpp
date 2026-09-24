@@ -310,6 +310,10 @@ void R3WRKAudioProcessorEditor::resized()
 
     {
         auto headerRow = area.removeFromTop(30);
+        // Mirror the file name's left inset (HeaderBar reserves 16px on its left for the dirty
+        // dot before the name even starts) on this side, so the icon group's right margin
+        // matches the name's left margin instead of sitting flush against the window edge.
+        headerRow.removeFromRight(16);
         // Corner buttons at the far right, in line with the file name -- small rounded rects
         // (their own shape, not a pill), like RCRDR / Sieve. Float-on-top is the outermost
         // (standalone only); Follow-playhead sits just left of it.
