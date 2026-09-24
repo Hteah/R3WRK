@@ -51,9 +51,10 @@ namespace r3wrk
     /**
         One channel's delay circuit: delay buffer, Halo diffusion (INSIDE the feedback loop, per
         Erbe's own description -- see this file's header comment), Color filtering, and Repeats
-        (feedback gain + saturator). MimeophonEngine below owns two of these (L and R),
-        independent of each other in phase 1 (no Skew yet -- that's exactly what a later pass
-        adds: making L/R diverge).
+        (feedback gain + saturator). MimeophonEngine below owns two of these (L and R). Each
+        channel's own state (delay line, Halo, Color) stays fully independent; only the Repeats
+        feedback signal itself can be routed to the OTHER channel (Ping-Pong mode) or diverge in
+        timing (Skew) -- see processRead()/commitWrite() and MimeophonEngine::processSample().
 
         All the per-block-computed fields (set by MimeophonEngine::setParams(), not taken as
         processSample() arguments) match ErbeVerbReverb/PlexiphonEngine's own style.
@@ -81,6 +82,13 @@ namespace r3wrk
         double repeatsGain = 0.0, repeatsDriveAmt = 0.0;
         double colorSatAmount = 0.0;
 
+        // Bridges processRead() -> commitWrite() (see below): the feedback signal this channel
+        // itself just generated, and the dry input it still needs to write back in. Split out of
+        // the old single-call processSample() so MimeophonEngine can route the feedback to the
+        // *other* channel in Ping-Pong mode before either line is written.
+        float pendingFeedback = 0.0f;
+        float pendingInput = 0.0f;
+
         void prepare(double newSampleRate)
         {
             sampleRate = juce::jmax(1000.0, newSampleRate);
@@ -101,7 +109,12 @@ namespace r3wrk
             colorHigh.reset();
         }
 
-        inline float processSample(float in) noexcept
+        // Read the delay line and run Halo/Color/Repeats -- everything that only needs this
+        // channel's own state. Stashes the feedback candidate + dry input rather than writing
+        // the line immediately, so the engine can route the feedback (straight back to this
+        // channel normally, or crossed to the other channel in Ping-Pong mode) before either
+        // line is committed -- see MimeophonEngine::processSample().
+        inline float processRead(float in) noexcept
         {
             // Glide the read position toward its target exponentially rather than snapping --
             // combined with DelayLine::readInterpolated(), this is what makes a Rate sweep or
@@ -135,11 +148,20 @@ namespace r3wrk
             float fedBack = (float) (repeatsGain * colored);
             fedBack = chebyshevPerturb(fedBack, repeatsDriveAmt, repeatsSatHp);
 
-            line.write(in + fedBack);
+            pendingFeedback = fedBack;
+            pendingInput = in;
 
             // The wet tap: post-Halo, pre-feedback-gain -- "what you'd hear," not the raw
             // recirculating signal.
             return postHalo;
+        }
+
+        // Commits the write this channel's own processRead() deferred -- `feedback` is normally
+        // this channel's own pendingFeedback (self-feedback, phase-1 behaviour, unchanged), or
+        // the OTHER channel's pendingFeedback in Ping-Pong mode.
+        inline void commitWrite(float feedback) noexcept
+        {
+            line.write(pendingInput + feedback);
         }
     };
 
@@ -154,6 +176,7 @@ namespace r3wrk
         MimeoChannel left, right;
         double sampleRate = 44100.0;
         double mixWet = 0.0, mixDry = 1.0;
+        bool pingPong = false;
 
         void prepare(double newSampleRate)
         {
@@ -167,14 +190,17 @@ namespace r3wrk
         // zone01/rate01/repeats01/color01/halo01/mix01: 0..1 knob positions, already smoothed
         // by the caller.
         void setParams(double zone01, double rate01, double repeats01, double color01,
-                       double halo01, double mix01) noexcept
+                       double halo01, double mix01, double skew01 = 0.5,
+                       bool pingPongOn = false) noexcept
         {
+            pingPong = pingPongOn;
             zone01    = juce::jlimit(0.0, 1.0, zone01);
             rate01    = juce::jlimit(0.0, 1.0, rate01);
             repeats01 = juce::jlimit(0.0, 1.0, repeats01);
             color01   = juce::jlimit(0.0, 1.0, color01);
             halo01    = juce::jlimit(0.0, 1.0, halo01);
             mix01     = juce::jlimit(0.0, 1.0, mix01);
+            skew01    = juce::jlimit(0.0, 1.0, skew01);
 
             // Zone: snaps to one of 8 positions (a rotary-knob-with-detents feel, matching the
             // real hardware's own physical Zone selector) -- see mimeoZoneRangeMs().
@@ -186,6 +212,17 @@ namespace r3wrk
             // knobs) -- this build's own mapping choice, not specified by the manual.
             const double ms = range.minMs * std::pow(range.maxMs / range.minMs, rate01);
             const double delaySamplesTarget = ms * 0.001 * sampleRate;
+
+            // Skew: offsets L/R rate in opposite directions, per the manual's own description --
+            // this build's own judgment call on depth (max +/-15% of the base delay time at full
+            // Skew, enough to read as a clear chorus/detune character without losing the sense
+            // of a single shared delay time). 0.5 = centred, both channels identical (today's
+            // default, unchanged). Ping-Pong (see pingPongOn/processSample() below) is a separate
+            // on/off routing mode, not a Skew position -- both can be used together.
+            const double skewSigned = (skew01 - 0.5) * 2.0;   // -1..+1
+            constexpr double kSkewDepth = 0.15;
+            const double delaySamplesTargetL = delaySamplesTarget * (1.0 - kSkewDepth * skewSigned);
+            const double delaySamplesTargetR = delaySamplesTarget * (1.0 + kSkewDepth * skewSigned);
 
             // Halo: crossfade amount + the diffuser cascade's own internal gain.
             const double haloAmount = halo01;
@@ -207,9 +244,10 @@ namespace r3wrk
             const double highGainDb  = juce::jlimit(-12.0, 6.0, 9.0 * colorSigned - 3.0);
             const double colorSatAmount = juce::jlimit(0.0, 0.4, juce::jmax(0.0, -colorSigned) * 0.4);
 
+            left.delaySamplesTarget  = delaySamplesTargetL;
+            right.delaySamplesTarget = delaySamplesTargetR;
             for (auto* ch : { &left, &right })
             {
-                ch->delaySamplesTarget = delaySamplesTarget;
                 ch->haloAmount = haloAmount;
                 ch->haloGain   = haloGain;
                 ch->repeatsGain     = repeatsGain;
@@ -227,11 +265,53 @@ namespace r3wrk
 
         inline void processSample(float inL, float inR, float& outL, float& outR) noexcept
         {
-            const float wetL = left.processSample(inL);
-            const float wetR = right.processSample(inR);
+            const float wetL = left.processRead(inL);
+            const float wetR = right.processRead(inR);
 
-            outL = (float) (mixDry * inL + mixWet * wetL);
-            outR = (float) (mixDry * inR + mixWet * wetR);
+            // Ping-Pong: cross the two channels' feedback before committing either line's write,
+            // so a repeat generated on one side recirculates out the OTHER side next time round
+            // -- the classic bounce, per the manual's "same button held" alternate mode for Skew.
+            // Off (default): each channel still feeds back into itself, phase-1 behaviour
+            // unchanged.
+            //
+            // Crucially, the dry input does NOT enter both channels any more when Ping-Pong is
+            // on (an earlier version did, reasoning that it kept a genuinely stereo input from
+            // being collapsed) -- if L and R start out identical, which is the common case here
+            // (most loaded material is mono, duplicated into both channels), crossing two
+            // identical feedback signals is a mathematical no-op: confirmed inaudible by the
+            // user. Real ping-pong hardware only ever has ONE input feeding the loop for exactly
+            // this reason. A mono sum of the dry input goes into the left line only; the right
+            // line carries nothing but what bounces over from the left's own feedback (and vice
+            // versa on the next repeat) -- a real, unmistakable alternation regardless of
+            // whether the source is mono or stereo. The actual stereo dry signal is untouched:
+            // it's summed back in further down via mixDry, so nothing about the input's own
+            // stereo image is lost, only what re-enters the delay's own feedback loop.
+            if (pingPong)
+            {
+                const float monoDry = 0.5f * (inL + inR);
+                left.pendingInput = monoDry;
+                right.pendingInput = 0.0f;
+                left.commitWrite(right.pendingFeedback);
+                right.commitWrite(left.pendingFeedback);
+            }
+            else
+            {
+                left.commitWrite(left.pendingFeedback);
+                right.commitWrite(right.pendingFeedback);
+            }
+
+            // Ping-Pong's routing above (right gets no dry input of its own, only what bounces
+            // over from the left) inherently halves each channel's own echo density versus
+            // normal mode's dual self-feedback -- confirmed against the real hardware (the user
+            // owns one): its Ping-Pong reads as a loud, crisp, unmistakable ear-to-ear
+            // alternation, not a quiet undercurrent under the dry signal. Compensate on OUTPUT
+            // only -- boosting wetL/wetR here, never the feedback fed back into commitWrite()
+            // above, so this can't push the recirculating loop past the stability the existing
+            // repeatsGain cap (0.98) + saturator were built and tested for. Own tuned constant,
+            // not derived from anything -- adjust by ear if it still doesn't match the hardware.
+            const double wetBoost = pingPong ? 1.8 : 1.0;
+            outL = (float) (mixDry * inL + mixWet * wetBoost * wetL);
+            outR = (float) (mixDry * inR + mixWet * wetBoost * wetR);
 
             // Safety backstop, same spirit as the other two engines'.
             outL = juce::jlimit(-4.0f, 4.0f, outL);

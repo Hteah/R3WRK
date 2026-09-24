@@ -13,6 +13,36 @@ juce::Typeface::Ptr R3WRKLookAndFeel::getTypefaceForFont(const juce::Font& font)
     return font.isBold() ? bold : regular;
 }
 
+// Explicitly attaches the embedded Space Mono typeface (the same one getTypefaceForFont()
+// above resolves to) to the returned Font, rather than just requesting a size/weight and
+// relying on the app-wide default LookAndFeel to resolve it. Used anywhere that font needs to
+// be guaranteed regardless of which LookAndFeel a component happens to inherit -- see
+// createSliderTextBox() below, which every knob (KnobRow's own and the FX drawer panels'
+// compact knobs alike) shares, so this is the one place that keeps their readouts identical.
+juce::Font spaceMonoFont(float height, bool bold)
+{
+    static juce::Typeface::Ptr regular = juce::Typeface::createSystemTypefaceFor(
+        BinaryData::SpaceMonoRegular_ttf, BinaryData::SpaceMonoRegular_ttfSize);
+    static juce::Typeface::Ptr boldTf = juce::Typeface::createSystemTypefaceFor(
+        BinaryData::SpaceMonoBold_ttf, BinaryData::SpaceMonoBold_ttfSize);
+    return juce::Font(juce::FontOptions(height).withTypeface(bold ? boldTf : regular));
+}
+
+// Explicitly attaches the OS's own system UI typeface -- bypassing getTypefaceForFont()'s
+// Space Mono override, which reads poorly at the very small sizes a few badges/pills use (see
+// KnobRow::ModelBadge's own comment for the story: confirmed by the user, extra kerning alone
+// didn't fix it). The height passed to createSystemTypefaceFor() here is just metadata for
+// resolving the right OS font by name/weight -- the typeface itself is scalable, so the actual
+// rendered size always comes from the `height` passed to the returned Font.
+juce::Font systemUIFont(float height, bool bold)
+{
+    static juce::Typeface::Ptr regular =
+        juce::Typeface::createSystemTypefaceFor(juce::Font(juce::FontOptions(16.0f)));
+    static juce::Typeface::Ptr boldTf =
+        juce::Typeface::createSystemTypefaceFor(juce::Font(juce::FontOptions(16.0f, juce::Font::bold)));
+    return juce::Font(juce::FontOptions(height).withTypeface(bold ? boldTf : regular));
+}
+
 namespace
 {
     // A small triangular arrowhead, tip at `angleDeg` (0 = up, clockwise) on the circle
@@ -364,24 +394,68 @@ namespace
                                                   juce::PathStrokeType::rounded));
     }
 
-    // Drawer toggle: a single chevron, pointing down when closed (more to reveal) and up when
-    // open (toggle state on -- collapse it back).
-    void drawChevronIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink, bool pointingUp)
+    // Drawer toggle: a centre dot with two dashed "orbit" rings, each carrying one solid dot --
+    // the r3wrk Component Library's solar-system glyph, picked by the user to replace the old
+    // plain chevron. Geometry lifted proportionally from the reference sheet's 100x100 viewBox:
+    // centre dot r=6, inner ring r=20 (dash 3/4) with a dot at 0deg, outer ring r=34 (dash 3/5)
+    // with a dot at -90deg (top). While the drawer is OPEN, the rings/planets drop out and only
+    // the centre dot (enlarged, so it still reads clearly on its own) is drawn -- per the user's
+    // request, so there's an obvious single target to click to close it again, rather than
+    // hunting for which part of a full orbit still does the same thing.
+    void drawOrbitIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink, bool open)
     {
-        auto a = bounds.reduced (bounds.getHeight() * 0.28f);
-        const float cx = a.getCentreX();
-        const float top = pointingUp ? a.getBottom() : a.getY();
-        const float bot = pointingUp ? a.getY()      : a.getBottom();
-        const float halfW = a.getWidth() * 0.5f;
+        // The glyph's own extent (outer ring r=34 plus its planet dot) is a ~72-diameter circle,
+        // already centred at (50,50) -- scaling by the raw 100-unit viewBox (as if whitespace
+        // out to the edges were part of the icon) read small next to the knobs. Fit the actual
+        // 72-diameter circle to the button instead, so it reads at roughly the knobs' own size.
+        constexpr float glyphDiameter = 72.0f;
+        constexpr float fillFraction = 0.90f;
+        const float cx = bounds.getCentreX();
+        const float cy = bounds.getCentreY();
+        const float s  = fillFraction * juce::jmin (bounds.getWidth(), bounds.getHeight()) / glyphDiameter;
 
-        juce::Path chev;
-        chev.startNewSubPath (cx - halfW, top);
-        chev.lineTo          (cx,         bot);
-        chev.lineTo          (cx + halfW, top);
         g.setColour (ink);
-        g.strokePath (chev, juce::PathStrokeType (juce::jmax (1.4f, a.getHeight() * 0.16f),
-                                                  juce::PathStrokeType::curved,
-                                                  juce::PathStrokeType::rounded));
+
+        if (open)
+        {
+            const float r = 12.0f;   // bigger than the closed state's r=6 -- it's the whole
+                                     // glyph now, not one element among several.
+            g.fillEllipse (cx - r * s, cy - r * s, 2.0f * r * s, 2.0f * r * s);
+            return;
+        }
+
+        g.fillEllipse (cx - 6.0f * s, cy - 6.0f * s, 12.0f * s, 12.0f * s);   // centre dot, r=6
+
+        auto strokeDashedRing = [&] (float r, float dashOn, float dashOff)
+        {
+            juce::Path ring;
+            ring.addEllipse (cx - r * s, cy - r * s, 2.0f * r * s, 2.0f * r * s);
+            float dashes[2] = { dashOn * s, dashOff * s };
+            juce::Path dashed;
+            juce::PathStrokeType (juce::jmax (1.0f, 2.5f * s)).createDashedStroke (dashed, ring, dashes, 2);
+            g.fillPath (dashed);
+        };
+        strokeDashedRing (20.0f, 3.0f, 4.0f);   // inner orbit, r=20
+        strokeDashedRing (34.0f, 3.0f, 5.0f);   // outer orbit, r=34
+
+        g.fillEllipse (cx + 20.0f * s - 3.4f * s, cy - 3.4f * s, 6.8f * s, 6.8f * s);   // planet on inner orbit (0deg)
+        g.fillEllipse (cx - 2.6f * s, cy - 34.0f * s - 2.6f * s, 5.2f * s, 5.2f * s);   // planet on outer orbit (-90deg/top)
+    }
+
+    // "More" (opens the full popup editor -- Mimeophon/Plexiphon/Reverb's compact panels): a
+    // small outlined ring with a filled dot centred inside it, replacing the old "..." text.
+    void drawMoreIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
+    {
+        auto a = bounds.reduced (bounds.getHeight() * 0.14f);   // was 0.28f -- read too small
+        const float d = juce::jmin (a.getWidth(), a.getHeight());
+        const float cx = a.getCentreX();
+        const float cy = a.getCentreY();
+
+        g.setColour (ink);
+        g.drawEllipse (cx - d * 0.5f, cy - d * 0.5f, d, d, juce::jmax (1.2f, d * 0.12f));
+
+        const float dotR = d * 0.20f;
+        g.fillEllipse (cx - dotR, cy - dotR, dotR * 2.0f, dotR * 2.0f);
     }
 
     // Record Desktop (Standalone only): a computer-monitor outline (rounded screen + a short
@@ -408,49 +482,56 @@ namespace
         g.fillEllipse (cx - r, screen.getCentreY() - r, r * 2.0f, r * 2.0f);
     }
 
-    // Float on top: a thin stroked "window" with a short diagonal arrow pointing into it from
-    // the upper-left -- the picture-in-picture box that used to sit in the lower-right corner
-    // was dropped (it read as a second, cluttering shape at icon size); one clean rectangle
-    // plus the arrow reads as "send this window out front" on its own. Accent-filled button
-    // while the toggle is on.
+    // Float on top: two overlapping rings, each with a short arrow inside pointing out of the
+    // icon (right, then up) -- "send this window out, above everything else." From the r3wrk
+    // Component Library reference sheet, picked by the user to replace the old picture-in-
+    // picture-style glyph. Geometry lifted proportionally from the reference's 100x100 viewBox.
     void drawFloatTopIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
     {
-        // Window: landscape ~1.42:1, sized to the icon box with a small margin all round.
-        const float margin = juce::jmin (bounds.getWidth(), bounds.getHeight()) * 0.16f;
-        auto area = bounds.reduced (margin);
-        const float winH = area.getHeight();
-        const float winW = juce::jmin (area.getWidth(), winH * 1.42f);
-        juce::Rectangle<float> win (area.getCentreX() - winW * 0.5f, area.getY(), winW, winH);
+        // The two rings + arrows only occupy a 73x40 band (x:14-87, y:30-70) of the reference's
+        // 100x100 viewBox, off-centre and mostly whitespace around it -- scaling by the raw
+        // viewBox (as if the glyph filled it) left the icon reading much smaller than its
+        // sibling buttons. Fit that actual bounding box to the button instead, centred on its
+        // own centre (50.5, 50), so it fills the frame the same way the other icons do.
+        constexpr float glyphW = 73.0f, glyphH = 40.0f, glyphCX = 50.5f, glyphCY = 50.0f;
+        constexpr float fillFraction = 0.95f;
+        const float s = fillFraction * juce::jmin (bounds.getWidth() / glyphW, bounds.getHeight() / glyphH);
+        const float ox = bounds.getCentreX() - glyphCX * s;
+        const float oy = bounds.getCentreY() - glyphCY * s;
+        auto P = [&] (float x, float y) { return juce::Point<float> (ox + x * s, oy + y * s); };
 
-        const float stroke = juce::jlimit (1.2f, 1.6f, winH * 0.115f);
         g.setColour (ink);
-        g.drawRoundedRectangle (win.reduced (stroke * 0.5f), winH * 0.12f, stroke);
 
-        // Arrow: a short straight diagonal into the window from the top-left, with a compact
-        // symmetric head -- the shaft stops short of the tip so the head reads as one crisp
-        // triangle rather than a shaft poking through it.
-        const juce::Point<float> tail (win.getX() + winW * 0.16f, win.getY() + winH * 0.20f);
-        const juce::Point<float> tip  (win.getX() + winW * 0.46f, win.getY() + winH * 0.52f);
-        juce::Point<float> dir = tip - tail;
-        dir = dir / juce::jmax (0.0001f, dir.getDistanceFromOrigin());
-        const juce::Point<float> normal (-dir.y, dir.x);
+        auto ringWithArrow = [&] (float ccx, float ccy, float r, float strokeW,
+                                  juce::Point<float> shaftA, juce::Point<float> shaftB,
+                                  juce::Point<float> headA,  juce::Point<float> headTip,
+                                  juce::Point<float> headB)
+        {
+            g.drawEllipse (P (ccx - r, ccy - r).x, P (ccx - r, ccy - r).y, 2.0f * r * s, 2.0f * r * s,
+                           strokeW * s);
 
-        const float headLen  = winH * 0.30f;
-        const float headHalf = winH * 0.19f;
-        const juce::Point<float> headBack = tip - dir * headLen;
+            juce::Path shaft;
+            shaft.startNewSubPath (P (shaftA.x, shaftA.y));
+            shaft.lineTo (P (shaftB.x, shaftB.y));
+            g.strokePath (shaft, juce::PathStrokeType (strokeW * s, juce::PathStrokeType::curved,
+                                                       juce::PathStrokeType::rounded));
 
-        juce::Path shaft;
-        shaft.startNewSubPath (tail);
-        shaft.lineTo (headBack);
-        g.strokePath (shaft, juce::PathStrokeType (stroke, juce::PathStrokeType::curved,
-                                                   juce::PathStrokeType::rounded));
+            juce::Path head;
+            head.startNewSubPath (P (headA.x, headA.y));
+            head.lineTo (P (headTip.x, headTip.y));
+            head.lineTo (P (headB.x, headB.y));
+            g.strokePath (head, juce::PathStrokeType (strokeW * s, juce::PathStrokeType::curved,
+                                                      juce::PathStrokeType::rounded));
+        };
 
-        juce::Path head;
-        head.startNewSubPath (tip);
-        head.lineTo (headBack + normal * headHalf);
-        head.lineTo (headBack - normal * headHalf);
-        head.closeSubPath();
-        g.fillPath (head);
+        // Left ring (cx=34,cy=50,r=20): shaft + head pointing right.
+        ringWithArrow (34.0f, 50.0f, 20.0f, 4.0f,
+                       { 30.0f, 50.0f }, { 42.0f, 50.0f },
+                       { 37.0f, 44.0f }, { 42.0f, 50.0f }, { 37.0f, 56.0f });
+        // Right ring (cx=72,cy=50,r=15): shaft + head pointing up.
+        ringWithArrow (72.0f, 50.0f, 15.0f, 4.0f,
+                       { 72.0f, 58.0f }, { 72.0f, 42.0f },
+                       { 67.0f, 47.0f }, { 72.0f, 42.0f }, { 77.0f, 47.0f });
     }
 
     // Capture Output: a record dot with a downward arrow beneath it -- "record what's coming
@@ -493,6 +574,19 @@ namespace
         const float r = juce::jmin (a.getWidth(), a.getHeight()) * 0.20f;
         g.fillEllipse (a.getCentreX() - r, a.getCentreY() - r, r * 2.0f, r * 2.0f);
     }
+}
+
+juce::Label* R3WRKLookAndFeel::createSliderTextBox(juce::Slider& slider)
+{
+    auto* l = juce::LookAndFeel_V4::createSliderTextBox(slider);
+    // Explicit typeface (not just a bigger size) -- see spaceMonoFont()'s own comment. Makes the
+    // Space Mono attachment guaranteed rather than relying on getTypefaceForFont() being called
+    // for this Label at all. Regular weight, not spaceMonoFont()'s bold default -- these readouts
+    // were always the regular weight (implicit, via getTypefaceForFont()'s isBold() check on a
+    // plain FontOptions(16.0f)); the bold Space Mono face's glyph metrics also render visibly
+    // smaller at the same point size, so bold silently shrank and thickened the text at once.
+    l->setFont(spaceMonoFont(16.0f, false));
+    return l;
 }
 
 void R3WRKLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int width, int height,
@@ -581,7 +675,7 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
         && text != iconReverse && text != iconClear && text != iconAutoRecord
         && text != iconSlice && text != iconFollow && text != iconDesktopRec
         && text != iconFloatTop && text != iconCaptureOut && text != iconBlackBox
-        && text != iconChevron)
+        && text != iconOrbit && text != iconMore)
     {
         juce::LookAndFeel_V4::drawButtonText(g, button, isMouseOverButton, isButtonDown);
         return;
@@ -648,9 +742,14 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
         drawBlackBoxIcon(g, bounds, ink);
         return;
     }
-    if (text == iconChevron)
+    if (text == iconOrbit)
     {
-        drawChevronIcon(g, bounds, ink, button.getToggleState());
+        drawOrbitIcon(g, bounds, ink, button.getToggleState());
+        return;
+    }
+    if (text == iconMore)
+    {
+        drawMoreIcon(g, bounds, ink);
         return;
     }
     if (text == iconReverse)

@@ -1279,6 +1279,154 @@ int main()
         check(energyLate < energyEarly, "Mimeophon tail decays by the end of a 3s window at a moderate Repeats setting");
     }
 
+    // --- Mimeophon Ping-Pong: stability at max Repeats, sweeping Zone -----------
+    // Same stress shape as the plain max-Repeats sweep above, but with Ping-Pong engaged --
+    // the cross-channel feedback routing is new code (MimeoChannel::processRead/commitWrite +
+    // MimeophonEngine::processSample's routing), so it gets its own stability gate before being
+    // trusted, same discipline as every other new subsystem in this codebase.
+    {
+        std::cout << "-- Mimeophon Ping-Pong: stability at max Repeats, sweeping Zone --" << std::endl;
+        const double fs = 48000.0;
+        const int numSamples = (int) (fs * 3.0);
+
+        r3wrk::MimeophonEngine engine;
+        engine.prepare(fs);
+
+        float peak = 0.0f;
+        bool hasNonFinite = false;
+
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const double zone01 = (double) i / (double) numSamples;
+            engine.setParams(zone01, /*rate*/ 0.5, /*repeats*/ 1.0, /*color*/ 0.5,
+                             /*halo*/ 0.5, /*mix*/ 1.0, /*skew*/ 0.5, /*pingPong*/ true);
+
+            const float in = (i == 0) ? 1.0f : 0.0f;   // a single-sample impulse
+            float outL, outR;
+            engine.processSample(in, in, outL, outR);
+
+            if (! std::isfinite(outL) || ! std::isfinite(outR)) hasNonFinite = true;
+            peak = juce::jmax(peak, std::abs(outL), std::abs(outR));
+        }
+
+        std::cout << "  peak: " << peak << (hasNonFinite ? " (NON-FINITE!)" : "") << std::endl;
+
+        check(! hasNonFinite, "Mimeophon Ping-Pong output stays finite under an impulse with Repeats pinned at max + a full Zone sweep");
+        check(peak < 4.0f, "Mimeophon Ping-Pong output peak stays within the safety clamp (< 4.0) under stress");
+    }
+
+    // --- Mimeophon Ping-Pong: repeats actually bounce across channels -----------
+    // The correctness check unique to Ping-Pong: feed an impulse into L only and confirm the
+    // repeats alternate sides -- echo 1 (the direct delay tap) stays on L, echo 2 (the first
+    // repeat generated FROM feedback) crosses to R, echo 3 bounces back to L. Halo off and a
+    // short Zone keep the three echo windows cleanly separated for this check.
+    {
+        std::cout << "-- Mimeophon Ping-Pong: repeats bounce L->R->L --" << std::endl;
+        const double fs = 48000.0;
+
+        r3wrk::MimeophonEngine engine;
+        engine.prepare(fs);
+        engine.setParams(/*zone*/ 1.0 / 7.0, /*rate*/ 0.5, /*repeats*/ 0.5, /*color*/ 0.5,
+                         /*halo*/ 0.0, /*mix*/ 1.0, /*skew*/ 0.5, /*pingPong*/ true);
+
+        const auto zoneRange = r3wrk::mimeoZoneRangeMs(1);
+        const double delayMs = std::sqrt(zoneRange.minMs * zoneRange.maxMs);
+        const double delaySamples = delayMs * 0.001 * fs;
+        const int numSamples = (int) (delaySamples * 4.0);
+
+        std::vector<float> outLbuf((size_t) numSamples), outRbuf((size_t) numSamples);
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const float inL = (i == 0) ? 1.0f : 0.0f;
+            float outL, outR;
+            engine.processSample(inL, 0.0f, outL, outR);
+            outLbuf[(size_t) i] = outL;
+            outRbuf[(size_t) i] = outR;
+        }
+
+        auto peakInWindow = [&](const std::vector<float>& buf, double centreSample)
+        {
+            const int halfWin = juce::jmax(4, (int) (delaySamples * 0.35));
+            const int lo = juce::jmax(0, (int) centreSample - halfWin);
+            const int hi = juce::jmin(numSamples - 1, (int) centreSample + halfWin);
+            float peak = 0.0f;
+            for (int i = lo; i <= hi; ++i) peak = juce::jmax(peak, std::abs(buf[(size_t) i]));
+            return peak;
+        };
+
+        const float echo1L = peakInWindow(outLbuf, delaySamples * 1.0);
+        const float echo1R = peakInWindow(outRbuf, delaySamples * 1.0);
+        const float echo2L = peakInWindow(outLbuf, delaySamples * 2.0);
+        const float echo2R = peakInWindow(outRbuf, delaySamples * 2.0);
+        const float echo3L = peakInWindow(outLbuf, delaySamples * 3.0);
+        const float echo3R = peakInWindow(outRbuf, delaySamples * 3.0);
+
+        std::cout << "  echo1 L=" << echo1L << " R=" << echo1R
+                  << ", echo2 L=" << echo2L << " R=" << echo2R
+                  << ", echo3 L=" << echo3L << " R=" << echo3R << std::endl;
+
+        check(echo1L > echo1R * 3.0f, "Ping-Pong echo 1 (the direct delay tap) stays on the input's own channel (L)");
+        check(echo2R > echo2L * 3.0f, "Ping-Pong echo 2 (the first feedback-born repeat) bounces to the other channel (R)");
+        check(echo3L > echo3R * 3.0f, "Ping-Pong echo 3 bounces back to the original channel (L)");
+    }
+
+    // --- Mimeophon Ping-Pong: still bounces with identical L/R input (mono source) ----------
+    // The bug the user actually hit: R3WRK plays back loaded audio, and most of it is mono
+    // duplicated into both channels. The test above alone can't catch that -- it only ever fed
+    // the impulse into L, so it kept passing while Ping-Pong was inaudible on real (mono)
+    // material, since crossing two identical feedback signals used to be a no-op. Feed the
+    // SAME impulse into both channels here -- the routing fix (mono dry into the left line
+    // only) must still produce a clear alternating bounce.
+    {
+        std::cout << "-- Mimeophon Ping-Pong: still bounces with identical L/R input (mono source) --" << std::endl;
+        const double fs = 48000.0;
+
+        r3wrk::MimeophonEngine engine;
+        engine.prepare(fs);
+        engine.setParams(/*zone*/ 1.0 / 7.0, /*rate*/ 0.5, /*repeats*/ 0.5, /*color*/ 0.5,
+                         /*halo*/ 0.0, /*mix*/ 1.0, /*skew*/ 0.5, /*pingPong*/ true);
+
+        const auto zoneRange = r3wrk::mimeoZoneRangeMs(1);
+        const double delayMs = std::sqrt(zoneRange.minMs * zoneRange.maxMs);
+        const double delaySamples = delayMs * 0.001 * fs;
+        const int numSamples = (int) (delaySamples * 4.0);
+
+        std::vector<float> outLbuf((size_t) numSamples), outRbuf((size_t) numSamples);
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const float in = (i == 0) ? 1.0f : 0.0f;   // identical on both channels -- the mono case
+            float outL, outR;
+            engine.processSample(in, in, outL, outR);
+            outLbuf[(size_t) i] = outL;
+            outRbuf[(size_t) i] = outR;
+        }
+
+        auto peakInWindow = [&](const std::vector<float>& buf, double centreSample)
+        {
+            const int halfWin = juce::jmax(4, (int) (delaySamples * 0.35));
+            const int lo = juce::jmax(0, (int) centreSample - halfWin);
+            const int hi = juce::jmin(numSamples - 1, (int) centreSample + halfWin);
+            float peak = 0.0f;
+            for (int i = lo; i <= hi; ++i) peak = juce::jmax(peak, std::abs(buf[(size_t) i]));
+            return peak;
+        };
+
+        const float echo1L = peakInWindow(outLbuf, delaySamples * 1.0);
+        const float echo1R = peakInWindow(outRbuf, delaySamples * 1.0);
+        const float echo2L = peakInWindow(outLbuf, delaySamples * 2.0);
+        const float echo2R = peakInWindow(outRbuf, delaySamples * 2.0);
+        const float echo3L = peakInWindow(outLbuf, delaySamples * 3.0);
+        const float echo3R = peakInWindow(outRbuf, delaySamples * 3.0);
+
+        std::cout << "  echo1 L=" << echo1L << " R=" << echo1R
+                  << ", echo2 L=" << echo2L << " R=" << echo2R
+                  << ", echo3 L=" << echo3L << " R=" << echo3R << std::endl;
+
+        check(echo1L > echo1R * 3.0f, "mono-source echo 1 stays on the left (mono dry only enters the left line)");
+        check(echo2R > echo2L * 3.0f, "mono-source echo 2 bounces to the right");
+        check(echo3L > echo3R * 3.0f, "mono-source echo 3 bounces back to the left");
+    }
+
     std::cout << "===========================================" << std::endl;
     if (failures == 0)
         std::cout << "ALL CHECKS PASSED" << std::endl;

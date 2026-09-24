@@ -13,13 +13,14 @@ HeaderBar::HeaderBar(AudioDocument& doc) : document(doc)
     nameLabel.setText(sourceName.isEmpty() ? "Untitled" : sourceName, juce::dontSendNotification);
     nameLabel.setFont(juce::FontOptions(14.0f, juce::Font::bold));
     nameLabel.setMinimumHorizontalScale(1.0f);
-    // Click to reveal in Finder (onNameClicked, wired by PluginEditor to EditorToolbar::
-    // revealCurrentFile()). addMouseListener rather than a subclass -- Label already consumes
-    // its own mouse events (for its double-click-to-edit machinery, unused here since this one
-    // is never made editable), so this just observes them alongside that, not instead of it.
+    // Click to load a different file (onNameClicked, wired by PluginEditor to EditorToolbar::
+    // openFile(), which starts the picker right at this one). addMouseListener rather than a
+    // subclass -- Label already consumes its own mouse events (for its double-click-to-edit
+    // machinery, unused here since this one is never made editable), so this just observes
+    // them alongside that, not instead of it.
     nameLabel.addMouseListener(this, false);
     nameLabel.setMouseCursor(juce::MouseCursor::PointingHandCursor);
-    nameLabel.setTooltip("Reveal in Finder");
+    nameLabel.setTooltip("Choose a file to load...");
 
     readoutLabel.setFont(juce::FontOptions(11.0f));
 

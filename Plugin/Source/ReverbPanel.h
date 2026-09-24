@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "AudioDocument.h"
 #include "Theme.h"
+#include "R3WRKLookAndFeel.h"
 
 /**
     The REVERB cell of the FX drawer (row 1, left half -- mirrors how LfoPanel owns row 0's left
@@ -53,7 +54,11 @@ private:
         juce::Slider slider { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow };
     };
     Knob decayKnob, mixKnob;
-    juce::TextButton moreButton { "..." };
+    // Boxless (see R3WRKIconOnlyLookAndFeel) -- the icon already has its own ring; the ordinary
+    // transparent-background pill outline every other TextButton gets drew a second, redundant
+    // oval around it.
+    R3WRKIconOnlyLookAndFeel moreButtonLnf;
+    juce::TextButton moreButton { R3WRKLookAndFeel::iconMore };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ReverbPanel)
 };

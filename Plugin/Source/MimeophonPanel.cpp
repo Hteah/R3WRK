@@ -9,6 +9,7 @@ namespace
     struct MimeophonEditorPanel : juce::Component
     {
         struct Knob { juce::Label caption; juce::Slider slider; };
+        struct Toggle { juce::Label caption; juce::TextButton button; };
 
         explicit MimeophonEditorPanel(AudioDocument& doc) : document(doc)
         {
@@ -25,6 +26,12 @@ namespace
                      [](double v) { return juce::String(juce::roundToInt(v * 100.0)) + "%"; });
             setUpKnob(repeats, "REPEATS", document.mimeoRepeats, 0.0, 1.0,
                      [](double v) { return juce::String(juce::roundToInt(v * 100.0)) + "%"; });
+            setUpKnob(skew, "SKEW", document.mimeoSkew, 0.0, 1.0,
+                     [](double v) {
+                         const int pct = juce::roundToInt((v - 0.5) * 200.0);
+                         if (pct == 0) return juce::String("CTR");
+                         return (pct > 0 ? "R" : "L") + juce::String(std::abs(pct)) + "%";
+                     });
             setUpKnob(color, "COLOR", document.mimeoColor, 0.0, 1.0,
                      [](double v) {
                          const int pct = juce::roundToInt((v - 0.5) * 200.0);
@@ -35,7 +42,13 @@ namespace
             setUpKnob(mix, "MIX", document.mimeoMix, 0.0, 1.0,
                      [](double v) { return juce::String(juce::roundToInt(v * 100.0)) + "%"; });
 
-            setSize(280, 190);
+            // Crosses the Repeats feedback between channels so echoes alternate L->R->L->R --
+            // the manual's "same button held" alternate mode for Skew, here a plain on/off
+            // toggle (a plugin has no hold-to-engage gesture worth reproducing). Orthogonal to
+            // the Skew knob above -- both can be on together.
+            setUpToggle(pingPong, "PING-PONG", document.mimeoPingPong);
+
+            setSize(320, 190);
         }
 
         void setUpKnob(Knob& k, const juce::String& caption, std::atomic<double>& target,
@@ -56,16 +69,36 @@ namespace
             addAndMakeVisible(k.slider);
         }
 
+        void setUpToggle(Toggle& t, const juce::String& caption, std::atomic<bool>& target)
+        {
+            t.caption.setText(caption, juce::dontSendNotification);
+            t.caption.setJustificationType(juce::Justification::centred);
+            t.caption.setFont(juce::FontOptions(11.0f));
+            addAndMakeVisible(t.caption);
+
+            const bool on = target.load();
+            t.button.setButtonText(on ? "ON" : "OFF");
+            t.button.setClickingTogglesState(true);
+            t.button.setToggleState(on, juce::dontSendNotification);
+            t.button.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+            t.button.onClick = [this, &target, &t]
+            {
+                const bool nowOn = t.button.getToggleState();
+                target.store(nowOn);
+                t.button.setButtonText(nowOn ? "ON" : "OFF");
+            };
+            addAndMakeVisible(t.button);
+        }
+
         void resized() override
         {
             auto r = getLocalBounds().reduced(10);
             title.setBounds(r.removeFromTop(20));
             r.removeFromTop(6);
 
-            const int gridCols = 3;
-            auto layoutRow = [&](std::initializer_list<Knob*> knobs)
+            const int gridCols = 4;   // fixed so both rows' columns line up, even with row 2's 3
+            auto layoutRow = [&](juce::Rectangle<int> row, std::initializer_list<Knob*> knobs)
             {
-                auto row = r.removeFromTop(70);
                 const int w = row.getWidth() / gridCols;
                 for (auto* k : knobs)
                 {
@@ -73,16 +106,21 @@ namespace
                     k->caption.setBounds(col.removeFromTop(14));
                     k->slider.setBounds(col);
                 }
+                return row;   // whatever's left over (row 2's unused 4th column)
             };
-            layoutRow({ &zone, &rate, &repeats });
-            layoutRow({ &color, &halo, &mix });
+            layoutRow(r.removeFromTop(70), { &zone, &rate, &repeats, &skew });
+
+            auto row2Rest = layoutRow(r.removeFromTop(70), { &color, &halo, &mix });
+            pingPong.caption.setBounds(row2Rest.removeFromTop(14));
+            pingPong.button.setBounds(row2Rest.reduced(6, 10));
         }
 
         ~MimeophonEditorPanel() override { setLookAndFeel(nullptr); }   // detach before lnf is destroyed
 
         AudioDocument& document;
         juce::Label title;
-        Knob zone, rate, repeats, color, halo, mix;
+        Knob zone, rate, repeats, skew, color, halo, mix;
+        Toggle pingPong;
         lcd::HardwareLcdLookAndFeel lnf;
     };
 }
@@ -102,7 +140,7 @@ MimeophonPanel::MimeophonPanel(AudioDocument& doc) : document(doc)
     {
         k.caption.setText(caption, juce::dontSendNotification);
         k.caption.setJustificationType(juce::Justification::centred);
-        k.caption.setFont(juce::FontOptions(11.0f));
+        k.caption.setFont(juce::FontOptions(14.0f));   // matches KnobRow's own caption size
         k.slider.setRange(0.0, 1.0, 0.0);
         k.slider.setValue(juce::jlimit(0.0, 1.0, target.load()), juce::dontSendNotification);
         k.slider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 56, 18);
@@ -115,12 +153,9 @@ MimeophonPanel::MimeophonPanel(AudioDocument& doc) : document(doc)
     setUpKnob(rateKnob, "RATE", document.mimeoRate);
     setUpKnob(mixKnob,  "MIX",  document.mimeoMix);
 
-    moreButton.setTooltip("Zone / Repeats / Color / Halo");
+    moreButton.setTooltip("Zone / Repeats / Skew / Color / Halo / Ping-Pong");
     moreButton.onClick = [this] { openFullEditor(); };
-    // Outline style (transparent fill) -- see R3WRKLookAndFeel::drawButtonBackground's comment:
-    // a fully-transparent buttonColourId gets a subtle hover/press wash instead of a solid
-    // filled pill.
-    moreButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+    moreButton.setLookAndFeel(&moreButtonLnf);   // boxless -- see the member's own comment
     addAndMakeVisible(moreButton);
 
     applyTheme();
@@ -130,6 +165,7 @@ MimeophonPanel::MimeophonPanel(AudioDocument& doc) : document(doc)
 
 MimeophonPanel::~MimeophonPanel()
 {
+    moreButton.setLookAndFeel(nullptr);   // detach before moreButtonLnf is destroyed
     theme->removeChangeListener(this);
 }
 
@@ -161,6 +197,10 @@ void MimeophonPanel::applyTheme()
     for (auto* k : { &rateKnob, &mixKnob })
     {
         k->caption.setColour(juce::Label::textColourId, pal.textDim);
+        // Matches KnobRow's own knobs: the default LookAndFeel_V4 textbox outline was never
+        // cleared here, so these readouts had a visible box the top knob row's don't.
+        k->slider.setColour(juce::Slider::textBoxTextColourId, pal.text);
+        k->slider.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
         k->caption.repaint();
         k->slider.repaint();
     }
@@ -187,7 +227,10 @@ void MimeophonPanel::EnablePill::paint(juce::Graphics& g)
     g.setColour(border.withAlpha(on || hovered ? 0.95f : 0.55f));
     g.drawRoundedRectangle(r, rad, 1.0f);
     g.setColour(on ? ink : border);
-    g.setFont(juce::FontOptions(9.0f, juce::Font::bold));
+    // systemUIFont(), not Space Mono -- matches KnobRow::ModelBadge's own fix (see its comment):
+    // a proportional UI font stays legible at this pill's small size where the monospace app
+    // default reads cramped.
+    g.setFont(systemUIFont(11.0f));
     g.drawText("MIME", getLocalBounds(), juce::Justification::centred);
 }
 
@@ -195,7 +238,7 @@ void MimeophonPanel::resized()
 {
     // Packed from the left, sized to content -- same fix as ReverbPanel/PlexiphonPanel/LfoPanel.
     auto r = getLocalBounds().reduced(4, 2);
-    constexpr int gap = 3, pillW = 22, pillH = 13, knobW = 48, moreW = 20, moreH = 16;
+    constexpr int gap = 3, pillW = 32, pillH = 16, knobW = 53, moreW = 20, moreH = 16;   // pillW/pillH match KnobRow::ModelBadge's own size (the filter MNM/OT badge); knobW matches KnobRow's own upper bound (46-53 auto-fit)
 
     auto pillArea = r.removeFromLeft(pillW);
     enablePill.setBounds(pillArea.withSizeKeepingCentre(pillW, pillH));
@@ -204,7 +247,7 @@ void MimeophonPanel::resized()
     for (auto* k : { &rateKnob, &mixKnob })
     {
         auto kcol = r.removeFromLeft(knobW);
-        k->caption.setBounds(kcol.removeFromTop(15));
+        k->caption.setBounds(kcol.removeFromTop(17));   // matches KnobRow's own caption row height
         k->slider.setBounds(kcol);
         r.removeFromLeft(gap);
     }

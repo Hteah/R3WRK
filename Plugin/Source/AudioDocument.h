@@ -378,6 +378,14 @@ public:
     std::atomic<double> mimeoColor   { 0.5 };
     std::atomic<double> mimeoHalo    { 0.0 };
     std::atomic<double> mimeoMix     { 0.0 };
+    // Offsets L/R delay rate in opposite directions -- the phase-2 stereo-differential feature
+    // from MIMEOPHON_PLAN.md's Mimeophon research, added on request. 0.5 = centred/no skew
+    // (both channels share the same rate, today's default behaviour), unchanged.
+    std::atomic<double> mimeoSkew    { 0.5 };
+    // The research's separate "Ping-Pong" hold-button mode: crosses the Repeats feedback between
+    // channels so echoes alternate L->R->L->R instead of each channel feeding back into itself.
+    // Orthogonal to Skew (both can be on together). Default off = today's self-feedback behaviour.
+    std::atomic<bool>   mimeoPingPong { false };
 
     //==============================================================================
     // LFO modulation slots. Fixed capacity so the audio thread can iterate every slot each

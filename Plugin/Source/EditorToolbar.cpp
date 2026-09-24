@@ -1693,7 +1693,14 @@ void EditorToolbar::changeListenerCallback(juce::ChangeBroadcaster* source)
 //==============================================================================
 void EditorToolbar::openFile()
 {
-    fileChooser = std::make_unique<juce::FileChooser>("Open audio file", juce::File(),
+    // Starts browsing at the currently loaded file's folder when there is one (macOS only
+    // actually uses the parent directory of a file passed here, not the file itself -- see
+    // juce::FileChooser's own constructor comment -- but that's enough to show what's loaded
+    // right there in the list, one click away from picking something else) -- falls back to
+    // JUCE's own sensible default (last-used directory) when nothing's loaded yet.
+    const auto startAt = (currentFile != juce::File() && currentFile.existsAsFile())
+                        ? currentFile : juce::File();
+    fileChooser = std::make_unique<juce::FileChooser>("Open audio file", startAt,
                                                       "*.wav;*.aiff;*.aif;*.flac;*.ogg;*.mp3");
     auto flags = juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles;
     fileChooser->launchAsync(flags, [this](const juce::FileChooser& fc)
@@ -1718,14 +1725,6 @@ void EditorToolbar::setCurrentFile(const juce::File& file)
 {
     currentFile = file;
     document.setSourceFilePath(file == juce::File() ? juce::String() : file.getFullPathName());
-}
-
-void EditorToolbar::revealCurrentFile()
-{
-    if (currentFile != juce::File() && currentFile.existsAsFile())
-        currentFile.revealToUser();
-    else if (onStatusMessage)
-        onStatusMessage("Not saved yet -- nothing on disk to show");
 }
 
 // Shared tail for Save / Save As: write with the persisted Save Options, coercing the

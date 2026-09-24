@@ -2,13 +2,6 @@
 #include "BiquadFilter.h"   // r3wrk::mnm::{hpCutoffHz,lpCutoffHz} for the Base/Width knob readouts
 #include <cmath>
 
-juce::Label* KnobRow::KnobLookAndFeel::createSliderTextBox(juce::Slider& slider)
-{
-    auto* l = R3WRKLookAndFeel::createSliderTextBox(slider);
-    l->setFont(juce::FontOptions(16.0f));
-    return l;
-}
-
 namespace
 {
     int64_t fracToSample(double frac, int64_t numSamples)
@@ -225,7 +218,7 @@ KnobRow::KnobRow(AudioDocument& doc, bool standalone)
 
     drawerButton.setClickingTogglesState(false);   // the editor decides open/closed, not the button itself
     drawerButton.setWantsKeyboardFocus(false);
-    drawerButton.setTooltip("More effects (LFO, Delay, Reverb, Granular)");
+    drawerButton.setTooltip("More effects (Delay, Reverb, Plexiphon)");
     drawerButton.setLookAndFeel(&drawerLnF);
     drawerButton.onClick = [this] { if (onDrawerToggle) onDrawerToggle(); };
     addAndMakeVisible(drawerButton);
@@ -264,9 +257,13 @@ void KnobRow::applyTheme()
     // Same outline idiom as the header's follow / float-on-top buttons: transparent fill,
     // dimmed ink normally, accent fill + windowBg ink once the drawer is open.
     drawerButton.setColour(juce::TextButton::buttonColourId,   juce::Colours::transparentBlack);
-    drawerButton.setColour(juce::TextButton::buttonOnColourId, pal.accent);
     drawerButton.setColour(juce::TextButton::textColourOffId,  pal.textDim);
-    drawerButton.setColour(juce::TextButton::textColourOnId,   pal.windowBg);
+    // windowBg here (matching MimeophonPanel/PlexiphonPanel's own accent-filled "on" pills) was
+    // meant for a solid accent-coloured box behind the icon -- now that the box is gone entirely
+    // (R3WRKIconOnlyLookAndFeel draws no background at all, per the user's request), that ink
+    // colour was drawn straight onto the actual window background, i.e. invisible. accent reads
+    // clearly on its own instead, and doubles as the open-state's "this one's active" cue.
+    drawerButton.setColour(juce::TextButton::textColourOnId,   pal.accent);
 }
 
 void KnobRow::setDrawerOpen(bool open)
@@ -297,7 +294,13 @@ void KnobRow::ModelBadge::paint(juce::Graphics& g)
     g.setColour(border.withAlpha(active || hovered ? 0.95f : 0.55f));
     g.drawRoundedRectangle(r, rad, 1.0f);
     g.setColour(active ? ink : border);
-    g.setFont(juce::FontOptions(9.0f, juce::Font::bold));
+    // R3WRKLookAndFeel::getTypefaceForFont() swaps EVERY font app-wide for Space Mono -- a
+    // monospace display face that reads fine at the sizes it's used at elsewhere (knob
+    // captions/readouts), but at this badge's tiny size its "M"/"N" strokes sit close enough to
+    // blur together (confirmed by the user; extra kerning alone didn't fix it). systemUIFont()
+    // attaches the OS's own system typeface directly, bypassing that override -- a proportional
+    // UI font stays legible at sizes a monospace one doesn't.
+    g.setFont(systemUIFont(11.0f));
     g.drawText(text, getLocalBounds(), juce::Justification::centred);
 }
 
@@ -358,9 +361,13 @@ void KnobRow::resized()
 {
     auto r = getLocalBounds().reduced(4, 2);
 
-    // Drawer chevron: pinned to the right edge, vertically centred, ahead of the knob layout
-    // below so it never competes with the auto-fit knob width.
-    constexpr int drawerW = 20;
+    // Drawer toggle (the orbit icon): pinned to the right edge, vertically centred, ahead of
+    // the knob layout below so it never competes with the auto-fit knob width. Sized up from
+    // the old chevron's 20px -- the orbit glyph (rings + dots) reads as a smudge that small.
+    constexpr int drawerW = 46;   // a touch under the knobs' own auto-fit width (46-53px) --
+                                  // the orbit icon's outer ring already fills most of this box
+                                  // (see drawOrbitIcon's fillFraction), so this reads slightly
+                                  // smaller than a knob's own disc, not bigger.
     auto drawerArea = r.removeFromRight(drawerW);
     drawerButton.setBounds(drawerArea.withSizeKeepingCentre(drawerW, drawerW));
     r.removeFromRight(6);
@@ -399,8 +406,8 @@ void KnobRow::resized()
         const auto rr = knobs[3]->slider.getBounds();
         if (rr.getX() > l.getRight())
         {
-            const int bw = juce::jlimit(18, 28, rr.getX() - l.getRight() - 4);
-            const int bh = 13;
+            const int bw = juce::jlimit(20, 32, rr.getX() - l.getRight() - 4);
+            const int bh = 16;
             modelBadge.setBounds((l.getRight() + rr.getX()) / 2 - bw / 2,
                                  getHeight() / 2 - bh / 2, bw, bh);
         }

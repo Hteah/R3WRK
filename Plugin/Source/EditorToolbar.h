@@ -74,11 +74,11 @@ public:
     // the open-succeeded bookkeeping (header name, zoom-to-fit, saved/dirty state).
     void loadAudioFile(const juce::File& file);
 
-    // HeaderBar's file name is clickable -- reveals currentFile in Finder, same as the
-    // "reveal in Finder" a written capture/export already gets elsewhere in this class.
-    // A no-op (with a status message explaining why) when there's nothing on disk yet: a
-    // fresh recording, a cleared document, or one loaded but not yet saved under that name.
-    void revealCurrentFile();
+    // HeaderBar's file name is clickable -- opens the same picker as Tools -> "Open...",
+    // starting at the currently loaded file's folder so it's right there in the list, one
+    // click away from picking something else (see this method's own comment). Made public for
+    // that second call site rather than duplicated (same reasoning as loadAudioFile() above).
+    void openFile();
 
     // ----- Tools actions, shared by the in-window "Tools ▾" popup (showToolsMenu) and the
     // Standalone macOS menu bar (StandaloneMenuBar). Both build their menus from these IDs
@@ -118,7 +118,6 @@ private:
     void applyTheme();
     void updateTransportButtonText();
     void refreshLoopButton();   // icon + fill + tooltip for the off/loop/ping-pong cycle
-    void openFile();
     void saveAs();             // native "Save As" dialog, extension from the current Save format
     void showSaveOptionsCallout();   // Tools: pick file type / sample rate / bit depth (persisted)
     void writeDocumentTo(const juce::File& file);   // shared: saveToFile + header/status bookkeeping

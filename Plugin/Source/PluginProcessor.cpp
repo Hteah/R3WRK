@@ -7,7 +7,9 @@
 
 namespace
 {
-    constexpr int kStateMagic     = 0x5233574D;   // 'R3WM' - adds Mimeophon params
+    constexpr int kStateMagic     = 0x5233574F;   // 'R3WO' - adds Mimeophon Ping-Pong
+    constexpr int kStateMagicR3WN = 0x5233574E;   // 'R3WN' - adds Mimeophon Skew
+    constexpr int kStateMagicR3WM = 0x5233574D;   // 'R3WM' - adds Mimeophon params
     constexpr int kStateMagicR3WL = 0x5233574C;   // 'R3WL' - adds Plexiphon params
     constexpr int kStateMagicR3WK = 0x5233574B;   // 'R3WK' - adds reverb Width
     constexpr int kStateMagicR3WJ = 0x5233574A;   // 'R3WJ' - adds reverb params
@@ -151,12 +153,14 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     smoothedMimeoColor.reset(sampleRate, mimeoRampSeconds);
     smoothedMimeoHalo.reset(sampleRate, mimeoRampSeconds);
     smoothedMimeoMix.reset(sampleRate, mimeoRampSeconds);
+    smoothedMimeoSkew.reset(sampleRate, mimeoRampSeconds);
     smoothedMimeoZone.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.mimeoZone.load()));
     smoothedMimeoRate.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.mimeoRate.load()));
     smoothedMimeoRepeats.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.mimeoRepeats.load()));
     smoothedMimeoColor.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.mimeoColor.load()));
     smoothedMimeoHalo.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.mimeoHalo.load()));
     smoothedMimeoMix.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.mimeoMix.load()));
+    smoothedMimeoSkew.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.mimeoSkew.load()));
     mimeoTailSamplesLeft = 0;
     mimeoTailSilentSamples = 0;
     lastMimeoEngaged = false;
@@ -650,7 +654,17 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             }
         }
 
+        // Filter + FX drawer ride scrub monitoring too, same as ordinary playback -- scrubbing
+        // through a filtered/delayed/reverberated region should sound like that region, not like
+        // the dry, unprocessed file. Only LFO modulation is deliberately excluded (see
+        // applyPlaybackGain's call below): applyPlaybackFilter() is the plain non-modulated path,
+        // never applyModulatedFilter(). freshPlayPass = a fresh scrub start (! wasScrubbing),
+        // mirroring how the isPlaying branch primes these on ! wasPlaying.
+        applyPlaybackFilter(buffer, numCh, 0, numSamples, ! wasScrubbing);
         applyPlaybackGain(buffer, numCh, 0, numSamples, {});   // Gain knob rides scrub monitoring too; LFOs don't run while scrubbing
+        applyMimeophon(buffer, numCh, numSamples, ! wasScrubbing);
+        applyReverb(buffer, numCh, numSamples, ! wasScrubbing);
+        applyPlexiphon(buffer, numCh, numSamples, ! wasScrubbing);
         captureOutput(buffer, numCh, numSamples);
         // R3WRK has taken the buffer over to scrub -- Black Box follows that, not the (now
         // irrelevant) input snapshot; see blackBoxInputScratch's header comment.
@@ -989,7 +1003,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         // tick from a stale leftover phase on the first block of a new play pass.
         if (! wasPlaying)
         {
-            const int n = juce::jlimit(0, AudioDocument::kMaxLfos, document.numVisibleLfos.load(std::memory_order_relaxed));
+            const int n = numActiveLfoSlots();
             for (int i = 0; i < n; ++i)
                 lfoDsp[i].reset();
         }
@@ -1155,7 +1169,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
 R3WRKAudioProcessor::LfoModResult R3WRKAudioProcessor::tickLfos(int numSamples)
 {
     LfoModResult r;
-    const int n = juce::jlimit(0, AudioDocument::kMaxLfos, document.numVisibleLfos.load(std::memory_order_relaxed));
+    const int n = numActiveLfoSlots();
 
     // Every slot's phase is reset centrally in processBlock() on a fresh play pass, before this
     // or applyModulatedFilter() runs.
@@ -1200,7 +1214,7 @@ namespace
 
 bool R3WRKAudioProcessor::applyModulatedFilter(juce::AudioBuffer<float>& buffer, int numCh, int numSamples, bool freshPlayPass)
 {
-    const int n = juce::jlimit(0, AudioDocument::kMaxLfos, document.numVisibleLfos.load(std::memory_order_relaxed));
+    const int n = numActiveLfoSlots();
 
     bool anyActive = false;
     for (int i = 0; i < n; ++i)
@@ -1611,6 +1625,8 @@ float R3WRKAudioProcessor::applyMimeophon(juce::AudioBuffer<float>& buffer, int 
     const double color01   = juce::jlimit(0.0, 1.0, document.mimeoColor.load(std::memory_order_relaxed));
     const double halo01    = juce::jlimit(0.0, 1.0, document.mimeoHalo.load(std::memory_order_relaxed));
     const double mix01     = juce::jlimit(0.0, 1.0, document.mimeoMix.load(std::memory_order_relaxed));
+    const double skew01    = juce::jlimit(0.0, 1.0, document.mimeoSkew.load(std::memory_order_relaxed));
+    const bool pingPongOn  = document.mimeoPingPong.load(std::memory_order_relaxed);
 
     if (freshPlayPass)
     {
@@ -1624,6 +1640,7 @@ float R3WRKAudioProcessor::applyMimeophon(juce::AudioBuffer<float>& buffer, int 
         smoothedMimeoColor.setCurrentAndTargetValue(color01);
         smoothedMimeoHalo.setCurrentAndTargetValue(halo01);
         smoothedMimeoMix.setCurrentAndTargetValue(mix01);
+        smoothedMimeoSkew.setCurrentAndTargetValue(skew01);
     }
 
     smoothedMimeoZone.setTargetValue(zone01);
@@ -1632,11 +1649,13 @@ float R3WRKAudioProcessor::applyMimeophon(juce::AudioBuffer<float>& buffer, int 
     smoothedMimeoColor.setTargetValue(color01);
     smoothedMimeoHalo.setTargetValue(halo01);
     smoothedMimeoMix.setTargetValue(mix01);
+    smoothedMimeoSkew.setTargetValue(skew01);
     const double zone    = smoothedMimeoZone.skip(numSamples);
     const double rate    = smoothedMimeoRate.skip(numSamples);
     const double repeats = smoothedMimeoRepeats.skip(numSamples);
     const double color   = smoothedMimeoColor.skip(numSamples);
     const double halo    = smoothedMimeoHalo.skip(numSamples);
+    const double skew    = smoothedMimeoSkew.skip(numSamples);
     const double mix     = smoothedMimeoMix.skip(numSamples);
 
     const bool engaged = document.mimeoEnabled.load(std::memory_order_relaxed) && mix > 0.001;
@@ -1648,7 +1667,7 @@ float R3WRKAudioProcessor::applyMimeophon(juce::AudioBuffer<float>& buffer, int 
     if (! engaged)
         return 0.0f;
 
-    mimeoDsp.setParams(zone, rate, repeats, color, halo, mix);
+    mimeoDsp.setParams(zone, rate, repeats, color, halo, mix, skew, pingPongOn);
 
     float peak = 0.0f;
     if (numCh <= 1)
@@ -2131,6 +2150,8 @@ void R3WRKAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     out.writeDouble(document.mimeoColor.load());
     out.writeDouble(document.mimeoHalo.load());
     out.writeDouble(document.mimeoMix.load());
+    out.writeDouble(document.mimeoSkew.load());   // R3WN+
+    out.writeBool(document.mimeoPingPong.load());   // R3WO+
 
     auto& buf = document.getBuffer();
     for (int ch = 0; ch < buf.getNumChannels(); ++ch)
@@ -2146,12 +2167,14 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     juce::MemoryInputStream in(data, (size_t) sizeInBytes, false);
     const int magic = in.readInt();
-    if (magic != kStateMagic && magic != kStateMagicR3WL && magic != kStateMagicR3WK && magic != kStateMagicR3WJ && magic != kStateMagicR3WI && magic != kStateMagicR3WH && magic != kStateMagicR3WG && magic != kStateMagicR3WF && magic != kStateMagicR3WE && magic != kStateMagicR3WD
+    if (magic != kStateMagic && magic != kStateMagicR3WN && magic != kStateMagicR3WM && magic != kStateMagicR3WL && magic != kStateMagicR3WK && magic != kStateMagicR3WJ && magic != kStateMagicR3WI && magic != kStateMagicR3WH && magic != kStateMagicR3WG && magic != kStateMagicR3WF && magic != kStateMagicR3WE && magic != kStateMagicR3WD
         && magic != kStateMagicR3WC && magic != kStateMagicR3WB && magic != kStateMagicR3WA
         && magic != kStateMagicR3W9 && magic != kStateMagicR3W8 && magic != kStateMagicR3W7
         && magic != kStateMagicR3W6 && magic != kStateMagicR3W5)
         return;
-    // R3WM: adds the Mimeophon params after the Plexiphon params. R3WL: adds the Plexiphon
+    // R3WO: adds Mimeophon Ping-Pong after Skew. R3WN: adds Mimeophon Skew after the other
+    // Mimeophon params. R3WM: adds the Mimeophon
+    // params after the Plexiphon params. R3WL: adds the Plexiphon
     // params after reverb Width. R3WK: adds reverb Width after Pre-
     // delay. R3WJ: adds the reverb params after the LFO
     // modulation slots. R3WI: adds the LFO
@@ -2164,7 +2187,9 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     // MnM model). R3W8..R3WA: the old OT-style Base/Width filter with a single resonance
     // (+ later Drive, + later 12/24 slope). R3W6/R3W7: the even older mode/cutoff filter.
     // R3W5: none.
-    const bool hasMimeo            = (magic == kStateMagic);                                  // R3WM
+    const bool hasMimeoPingPong    = (magic == kStateMagic);                                  // R3WO
+    const bool hasMimeoSkew        = (hasMimeoPingPong || magic == kStateMagicR3WN);          // R3WN+
+    const bool hasMimeo            = (hasMimeoSkew || magic == kStateMagicR3WM);              // R3WM+
     const bool hasPlex             = (hasMimeo || magic == kStateMagicR3WL);                  // R3WL+
     const bool hasReverbWidth      = (hasPlex || magic == kStateMagicR3WK);                   // R3WK+
     const bool hasReverb           = (hasReverbWidth || magic == kStateMagicR3WJ);            // R3WJ+
@@ -2311,7 +2336,8 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     // An older state blob has no Mimeophon -- same non-destructive defaults AudioDocument
     // itself declares (enabled=false, mix=0).
     bool   mxEnabled = false;
-    double mxZone = 3.0 / 7.0, mxRate = 0.5, mxRepeats = 0.3, mxColor = 0.5, mxHalo = 0.0, mxMix = 0.0;
+    double mxZone = 3.0 / 7.0, mxRate = 0.5, mxRepeats = 0.3, mxColor = 0.5, mxHalo = 0.0, mxMix = 0.0, mxSkew = 0.5;
+    bool mxPingPong = false;
     if (hasMimeo)
     {
         mxEnabled = in.readBool();
@@ -2322,6 +2348,10 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
         mxHalo    = in.readDouble();
         mxMix     = in.readDouble();
     }
+    if (hasMimeoSkew)
+        mxSkew = in.readDouble();
+    if (hasMimeoPingPong)
+        mxPingPong = in.readBool();
 
     if (numCh <= 0 || numCh > kMaxStateChannels || numSamples < 0 || numSamples > 0x7fffffff)
         return;
@@ -2398,6 +2428,8 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     document.mimeoColor.store(juce::jlimit(0.0, 1.0, mxColor));
     document.mimeoHalo.store(juce::jlimit(0.0, 1.0, mxHalo));
     document.mimeoMix.store(juce::jlimit(0.0, 1.0, mxMix));
+    document.mimeoSkew.store(juce::jlimit(0.0, 1.0, mxSkew));
+    document.mimeoPingPong.store(mxPingPong);
 
     document.setSourceFilePath(sourceFilePath);   // "" on an older state blob -- header shows "Untitled"
 

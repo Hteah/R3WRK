@@ -106,7 +106,7 @@ ReverbPanel::ReverbPanel(AudioDocument& doc) : document(doc)
     {
         k.caption.setText(caption, juce::dontSendNotification);
         k.caption.setJustificationType(juce::Justification::centred);
-        k.caption.setFont(juce::FontOptions(11.0f));
+        k.caption.setFont(juce::FontOptions(14.0f));   // matches KnobRow's own caption size
         k.slider.setRange(0.0, 1.0, 0.0);
         k.slider.setValue(juce::jlimit(0.0, 1.0, target.load()), juce::dontSendNotification);
         k.slider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 56, 18);
@@ -121,11 +121,7 @@ ReverbPanel::ReverbPanel(AudioDocument& doc) : document(doc)
 
     moreButton.setTooltip("Size / Absorb / Tilt / Pre-delay");
     moreButton.onClick = [this] { openFullEditor(); };
-    // Outline style (transparent fill) -- see R3WRKLookAndFeel::drawButtonBackground's comment:
-    // a fully-transparent buttonColourId gets a subtle hover/press wash instead of a solid
-    // filled pill. Never set before, so this was rendering as a plain filled oval in whatever
-    // the default button colour happened to be.
-    moreButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+    moreButton.setLookAndFeel(&moreButtonLnf);   // boxless -- see the member's own comment
     addAndMakeVisible(moreButton);
 
     applyTheme();
@@ -135,6 +131,7 @@ ReverbPanel::ReverbPanel(AudioDocument& doc) : document(doc)
 
 ReverbPanel::~ReverbPanel()
 {
+    moreButton.setLookAndFeel(nullptr);   // detach before moreButtonLnf is destroyed
     theme->removeChangeListener(this);
 }
 
@@ -166,6 +163,10 @@ void ReverbPanel::applyTheme()
     for (auto* k : { &decayKnob, &mixKnob })
     {
         k->caption.setColour(juce::Label::textColourId, pal.textDim);
+        // Matches KnobRow's own knobs: the default LookAndFeel_V4 textbox outline was never
+        // cleared here, so these readouts had a visible box the top knob row's don't.
+        k->slider.setColour(juce::Slider::textBoxTextColourId, pal.text);
+        k->slider.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
         k->caption.repaint();
         k->slider.repaint();
     }
@@ -192,7 +193,10 @@ void ReverbPanel::EnablePill::paint(juce::Graphics& g)
     g.setColour(border.withAlpha(on || hovered ? 0.95f : 0.55f));
     g.drawRoundedRectangle(r, rad, 1.0f);
     g.setColour(on ? ink : border);
-    g.setFont(juce::FontOptions(9.0f, juce::Font::bold));
+    // systemUIFont(), not Space Mono -- matches KnobRow::ModelBadge's own fix (see its comment):
+    // a proportional UI font stays legible at this pill's small size where the monospace app
+    // default reads cramped.
+    g.setFont(systemUIFont(11.0f));
     g.drawText("RVRB", getLocalBounds(), juce::Justification::centred);
 }
 
@@ -204,7 +208,7 @@ void ReverbPanel::resized()
     // two knobs + a button actually need, so any leftover space collects on the right instead
     // of being spread out between the controls).
     auto r = getLocalBounds().reduced(4, 2);
-    constexpr int gap = 3, pillW = 22, pillH = 13, knobW = 48, moreW = 20, moreH = 16;
+    constexpr int gap = 3, pillW = 32, pillH = 16, knobW = 53, moreW = 20, moreH = 16;   // pillW/pillH match KnobRow::ModelBadge's own size (the filter MNM/OT badge); knobW matches KnobRow's own upper bound (46-53 auto-fit)
 
     auto pillArea = r.removeFromLeft(pillW);
     enablePill.setBounds(pillArea.withSizeKeepingCentre(pillW, pillH));
@@ -213,7 +217,7 @@ void ReverbPanel::resized()
     for (auto* k : { &decayKnob, &mixKnob })
     {
         auto kcol = r.removeFromLeft(knobW);
-        k->caption.setBounds(kcol.removeFromTop(15));
+        k->caption.setBounds(kcol.removeFromTop(17));   // matches KnobRow's own caption row height
         k->slider.setBounds(kcol);
         r.removeFromLeft(gap);
     }

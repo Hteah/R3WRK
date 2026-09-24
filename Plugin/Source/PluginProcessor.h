@@ -314,6 +314,21 @@ private:
     r3wrk::LfoModule lfoDsp[AudioDocument::kMaxLfos];
     struct LfoModResult { double gainDb = 0.0; };
     LfoModResult tickLfos (int numSamples);
+
+    // The LFO feature is shelved from the UI (FxRow hides LfoPanel -- see its own comment)
+    // but deliberately left fully wired in AudioDocument/here so it's trivial to bring back.
+    // Without this guard, a slot that was enabled and targeting the filter (or restored that
+    // way from a saved project, since Standalone auto-persists document state across launches)
+    // keeps silently modulating with no UI control left to see or turn it off -- exactly the
+    // "something from the old LFO still connected to the filter Base knob" bug found by ear
+    // during a filter sweep. Forces every LFO read site to see zero active slots while shelved;
+    // flip this back to bring LFOs live again, no other code changes needed.
+    static constexpr bool kLfoFeatureShelved = true;
+    int numActiveLfoSlots() const noexcept
+    {
+        return kLfoFeatureShelved ? 0
+            : juce::jlimit(0, AudioDocument::kMaxLfos, document.numVisibleLfos.load(std::memory_order_relaxed));
+    }
     // Gain has no natural 0..1 range the way the filter knobs do, so an Amount of 100% on a
     // Gain-targeted LFO is defined to swing +/- this many dB. Filter targets ARE already 0..1,
     // so applyModulatedFilter() just adds (LFO output * Amount) directly -- no dB scaling there.
@@ -406,6 +421,7 @@ private:
     juce::SmoothedValue<double> smoothedMimeoColor   { 0.5 };
     juce::SmoothedValue<double> smoothedMimeoHalo    { 0.0 };
     juce::SmoothedValue<double> smoothedMimeoMix     { 0.0 };
+    juce::SmoothedValue<double> smoothedMimeoSkew    { 0.5 };
     int  mimeoTailSamplesLeft   = 0;
     int  mimeoTailSilentSamples = 0;
     bool lastMimeoEngaged = false;

@@ -108,16 +108,11 @@ private:
     juce::String timeString(double seconds) const;
     void syncModelBadge();   // text/colour/tooltip from document.filterModel
 
-    // The value readout below each knob (e.g. "0.00 st", "1.00x") is JUCE's own built-in
-    // Slider text-box Label, which never gets an explicit setFont() -- so it draws at
-    // whatever size Label defaults to, clipped against the slider's small text-box height.
-    // Scoped to just the knob row (not R3WRKLookAndFeel's other users -- EditorToolbar's
-    // popup sliders share that base class too) so only these readouts get bigger.
-    class KnobLookAndFeel : public R3WRKLookAndFeel
-    {
-    public:
-        juce::Label* createSliderTextBox(juce::Slider&) override;
-    };
+    // Readout sizing/font now live on the base class itself (R3WRKLookAndFeel::
+    // createSliderTextBox), so every rotary knob using that look matches KnobRow's without this
+    // subclass overriding anything -- kept only as a distinctly-named instance for the
+    // setLookAndFeel/nullptr attach-detach pairing below.
+    class KnobLookAndFeel : public R3WRKLookAndFeel {};
 
     AudioDocument& document;
     juce::SharedResourcePointer<ThemeManager> theme;
@@ -128,10 +123,11 @@ private:
     Knob* endKnob   = nullptr;
     ModelBadge modelBadge;
 
-    // FX drawer toggle -- small chevron pinned to the row's right edge, reusing the same
-    // small-rect icon look the header's follow / float-on-top buttons use.
-    R3WRKIconRectLookAndFeel drawerLnF;
-    juce::TextButton drawerButton { R3WRKLookAndFeel::iconChevron };
+    // FX drawer toggle -- the orbit icon, pinned to the row's right edge. Boxless (see
+    // R3WRKIconOnlyLookAndFeel) per the user's request -- no permanent frame around it, only a
+    // faint wash on hover/press/while the drawer is open.
+    R3WRKIconOnlyLookAndFeel drawerLnF;
+    juce::TextButton drawerButton { R3WRKLookAndFeel::iconOrbit };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(KnobRow)
 };
