@@ -255,15 +255,12 @@ void KnobRow::applyTheme()
     modelBadge.repaint();
 
     // Same outline idiom as the header's follow / float-on-top buttons: transparent fill,
-    // dimmed ink normally, accent fill + windowBg ink once the drawer is open.
+    // plain text ink.
     drawerButton.setColour(juce::TextButton::buttonColourId,   juce::Colours::transparentBlack);
-    drawerButton.setColour(juce::TextButton::textColourOffId,  pal.textDim);
-    // windowBg here (matching MimeophonPanel/PlexiphonPanel's own accent-filled "on" pills) was
-    // meant for a solid accent-coloured box behind the icon -- now that the box is gone entirely
-    // (R3WRKIconOnlyLookAndFeel draws no background at all, per the user's request), that ink
-    // colour was drawn straight onto the actual window background, i.e. invisible. accent reads
-    // clearly on its own instead, and doubles as the open-state's "this one's active" cue.
-    drawerButton.setColour(juce::TextButton::textColourOnId,   pal.accent);
+    drawerButton.setColour(juce::TextButton::textColourOffId,  pal.text);
+    // Same text ink when open too (per the user -- accent read as dimmed in themes with a muted
+    // accent); the glyph itself shows the state, dropping its outer orbit ring once open.
+    drawerButton.setColour(juce::TextButton::textColourOnId,   pal.text);
 }
 
 void KnobRow::setDrawerOpen(bool open)

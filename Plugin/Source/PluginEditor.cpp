@@ -143,13 +143,13 @@ void R3WRKAudioProcessorEditor::changeListenerCallback(juce::ChangeBroadcaster*)
 void R3WRKAudioProcessorEditor::applyHeaderButtonThemes()
 {
     const auto& pal = theme->palette();
-    // Boxless (see cornerButtonLnF) -- on/off reads purely through the icon's own ink colour,
-    // same idiom as KnobRow's drawer toggle: accent while on, plain text ink while off.
+    // Boxless (see cornerButtonLnF) -- plain text ink in both states; "on" is a small dot drawn
+    // under the icon by R3WRKLookAndFeel::drawButtonText.
     for (auto* b : { &followButton, &floatOnTopButton })
     {
         b->setColour(juce::TextButton::buttonColourId,  juce::Colours::transparentBlack);
         b->setColour(juce::TextButton::textColourOffId, pal.text);
-        b->setColour(juce::TextButton::textColourOnId,  pal.accent);
+        b->setColour(juce::TextButton::textColourOnId,  pal.text);
     }
 }
 
@@ -319,10 +319,10 @@ void R3WRKAudioProcessorEditor::resized()
         // (standalone only); Follow-playhead sits just left of it.
         if (standaloneWindow)
         {
-            floatOnTopButton.setBounds(headerRow.removeFromRight(36).withSizeKeepingCentre(34, 22));
+            floatOnTopButton.setBounds(headerRow.removeFromRight(36).withSizeKeepingCentre(34, 30));
             headerRow.removeFromRight(6);
         }
-        followButton.setBounds(headerRow.removeFromRight(36).withSizeKeepingCentre(34, 22));
+        followButton.setBounds(headerRow.removeFromRight(36).withSizeKeepingCentre(34, 30));
         headerRow.removeFromRight(6);
         header.setBounds(headerRow);
     }

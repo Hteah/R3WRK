@@ -693,9 +693,25 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
         drawSliceIcon(g, bounds, ink);
         return;
     }
-    if (text == iconFollow)
+    if (text == iconFollow || text == iconFloatTop)
     {
-        drawFollowIcon(g, bounds, ink);
+        // Header toggles: the icon stays full text ink in both states (per the user -- the old
+        // accent-when-on read as dimmed in themes with a muted accent); "on" is a small dot
+        // centred under the icon instead. The button is taller than the icon (see
+        // PluginEditor::resized) so the dot has room below it without shrinking the glyph.
+        constexpr float iconH = 22.0f, dotR = 1.6f;
+        const auto iconBounds = bounds.withSizeKeepingCentre(bounds.getWidth(), juce::jmin(iconH, bounds.getHeight()))
+                                      .translated(0.0f, -2.0f);
+        if (text == iconFollow)
+            drawFollowIcon(g, iconBounds, ink);
+        else
+            drawFloatTopIcon(g, iconBounds, ink);
+
+        if (button.getToggleState())
+        {
+            g.setColour(ink);
+            g.fillEllipse(bounds.getCentreX() - dotR, iconBounds.getBottom() + 1.0f, dotR * 2.0f, dotR * 2.0f);
+        }
         return;
     }
     if (text == iconDesktopRec)
@@ -704,11 +720,6 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
         // textColourOffId/OnId, so the circle stays red) -- per the user's request, so the glyph
         // reads clearly against the button's own red ring instead of blending into it.
         drawDesktopRecIcon(g, bounds, juce::Colours::white.withMultipliedAlpha(button.isEnabled() ? 1.0f : 0.5f));
-        return;
-    }
-    if (text == iconFloatTop)
-    {
-        drawFloatTopIcon(g, bounds, ink);
         return;
     }
     if (text == iconCaptureOut)
