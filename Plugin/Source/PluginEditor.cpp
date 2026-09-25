@@ -118,7 +118,7 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
     // hood, just visually hidden), so the drawn grip was a redundant, non-native-looking
     // extra. Window is still resizable either way -- this only removes the drawn handle.
     setResizable(true, false);
-    setResizeLimits(680, 473 + topInset, 2200, 1300 + topInset);
+    setResizeLimits(680, 473 + topInset, kMaxEditorWidth, kMaxEditorHeight + topInset);
     setSize(1000, 639 + topInset);
 }
 
@@ -170,7 +170,7 @@ void R3WRKAudioProcessorEditor::toggleFxDrawer()
     // open/close cycle.
     const int targetHeight = getHeight() + (fxDrawerOpen ? delta : -delta);
     setResizeLimits(680, (fxDrawerOpen ? 473 + delta : 473) + topInset,
-                     2200, (fxDrawerOpen ? 1300 + delta : 1300) + topInset);
+                     kMaxEditorWidth, (fxDrawerOpen ? kMaxEditorHeight + delta : kMaxEditorHeight) + topInset);
     setSize(getWidth(), targetHeight);
 }
 

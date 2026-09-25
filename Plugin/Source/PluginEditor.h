@@ -64,6 +64,11 @@ private:
     // (native title bar, no strip -- see StandaloneWindowShape.mm), so reserve a thin band at
     // the top for them. Zero in a plugin (the DAW owns the window chrome).
     static constexpr int kMacTrafficLightInset = 22;
+    // Upper resize limit -- deliberately far past any real display (5K is 2560x1440 points,
+    // 6K 3008x1692, super-ultrawides 5120 wide) so the Standalone can zoom / go full screen on
+    // anything. It used to be 2200x1300, which stopped a 27" window well short of the edges.
+    static constexpr int kMaxEditorWidth  = 8192;
+    static constexpr int kMaxEditorHeight = 4608;
     const bool standaloneWindow;
 
     // A press in the top inset arms a window move; it only actually starts once the mouse
