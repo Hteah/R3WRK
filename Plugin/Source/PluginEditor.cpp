@@ -164,9 +164,14 @@ void R3WRKAudioProcessorEditor::toggleFxDrawer()
     // The drawer only ever adds to the plugin's normal footprint -- min/max both shift by the
     // same delta so a host that clamps to the reported limits can't crush the open drawer, and
     // the user can't manually resize below the closed-row minimum either way.
+    // Target height taken BEFORE the new limits apply: at the minimum closed height, raising the
+    // min to the open-drawer minimum already bumps the height by `delta`, and adding delta to
+    // that post-clamp height doubled it -- the window came back 87px taller after every
+    // open/close cycle.
+    const int targetHeight = getHeight() + (fxDrawerOpen ? delta : -delta);
     setResizeLimits(680, (fxDrawerOpen ? 473 + delta : 473) + topInset,
                      2200, (fxDrawerOpen ? 1300 + delta : 1300) + topInset);
-    setSize(getWidth(), getHeight() + (fxDrawerOpen ? delta : -delta));
+    setSize(getWidth(), targetHeight);
 }
 
 void R3WRKAudioProcessorEditor::applyFloatOnTop(bool on)

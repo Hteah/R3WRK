@@ -1,4 +1,5 @@
 #include "EditorToolbar.h"
+#include "DotMatrixLCD.h"
 #include "TimeStretchEngine.h"
 #include "ThemeEditor.h"
 #include "WaveformDisplay.h"
@@ -324,25 +325,52 @@ namespace
     // Right-click the loop button. Live setting (no Apply): a raised-cosine volume envelope
     // over the first/last N ms of the loop region during playback, so the wrap doesn't click.
     // Doesn't touch the stored audio; the "bake" toggle also writes it into exported selections.
+    // Borderless dot-matrix checkbox for LoopCrossfadePanel: a small dot-outlined square
+    // (filled when on) followed by dot-matrix text, in the popup's LCD ink.
+    struct LcdCheckbox : juce::ToggleButton
+    {
+        using juce::ToggleButton::ToggleButton;
+        void paintButton(juce::Graphics& g, bool isHighlighted, bool isDown) override
+        {
+            const auto ink = theme->palette().popupInk;
+            auto r = getLocalBounds().toFloat();
+            const float dotSize = juce::jlimit(1.1f, 3.0f, (r.getHeight() - 2.0f) / 9.0f);
+            const float boxSide = dotSize * 7.0f;
+            const auto box = r.removeFromLeft(boxSide).withSizeKeepingCentre(boxSide, boxSide);
+            g.setColour(ink.withAlpha(isDown ? 0.6f : (isHighlighted ? 0.9f : 0.75f)));
+            g.drawRect(box, dotSize);
+            if (getToggleState())
+                g.fillRect(box.reduced(dotSize * 2.0f));
+            r.removeFromLeft(dotSize * 4.0f);
+            lcd::drawText(g, getButtonText(), r, dotSize, ink, juce::Justification::centredLeft);
+        }
+        juce::SharedResourcePointer<ThemeManager> theme;
+    };
+
     struct LoopCrossfadePanel : juce::Component
     {
         explicit LoopCrossfadePanel(AudioDocument& doc) : document(doc)
         {
-            title.setText("Loop Crossfade", juce::dontSendNotification);
-            title.setFont(juce::FontOptions(14.0f, juce::Font::bold));
+            // Hardware-LCD look (dot-matrix text, dot-row slider, inverted-when-on button), same
+            // as the FX drawer's popups -- see DotMatrixLCD.h. Set on the panel so every child
+            // inherits it, including the slider's value text box (drawn in popupInk, so it
+            // reads on the light popup background).
+            setLookAndFeel(&lnf);
+
+            title.setText("LOOP CROSSFADE", juce::dontSendNotification);
 
             amount.setRange(0.0, 50.0, 0.5);
             amount.setValue(document.loopCrossfadeMs.load(), juce::dontSendNotification);
             amount.setTextValueSuffix(" ms");
             amount.setSliderStyle(juce::Slider::LinearHorizontal);
-            amount.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 22);
+            amount.setTextBoxStyle(juce::Slider::TextBoxRight, false, 80, 16);
             amount.onValueChange = [this]
             {
                 document.loopCrossfadeMs = amount.getValue();
                 document.notifyChanged();   // mark dirty so Save keeps it
             };
 
-            bake.setButtonText("Bake into exported selections");
+            bake.setButtonText("BAKE INTO EXPORTS");
             bake.setToggleState(document.bakeLoopCrossfadeOnExport.load(), juce::dontSendNotification);
             bake.onClick = [this]
             {
@@ -350,33 +378,33 @@ namespace
                 document.notifyChanged();
             };
 
-            hint.setText("Fades the loop ends so the wrap doesn't click. 0 = off.",
+            hint.setText("FADES LOOP ENDS SO THE WRAP WON'T CLICK. 0 = OFF.",
                          juce::dontSendNotification);
-            hint.setFont(juce::FontOptions(11.0f));
-            hint.setColour(juce::Label::textColourId, juce::Colours::grey);
-            hint.setMinimumHorizontalScale(1.0f);
 
             addAndMakeVisible(title);
             addAndMakeVisible(amount);
             addAndMakeVisible(bake);
             addAndMakeVisible(hint);
-            setSize(360, 130);
+            setSize(380, 126);
         }
+        ~LoopCrossfadePanel() override { setLookAndFeel(nullptr); }   // detach before lnf is destroyed
+
         void resized() override
         {
             auto r = getLocalBounds().reduced(12);
-            title.setBounds(r.removeFromTop(20));
-            r.removeFromTop(8);
-            amount.setBounds(r.removeFromTop(26));
-            r.removeFromTop(8);
-            bake.setBounds(r.removeFromTop(22));
-            r.removeFromTop(6);
-            hint.setBounds(r.removeFromTop(16));
+            title.setBounds(r.removeFromTop(16));
+            r.removeFromTop(10);
+            amount.setBounds(r.removeFromTop(24));
+            r.removeFromTop(10);
+            bake.setBounds(r.removeFromTop(16).removeFromLeft(220));
+            r.removeFromTop(12);
+            hint.setBounds(r.removeFromTop(12));
         }
         AudioDocument& document;
         juce::Label title, hint;
         juce::Slider amount;
-        juce::ToggleButton bake;
+        LcdCheckbox bake;
+        lcd::HardwareLcdLookAndFeel lnf;
     };
 
     //==============================================================================
@@ -1334,6 +1362,7 @@ void EditorToolbar::showToolsMenu()
     m.addItem(keyed("Redo", tmiRedo, canRedo, shift + cmd + "Z"));
     m.addItem(tmiRevert, "Revert to Original", ! empty);
 
+    m.setLookAndFeel(&toolsMenuLnf);   // dot-matrix LCD style, matching the popups
     m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(toolsButton),
                     [this](int r) { if (r != 0) performToolsItem(r); });
 }
@@ -1937,5 +1966,17 @@ void EditorToolbar::resized()
     fb.items.add(juce::FlexItem().withFlex(1.0f));
     addWide(timeLabel, 150, gap);
     fb.performLayout(row);
+
+    // A narrow window squeezes the buttons' widths (down to withMinWidth) but not their height,
+    // which turned the round buttons into ovals -- re-centre each as a square on its smaller
+    // side so they shrink as circles instead.
+    for (auto& item : fb.items)
+    {
+        if (item.associatedComponent == nullptr || item.associatedComponent == &timeLabel)
+            continue;
+        auto b = item.associatedComponent->getBounds();
+        const int side = juce::jmin(b.getWidth(), b.getHeight());
+        item.associatedComponent->setBounds(b.withSizeKeepingCentre(side, side));
+    }
     repaint();   // keep the recording-section divider aligned with the new button positions
 }

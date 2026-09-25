@@ -4,6 +4,7 @@
 #include "EditActions.h"
 #include "PluginProcessor.h"
 #include "Theme.h"
+#include "DotMatrixLCD.h"
 #include "OutputSettings.h"
 #include "R3WRKLookAndFeel.h"
 
@@ -139,6 +140,7 @@ private:
     R3WRKAudioProcessor& processor;
     AudioDocument& document;
     juce::SharedResourcePointer<ThemeManager> theme;
+    lcd::HardwareLcdLookAndFeel toolsMenuLnf;   // Tools ▾ menu styling -- see showToolsMenu
     juce::SharedResourcePointer<OutputSettings> outputSettings;
     R3WRKLookAndFeel toolbarLnF;
     Clipboard clipboard;

@@ -82,6 +82,9 @@ public:
     // scheme, not this app's theme -- so it never matched a theme's actual palette.
     void drawCallOutBoxBackground(juce::CallOutBox&, juce::Graphics&,
                                   const juce::Path&, juce::Image&) override;
+    // Sharp square corners on every popup bubble (the arrow stays), matching the dot-matrix
+    // Tools menu's hard-edged rectangle -- per the user.
+    float getCallOutBoxCornerSize(const juce::CallOutBox&) override { return 0.0f; }
 
 private:
     juce::SharedResourcePointer<ThemeManager> theme;

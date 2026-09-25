@@ -19,6 +19,14 @@ namespace lcd
         static const Glyph kPct   = G(0b11001, 0b11010, 0b00010, 0b00100, 0b01000, 0b01011, 0b10011);
         static const Glyph kColon = G(0b00000, 0b01100, 0b01100, 0b00000, 0b01100, 0b01100, 0b00000);
         static const Glyph kSlash = G(0b00001, 0b00010, 0b00100, 0b00100, 0b00100, 0b01000, 0b10000);
+        static const Glyph kEquals = G(0b00000, 0b00000, 0b11111, 0b00000, 0b11111, 0b00000, 0b00000);
+        static const Glyph kApos   = G(0b00100, 0b00100, 0b01000, 0b00000, 0b00000, 0b00000, 0b00000);
+        static const Glyph kLParen = G(0b00010, 0b00100, 0b01000, 0b01000, 0b01000, 0b00100, 0b00010);
+        static const Glyph kRParen = G(0b01000, 0b00100, 0b00010, 0b00010, 0b00010, 0b00100, 0b01000);
+        static const Glyph kComma  = G(0b00000, 0b00000, 0b00000, 0b00000, 0b01100, 0b00100, 0b01000);
+        static const Glyph kMidDot = G(0b00000, 0b00000, 0b00000, 0b01100, 0b01100, 0b00000, 0b00000);
+        static const Glyph kCmd    = G(0b11011, 0b11111, 0b01010, 0b01010, 0b01010, 0b11111, 0b11011);
+        static const Glyph kShift  = G(0b00100, 0b01010, 0b10001, 0b11011, 0b01010, 0b01010, 0b01110);
         static const Glyph kAmp   = G(0b01100, 0b10010, 0b10100, 0b01000, 0b10101, 0b10010, 0b01101);
 
         static const Glyph k0 = G(0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110);
@@ -69,6 +77,14 @@ namespace lcd
             case ':': return &kColon;
             case '/': return &kSlash;
             case '&': return &kAmp;
+            case '=': return &kEquals;
+            case '(': return &kLParen;
+            case ')': return &kRParen;
+            case ',': return &kComma;
+            case 0x00B7: return &kMidDot;   // ·
+            case 0x2318: return &kCmd;      // ⌘
+            case 0x21E7: return &kShift;    // ⇧
+            case '\'': return &kApos;
             case '0': return &k0; case '1': return &k1; case '2': return &k2;
             case '3': return &k3; case '4': return &k4; case '5': return &k5;
             case '6': return &k6; case '7': return &k7; case '8': return &k8;
@@ -86,9 +102,15 @@ namespace lcd
         }
     }
 
+    // One glyph per character, so an ellipsis character (menu items' "Open…") becomes three dots.
+    static juce::String normalise(const juce::String& text)
+    {
+        return text.toUpperCase().replace(juce::String::fromUTF8("\xe2\x80\xa6"), "...");
+    }
+
     float textWidth(const juce::String& text, float dotSize) noexcept
     {
-        const int n = text.length();
+        const int n = normalise(text).length();
         if (n <= 0)
             return 0.0f;
         return (float) (n * 6 - 1) * dotSize;   // 5 dots/char + 1 dot gap, no trailing gap
@@ -97,7 +119,7 @@ namespace lcd
     void drawText(juce::Graphics& g, const juce::String& text, juce::Rectangle<float> area,
                  float dotSize, juce::Colour ink, juce::Justification justification)
     {
-        const auto upper = text.toUpperCase();
+        const auto upper = normalise(text);
         const float w = textWidth(upper, dotSize);
         const float h = 7.0f * dotSize;
 
@@ -185,7 +207,7 @@ namespace lcd
         // Captions and a Slider's own value textbox render at very different sizes in these
         // popups; scale the dot size off the label's own height so both stay legible rather
         // than sharing one fixed dot size.
-        const float dotSize = juce::jlimit(1.3f, 3.4f, area.getHeight() / 9.0f);
+        const float dotSize = juce::jlimit(1.1f, 3.4f, area.getHeight() / 9.0f);
 
         drawText(g, label.getText(), area, dotSize, pal.popupInk, label.getJustificationType());
     }
@@ -198,6 +220,34 @@ namespace lcd
         const juce::Rectangle<float> bounds((float) x, (float) y, (float) width, (float) height);
         const float angle = rotaryStartAngle + sliderPosProportional * (rotaryEndAngle - rotaryStartAngle);
         drawKnob(g, bounds.reduced(bounds.getWidth() * 0.1f), angle, pal.popupInk);
+    }
+
+    void HardwareLcdLookAndFeel::drawLinearSlider(juce::Graphics& g, int x, int y, int width, int height,
+                                                  float sliderPos, float, float,
+                                                  juce::Slider::SliderStyle style, juce::Slider& slider)
+    {
+        if (style != juce::Slider::LinearHorizontal)
+        {
+            LookAndFeel_V4::drawLinearSlider(g, x, y, width, height, sliderPos, 0.0f, 0.0f, style, slider);
+            return;
+        }
+
+        // A single row of square dots across the track: solid ink up to the value, faint past
+        // it -- a dot-matrix "bar graph" readout -- with a 3-dot-tall column as the thumb.
+        const auto& pal = theme->palette();
+        constexpr float dotSize = 3.0f, pitch = 5.0f;
+        const float cy = (float) y + (float) height * 0.5f;
+        const float left = (float) x + dotSize, right = (float) (x + width) - dotSize;
+        for (float px = left; px <= right; px += pitch)
+        {
+            g.setColour(pal.popupInk.withAlpha(px <= sliderPos ? 0.9f : 0.22f));
+            g.fillRect(px - dotSize * 0.5f, cy - dotSize * 0.5f, dotSize, dotSize);
+        }
+
+        const float thumbX = juce::jlimit(left, right, sliderPos);
+        g.setColour(pal.popupInk);
+        for (int i = -2; i <= 2; ++i)
+            g.fillRect(thumbX - dotSize * 0.5f, cy + (float) i * pitch * 0.8f - dotSize * 0.5f, dotSize, dotSize);
     }
 
     void HardwareLcdLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Button& button,
@@ -229,5 +279,96 @@ namespace lcd
         auto area = button.getLocalBounds().toFloat().reduced(2.0f);
         const float dotSize = juce::jlimit(1.2f, 2.6f, area.getHeight() / 9.0f);
         drawText(g, button.getButtonText(), area, dotSize, ink, juce::Justification::centred);
+    }
+
+    namespace
+    {
+        constexpr float kMenuDot = 1.4f;          // menu text dot size
+        constexpr float kMenuRowH = 22.0f;
+        constexpr float kMenuSepH = 9.0f;
+        constexpr float kMenuTickW = 18.0f;       // left gutter for the tick mark
+        constexpr float kMenuArrowW = 16.0f;      // right gutter for the submenu arrow
+        constexpr float kMenuShortcutGap = 24.0f;
+    }
+
+    void HardwareLcdLookAndFeel::drawPopupMenuBackground(juce::Graphics& g, int width, int height)
+    {
+        const auto& pal = theme->palette();
+        g.fillAll(pal.popupBg);
+        drawScreenTexture(g, { 0, 0, width, height }, pal.popupInk.withAlpha(0.10f));
+        g.setColour(pal.popupInk.withAlpha(0.6f));
+        g.drawRect(0, 0, width, height, 2);
+    }
+
+    void HardwareLcdLookAndFeel::getIdealPopupMenuItemSize(const juce::String& text, bool isSeparator,
+                                                           int, int& idealWidth, int& idealHeight)
+    {
+        if (isSeparator)
+        {
+            idealWidth = 50;
+            idealHeight = (int) kMenuSepH;
+            return;
+        }
+        // Shortcut width isn't passed here -- reserve room for the longest one used ("⇧⌘Z").
+        idealWidth = (int) std::ceil(kMenuTickW + textWidth(text, kMenuDot) + kMenuShortcutGap
+                                     + textWidth("XXX", kMenuDot) + kMenuArrowW);
+        idealHeight = (int) kMenuRowH;
+    }
+
+    void HardwareLcdLookAndFeel::drawPopupMenuItem(juce::Graphics& g, const juce::Rectangle<int>& areaIn,
+                                                   bool isSeparator, bool isActive, bool isHighlighted,
+                                                   bool isTicked, bool hasSubMenu, const juce::String& text,
+                                                   const juce::String& shortcutKeyText,
+                                                   const juce::Drawable*, const juce::Colour*)
+    {
+        const auto& pal = theme->palette();
+        auto area = areaIn.toFloat();
+
+        if (isSeparator)
+        {
+            // A dotted rule, on the same 5px pitch as the background texture.
+            g.setColour(pal.popupInk.withAlpha(0.45f));
+            const float y = area.getCentreY() - 0.75f;
+            for (float x = area.getX() + 8.0f; x < area.getRight() - 8.0f; x += 5.0f)
+                g.fillRect(x, y, 1.5f, 1.5f);
+            return;
+        }
+
+        const bool hot = isHighlighted && isActive;
+        if (hot)
+        {
+            g.setColour(pal.popupInk.withAlpha(0.85f));
+            g.fillRect(area.reduced(2.0f, 1.0f));
+        }
+        const auto ink = hot ? pal.popupBg
+                             : pal.popupInk.withAlpha(isActive ? 1.0f : 0.35f);
+
+        auto r = area.reduced(4.0f, 0.0f);
+        auto tickArea = r.removeFromLeft(kMenuTickW);
+        auto arrowArea = r.removeFromRight(kMenuArrowW);
+
+        if (isTicked)
+        {
+            const float s = kMenuDot * 4.0f;
+            g.setColour(ink);
+            g.fillRect(juce::Rectangle<float>(s, s).withCentre(tickArea.getCentre()));
+        }
+
+        if (hasSubMenu)
+        {
+            // A dot-built ">" : three rows stepping out and back.
+            g.setColour(ink);
+            const float d = kMenuDot, cx = arrowArea.getCentreX() - d, cy = arrowArea.getCentreY();
+            for (int i = -3; i <= 3; ++i)
+            {
+                const float x = cx + (float) (3 - std::abs(i)) * d;
+                g.fillRect(x, cy + (float) i * d - d * 0.5f, d * 0.85f, d * 0.85f);
+            }
+        }
+
+        if (shortcutKeyText.isNotEmpty())
+            drawText(g, shortcutKeyText, r, kMenuDot, ink, juce::Justification::centredRight);
+
+        drawText(g, text, r, kMenuDot, ink, juce::Justification::centredLeft);
     }
 }

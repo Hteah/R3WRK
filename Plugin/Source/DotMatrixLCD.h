@@ -69,6 +69,12 @@ namespace lcd
                               float sliderPosProportional, float rotaryStartAngle,
                               float rotaryEndAngle, juce::Slider&) override;
 
+        // LinearHorizontal sliders: a dot-row bar graph with a dot-column thumb (other linear
+        // styles fall back to LookAndFeel_V4).
+        void drawLinearSlider(juce::Graphics&, int x, int y, int width, int height,
+                              float sliderPos, float minSliderPos, float maxSliderPos,
+                              juce::Slider::SliderStyle, juce::Slider&) override;
+
         // TextButtons (shape/range selectors, enable pills, ...): a plain rectangular dot-
         // outlined "screen button", filled solid ink with inverted (background-coloured) text
         // when toggled on -- the reference hardware's own highlighted-row look for a selected
@@ -77,6 +83,20 @@ namespace lcd
                                   bool shouldDrawButtonAsHighlighted, bool shouldDrawButtonAsDown) override;
         void drawButtonText(juce::Graphics&, juce::TextButton&,
                            bool shouldDrawButtonAsHighlighted, bool shouldDrawButtonAsDown) override;
+
+        // PopupMenus (set per menu via PopupMenu::setLookAndFeel -- the Tools menu): popupBg
+        // screen with the dot texture, dot-matrix item text + shortcuts, dotted separators,
+        // highlighted row inverted (solid ink, background-coloured text).
+        void drawPopupMenuBackground(juce::Graphics&, int width, int height) override;
+        void drawPopupMenuItem(juce::Graphics&, const juce::Rectangle<int>& area,
+                               bool isSeparator, bool isActive, bool isHighlighted, bool isTicked,
+                               bool hasSubMenu, const juce::String& text,
+                               const juce::String& shortcutKeyText,
+                               const juce::Drawable* icon, const juce::Colour* textColour) override;
+        void getIdealPopupMenuItemSize(const juce::String& text, bool isSeparator,
+                                       int standardMenuItemHeight, int& idealWidth,
+                                       int& idealHeight) override;
+        int getPopupMenuBorderSize() override { return 4; }
 
     private:
         juce::SharedResourcePointer<ThemeManager> theme;
