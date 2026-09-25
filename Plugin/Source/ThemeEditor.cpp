@@ -31,6 +31,18 @@ ThemeEditor::ThemeEditor()
             theme->deleteCustom(name);
     };
     resetButton.onClick = [this] { theme->setPalette(theme->getPreset("Midnight")); };
+    copyButton.onClick = [this]
+    {
+        auto name = presetBox.getSelectedId() != 0 ? presetBox.getText() : nameField.getText().trim();
+        theme->copyToClipboard(name.isNotEmpty() ? name : juce::String("Untitled"));
+    };
+    pasteButton.onClick = [this]
+    {
+        juce::String name;
+        if (theme->pasteFromClipboard(&name) && name.isNotEmpty() && ! theme->isCustom(name)
+            && ! theme->builtInNames().contains(name))
+            nameField.setText(name, juce::dontSendNotification);   // ready to Save under its name
+    };
 
     shadedToggle.onClick = [this]
     {
@@ -74,6 +86,8 @@ ThemeEditor::ThemeEditor()
     addAndMakeVisible(saveButton);
     addAndMakeVisible(deleteButton);
     addAndMakeVisible(resetButton);
+    addAndMakeVisible(copyButton);
+    addAndMakeVisible(pasteButton);
     addChildComponent(picker);
     addChildComponent(pickerDone);
 
@@ -304,6 +318,9 @@ void ThemeEditor::resized()
     resetButton.setBounds(bb.removeFromRight(64));
     bb.removeFromRight(6);
     deleteButton.setBounds(bb.removeFromRight(64));
+    copyButton.setBounds(bb.removeFromLeft(56));
+    bb.removeFromLeft(6);
+    pasteButton.setBounds(bb.removeFromLeft(56));
 
     // Colour-picker overlay sits on top of the colour rows.
     if (picker.isVisible())

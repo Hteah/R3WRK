@@ -69,6 +69,44 @@ Palette Palette::fromString(const juce::String& s)
     return p;
 }
 
+juce::String Palette::toClipboardText(const juce::String& name) const
+{
+    return "THEME name=" + name.removeCharacters(";") + ";" + toString();
+}
+
+bool Palette::fromClipboardText(const juce::String& text, Palette& out, juce::String* name)
+{
+    auto t = text.trim();
+    if (t.startsWith("THEME"))
+        t = t.substring(5).trimStart();
+
+    bool anyKnown = false;
+    juce::String foundName;
+    juce::StringArray kept;
+    for (auto& tok : juce::StringArray::fromTokens(t, ";", {}))
+    {
+        const auto trimmed = tok.trim();
+        if (trimmed.startsWith("name="))
+        {
+            foundName = trimmed.substring(5).trim();
+            continue;
+        }
+        const auto key = trimmed.upToFirstOccurrenceOf(":", false, false).trim();
+        if (key == "shadedPanel" || key == "edgeShadeDarken" || key == "edgeShadeAlpha")
+            anyKnown = true;
+        for (int i = 0; i < kNumPaletteFields; ++i)
+            if (key == kPaletteFields[i].key)
+                anyKnown = true;
+        kept.add(trimmed);
+    }
+    if (! anyKnown)
+        return false;
+    out = fromString(kept.joinIntoString(";"));
+    if (name != nullptr)
+        *name = foundName;
+    return true;
+}
+
 bool Palette::operator== (const Palette& o) const
 {
     for (int i = 0; i < kNumPaletteFields; ++i)
@@ -136,11 +174,49 @@ namespace
           "recordButton:ff8b0000;text:ff2b2c2e;textDim:ff6e6f72;"
           "screenText:ffe0e0e0;screenTextDim:ff888888;shadedPanel:1;"
           "edgeShadeDarken:0.85;edgeShadeAlpha:0.42" },
+
+        // Sieve's own presets, in the shared format: Sieve's surface = panelBg, its bars =
+        // windowBg, divider = gridLine, accent = accent + waveform. Everything else is Midnight's
+        // (they're all dark surfaces, so Midnight's light text fits). Kept identical to
+        // Sieve's ThemePalette.builtIns so both apps list the same starting points.
+        { "Ableton Dark Blue-Grey",
+          "windowBg:ff293238;panelBg:ff37474f;gridLine:ff2c3a42;accent:fff5b854;waveform:fff5b854" },
+        { "Charcoal",
+          "windowBg:ff2e2e2e;panelBg:ff434343;gridLine:ff363636;accent:fff5b854;waveform:fff5b854" },
+        { "Neutral Grey",
+          "windowBg:ff3a3a3a;panelBg:ff616161;gridLine:ff4e4e4e;accent:fff5b854;waveform:fff5b854" },
+        { "Slate Blue",
+          "windowBg:ff21252e;panelBg:ff2e3440;gridLine:ff262b36;accent:ff88c0d0;waveform:ff88c0d0" },
+        { "Warm Graphite",
+          "windowBg:ff262322;panelBg:ff3a3736;gridLine:ff302c2b;accent:ffe0a24e;waveform:ffe0a24e" },
+        { "Soft Grey",
+          "windowBg:ff66666a;panelBg:ff46464b;gridLine:ff363636;accent:ffe7eaec;waveform:ffe7eaec" },
     };
     const int kNumBuiltIns = (int) (sizeof(kBuiltIns) / sizeof(kBuiltIns[0]));
 
     const juce::String kCustomPrefix = "custom.";
     const juce::String kActiveKey    = "activePalette";
+    const juce::String kMigratedKey  = "migratedSharedThemes";
+    const juce::String kThemeExt     = ".theme";
+
+    // A theme name as a file name: no path separators or colons (Finder shows ':' as '/').
+    juce::String fileSafe(const juce::String& name)
+    {
+        return name.trim().replaceCharacters("/:", "--");
+    }
+}
+
+juce::File ThemeManager::sharedThemesDir()
+{
+    auto dir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+                   .getChildFile("Application Support").getChildFile("Shared Themes");
+    dir.createDirectory();
+    return dir;
+}
+
+juce::File ThemeManager::themeFile(const juce::String& name)
+{
+    return sharedThemesDir().getChildFile(fileSafe(name) + kThemeExt);
 }
 
 //==============================================================================
@@ -172,8 +248,29 @@ juce::PropertiesFile& ThemeManager::props()
 
 void ThemeManager::load()
 {
+    migrateSettingsThemes();
     const auto stored = props().getValue(kActiveKey, {});
     active = stored.isNotEmpty() ? Palette::fromString(stored) : getPreset("Midnight");
+}
+
+void ThemeManager::migrateSettingsThemes()
+{
+    auto& pf = props();
+    if (pf.getBoolValue(kMigratedKey, false))
+        return;
+    // Themes saved before the shared folder existed lived as "custom.<name>" settings entries.
+    // Copy each out to a .theme file (never clobbering one that's already there); the old
+    // entries stay in the settings file untouched, as a backup.
+    for (auto& key : pf.getAllProperties().getAllKeys())
+    {
+        if (! key.startsWith(kCustomPrefix))
+            continue;
+        const auto f = themeFile(key.substring(kCustomPrefix.length()));
+        if (! f.existsAsFile())
+            f.replaceWithText(pf.getValue(key));
+    }
+    pf.setValue(kMigratedKey, true);
+    pf.saveIfNeeded();
 }
 
 void ThemeManager::setPalette(const Palette& p)
@@ -202,10 +299,8 @@ juce::StringArray ThemeManager::builtInNames() const
 juce::StringArray ThemeManager::customNames() const
 {
     juce::StringArray names;
-    if (propsFile != nullptr)
-        for (auto& key : propsFile->getAllProperties().getAllKeys())
-            if (key.startsWith(kCustomPrefix))
-                names.add(key.substring(kCustomPrefix.length()));
+    for (auto& f : sharedThemesDir().findChildFiles(juce::File::findFiles, false, "*" + kThemeExt))
+        names.add(f.getFileNameWithoutExtension());
     names.sort(true);
     return names;
 }
@@ -221,12 +316,9 @@ Palette ThemeManager::getPreset(const juce::String& name) const
         if (name == kBuiltIns[i].name)
             return Palette::fromString(kBuiltIns[i].spec);
 
-    if (propsFile != nullptr)
-    {
-        const auto v = propsFile->getValue(kCustomPrefix + name, {});
-        if (v.isNotEmpty())
-            return Palette::fromString(v);
-    }
+    const auto f = themeFile(name);
+    if (f.existsAsFile())
+        return Palette::fromString(f.loadFileAsString());
     return Palette::fromString(kBuiltIns[0].spec);   // Midnight
 }
 
@@ -235,14 +327,26 @@ void ThemeManager::saveCustom(const juce::String& name, const Palette& p)
     const auto clean = name.trim();
     if (clean.isEmpty())
         return;
-    props().setValue(kCustomPrefix + clean, p.toString());
-    props().saveIfNeeded();
+    themeFile(clean).replaceWithText(p.toString());
     sendChangeMessage();
 }
 
 void ThemeManager::deleteCustom(const juce::String& name)
 {
-    props().removeValue(kCustomPrefix + name.trim());
-    props().saveIfNeeded();
+    themeFile(name).deleteFile();
     sendChangeMessage();
+}
+
+void ThemeManager::copyToClipboard(const juce::String& name) const
+{
+    juce::SystemClipboard::copyTextToClipboard(active.toClipboardText(name));
+}
+
+bool ThemeManager::pasteFromClipboard(juce::String* name)
+{
+    Palette p;
+    if (! Palette::fromClipboardText(juce::SystemClipboard::getTextFromClipboard(), p, name))
+        return false;
+    setPalette(p);
+    return true;
 }

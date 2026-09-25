@@ -59,6 +59,11 @@ struct Palette
     juce::String toString() const;                       // "key:aarrggbb;key:aarrggbb;..."
     static Palette fromString(const juce::String&);      // unknown keys ignored, missing keep default
 
+    // Clipboard form shared with Sieve: "THEME name=<name>;<toString()>". The parser also takes
+    // a bare toString() (no prefix); returns false when the text holds no known theme key.
+    juce::String toClipboardText(const juce::String& name) const;
+    static bool fromClipboardText(const juce::String&, Palette& out, juce::String* name = nullptr);
+
     bool operator== (const Palette&) const;
     bool operator!= (const Palette& o) const { return ! (*this == o); }
 };
@@ -84,16 +89,28 @@ public:
     void setPalette (const Palette&);        // apply live + debounced save + broadcast
 
     juce::StringArray builtInNames() const;  // "Start from..." presets baked into the code
-    juce::StringArray customNames() const;   // user-saved presets from the settings file
+    juce::StringArray customNames() const;   // user-saved presets from the shared themes folder
     bool isCustom (const juce::String& name) const;
     Palette getPreset (const juce::String& name) const;   // built-in or custom; Midnight if unknown
 
     void saveCustom (const juce::String& name, const Palette&);
     void deleteCustom (const juce::String& name);
 
+    // Copy / paste a theme as text (see Palette::toClipboardText) -- the quick way to move one
+    // between R3WRK and Sieve without saving it first. Paste applies it live.
+    void copyToClipboard (const juce::String& name) const;
+    bool pasteFromClipboard (juce::String* name = nullptr);   // name from the text, if any
+
+    // ~/Library/Application Support/Shared Themes/ -- one "<name>.theme" file per saved theme,
+    // each holding a Palette::toString(). Sieve reads and writes the same folder, so a theme
+    // saved in either app shows up in both. Created on first use.
+    static juce::File sharedThemesDir();
+
 private:
     void timerCallback() override;           // debounced settings-file write
     void load();
+    void migrateSettingsThemes();            // one-time: old custom.* settings -> .theme files
+    static juce::File themeFile (const juce::String& name);
     juce::PropertiesFile& props();
 
     Palette active;

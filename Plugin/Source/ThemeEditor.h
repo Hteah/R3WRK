@@ -10,6 +10,8 @@
         open the colour picker in place) — changes apply live everywhere.
       - name field + Save to store the current palette as a custom preset;
         Delete removes the selected custom preset; Reset returns to Midnight.
+      - Copy / Paste: the theme as a line of text, to move it to Sieve (or back) without
+        saving. Saved themes live in the shared themes folder, so Sieve lists them too.
 
     Everything lives inside this one component (the picker is an in-panel overlay,
     not a nested call-out) so the enclosing CallOutBox never dismisses itself.
@@ -58,6 +60,8 @@ private:
     juce::TextButton saveButton   { "Save" };
     juce::TextButton deleteButton { "Delete" };
     juce::TextButton resetButton  { "Reset" };
+    juce::TextButton copyButton   { "Copy" };    // theme as text, for pasting into Sieve
+    juce::TextButton pasteButton  { "Paste" };
 
     juce::ColourSelector picker;
     juce::TextButton     pickerDone { "Done" };

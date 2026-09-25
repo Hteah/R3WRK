@@ -9,6 +9,7 @@
 #include "../Source/ReverbEngine.h"
 #include "../Source/PlexiphonEngine.h"
 #include "../Source/MimeophonEngine.h"
+#include "../Source/Theme.h"
 
 namespace
 {
@@ -1425,6 +1426,29 @@ int main()
         check(echo1L > echo1R * 3.0f, "mono-source echo 1 stays on the left (mono dry only enters the left line)");
         check(echo2R > echo2L * 3.0f, "mono-source echo 2 bounces to the right");
         check(echo3L > echo3R * 3.0f, "mono-source echo 3 bounces back to the left");
+    }
+
+    {
+        std::cout << "\n[Theme] shared text format (R3WRK <-> Sieve)" << std::endl;
+        // Pure Palette parsing only -- no ThemeManager, so the real settings file and the
+        // shared themes folder are never touched.
+        Palette p;
+        p.windowBg = juce::Colour(0xff8797ac);
+        p.gridLine = juce::Colour(0x80000000);
+        p.shadedPanel = true;
+        p.edgeShadeAlpha = 0.3f;
+        check(Palette::fromString(p.toString()) == p, "toString -> fromString round-trips");
+        check(Palette::fromString(p.toString()).toString() == p.toString(), "text round-trips byte for byte");
+
+        Palette q;
+        juce::String name;
+        check(Palette::fromClipboardText(p.toClipboardText("Grey Blue"), q, &name) && q == p && name == "Grey Blue",
+              "clipboard text round-trips with its name");
+        check(Palette::fromClipboardText(p.toString(), q) && q == p, "bare toString() pastes too");
+        check(! Palette::fromClipboardText("hello there", q), "non-theme text is rejected");
+        check(Palette::fromString("futureKey:ff00ff00;accent:ff112233").accent == juce::Colour(0xff112233)
+                  && Palette::fromString("futureKey:ff00ff00") == Palette(),
+              "unknown keys are ignored, missing keys keep Midnight defaults");
     }
 
     std::cout << "===========================================" << std::endl;

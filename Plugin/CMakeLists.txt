@@ -168,6 +168,7 @@ target_sources(R3WRKSmokeTest
         Source/EditActions.cpp
         Source/OctatrackOtFile.cpp
         Source/TimeStretchEngine.cpp
+        Source/Theme.cpp
         Tests/SmokeTest.cpp)
 
 target_compile_definitions(R3WRKSmokeTest
@@ -183,6 +184,7 @@ target_link_libraries(R3WRKSmokeTest
         juce::juce_events
         juce::juce_audio_basics
         juce::juce_audio_formats
+        juce::juce_gui_basics          # Theme.cpp (Colour, SystemClipboard)
         rubberband_dep
     PUBLIC
         juce::juce_recommended_config_flags)
