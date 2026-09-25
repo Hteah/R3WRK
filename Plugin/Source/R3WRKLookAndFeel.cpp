@@ -476,56 +476,34 @@ namespace
         g.fillEllipse (cx - r, screen.getCentreY() - r, r * 2.0f, r * 2.0f);
     }
 
-    // Float on top: two overlapping rings, each with a short arrow inside pointing out of the
-    // icon (right, then up) -- "send this window out, above everything else." From the r3wrk
-    // Component Library reference sheet, picked by the user to replace the old picture-in-
-    // picture-style glyph. Geometry lifted proportionally from the reference's 100x100 viewBox.
+    // Float on top: an eye -- pointed almond outline, an iris ring, a solid pupil. Flat line
+    // art, no shading or highlight, from a reference picked by the user to replace the old
+    // two-rings-with-arrows glyph.
     void drawFloatTopIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
     {
-        // The two rings + arrows only occupy a 73x40 band (x:14-87, y:30-70) of the reference's
-        // 100x100 viewBox, off-centre and mostly whitespace around it -- scaling by the raw
-        // viewBox (as if the glyph filled it) left the icon reading much smaller than its
-        // sibling buttons. Fit that actual bounding box to the button instead, centred on its
-        // own centre (50.5, 50), so it fills the frame the same way the other icons do.
-        constexpr float glyphW = 73.0f, glyphH = 40.0f, glyphCX = 50.5f, glyphCY = 50.0f;
-        constexpr float fillFraction = 0.95f;
-        const float s = fillFraction * juce::jmin (bounds.getWidth() / glyphW, bounds.getHeight() / glyphH);
-        const float ox = bounds.getCentreX() - glyphCX * s;
-        const float oy = bounds.getCentreY() - glyphCY * s;
-        auto P = [&] (float x, float y) { return juce::Point<float> (ox + x * s, oy + y * s); };
+        // Almond is ~2.2:1, sized to the button the same way the other icons fill their frame.
+        const float h = juce::jmin (bounds.getHeight() * 0.82f, bounds.getWidth() * 0.82f / 2.2f);
+        const float w = h * 2.2f;
+        const float cx = bounds.getCentreX(), cy = bounds.getCentreY();
+        const float stroke = juce::jmax (1.2f, h * 0.09f);
+
+        // Two quadratic lids meeting in sharp corners. A quadratic's peak sits halfway to its
+        // control point, so the control goes at a full h from centre for an h/2 lid height.
+        juce::Path almond;
+        almond.startNewSubPath (cx - w * 0.5f, cy);
+        almond.quadraticTo (cx, cy - h, cx + w * 0.5f, cy);
+        almond.quadraticTo (cx, cy + h, cx - w * 0.5f, cy);
+        almond.closeSubPath();
 
         g.setColour (ink);
+        g.strokePath (almond, juce::PathStrokeType (stroke, juce::PathStrokeType::mitered,
+                                                    juce::PathStrokeType::rounded));
 
-        auto ringWithArrow = [&] (float ccx, float ccy, float r, float strokeW,
-                                  juce::Point<float> shaftA, juce::Point<float> shaftB,
-                                  juce::Point<float> headA,  juce::Point<float> headTip,
-                                  juce::Point<float> headB)
-        {
-            g.drawEllipse (P (ccx - r, ccy - r).x, P (ccx - r, ccy - r).y, 2.0f * r * s, 2.0f * r * s,
-                           strokeW * s);
+        const float irisR = h * 0.41f;
+        g.drawEllipse (cx - irisR, cy - irisR, irisR * 2.0f, irisR * 2.0f, stroke);
 
-            juce::Path shaft;
-            shaft.startNewSubPath (P (shaftA.x, shaftA.y));
-            shaft.lineTo (P (shaftB.x, shaftB.y));
-            g.strokePath (shaft, juce::PathStrokeType (strokeW * s, juce::PathStrokeType::curved,
-                                                       juce::PathStrokeType::rounded));
-
-            juce::Path head;
-            head.startNewSubPath (P (headA.x, headA.y));
-            head.lineTo (P (headTip.x, headTip.y));
-            head.lineTo (P (headB.x, headB.y));
-            g.strokePath (head, juce::PathStrokeType (strokeW * s, juce::PathStrokeType::curved,
-                                                      juce::PathStrokeType::rounded));
-        };
-
-        // Left ring (cx=34,cy=50,r=20): shaft + head pointing right.
-        ringWithArrow (34.0f, 50.0f, 20.0f, 2.5f,
-                       { 30.0f, 50.0f }, { 42.0f, 50.0f },
-                       { 37.0f, 44.0f }, { 42.0f, 50.0f }, { 37.0f, 56.0f });
-        // Right ring (cx=72,cy=50,r=15): shaft + head pointing up.
-        ringWithArrow (72.0f, 50.0f, 15.0f, 2.5f,
-                       { 72.0f, 58.0f }, { 72.0f, 42.0f },
-                       { 67.0f, 47.0f }, { 72.0f, 42.0f }, { 77.0f, 47.0f });
+        const float pupilR = h * 0.22f;
+        g.fillEllipse (cx - pupilR, cy - pupilR, pupilR * 2.0f, pupilR * 2.0f);
     }
 
     // Capture Output: a record dot with a downward arrow beneath it -- "record what's coming
