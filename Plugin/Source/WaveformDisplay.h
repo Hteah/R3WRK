@@ -46,7 +46,11 @@ class WaveformDisplay : public juce::Component,
                          private juce::Timer
 {
 public:
-    explicit WaveformDisplay(AudioDocument& doc);
+    // isPluginInstance -- true for VST3/AU, false for the Standalone app (see PluginEditor's
+    // standaloneWindow, and KnobRow/FxRow's own `standalone` ctor param for the same idiom).
+    // Drives the idle-state live input oscilloscope (see paint()/paintInputMonitorScope()) --
+    // a plugin has a real host-fed input signal to show while idle; Standalone normally doesn't.
+    WaveformDisplay(AudioDocument& doc, bool isPluginInstance);
     ~WaveformDisplay() override;
 
     void paint(juce::Graphics&) override;
@@ -118,6 +122,7 @@ private:
     bool refitViewIfContentChanged();   // see .cpp -- keeps "show everything" showing everything
     void followPlayheadIfNeeded();      // slide the view to keep the playhead centred while playing
     void paintRecordingScope(juce::Graphics&);
+    void paintInputMonitorScope(juce::Graphics&);   // VST/AU idle -- live input oscilloscope
     void paintSelectionPreview(juce::Graphics&);        // live Amplify/Stretch preview over a selection
     void paintWholeClipGainPreview(juce::Graphics&);    // live Amplify preview when there's no selection
     void paintLoopCrossfade(juce::Graphics&);           // fade wedges at the loop region's ends
@@ -139,6 +144,7 @@ private:
                                                  // this, not maxViewSpan()-span directly
 
     AudioDocument& document;
+    const bool isPluginInstance;
     juce::SharedResourcePointer<ThemeManager> theme;
     int64_t viewStart = 0, viewEnd = 0;
     int64_t followViewAnchorSample = -1;   // playhead value the follow scroll last used; -1 = not following

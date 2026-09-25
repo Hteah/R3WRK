@@ -20,7 +20,7 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
     : AudioProcessorEditor(&p),
       standaloneWindow(p.wrapperType == juce::AudioProcessor::wrapperType_Standalone),
       processorRef(p),
-      header(p.document), waveformDisplay(p.document), spectrogramDisplay(p.document),
+      header(p.document), waveformDisplay(p.document, ! standaloneWindow), spectrogramDisplay(p.document),
       timeRuler(waveformDisplay, p.document), toolbar(p, p.document),
       knobRow(p.document, standaloneWindow), fxRow(p.document, standaloneWindow)
 {

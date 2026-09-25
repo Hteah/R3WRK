@@ -456,6 +456,17 @@ public:
     std::atomic<int64_t> recordedSamples { 0 };   // running length of the take
     void resetRecordingScope();
 
+    // Live INPUT monitor (VST/AU only -- see PluginProcessor::processBlock's idle tail): while
+    // genuinely idle (not recording/playing/scrubbing), fed with the same block peak min/max
+    // shape the recording scope uses, from the untouched host input, so WaveformDisplay can show
+    // a live oscilloscope of what's arriving at the plugin. A SEPARATE ring from scopeMin/
+    // scopeMax on purpose, even though the two states are mutually exclusive -- keeps this
+    // feature fully additive and the recording path untouched.
+    static constexpr int monitorScopeSize = 1024;
+    float monitorScopeMin[monitorScopeSize] = {};
+    float monitorScopeMax[monitorScopeSize] = {};
+    std::atomic<int> monitorScopeWritePos { 0 };
+
     //==============================================================================
     juce::UndoManager undoManager;
 

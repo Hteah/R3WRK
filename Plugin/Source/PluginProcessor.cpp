@@ -255,8 +255,15 @@ static int gatherRegion(juce::AudioBuffer<float>& dst, int dstOffset, int count,
         {
             if (pos >= regionEnd)
             {
-                if (pingPong)  { dir = -1; pos = regionEnd - 2; continue; }   // reflect at the top
-                if (loop)      { pos = regionStart; continue; }
+                if (pingPong)    { dir = -1; pos = regionEnd - 2; continue; }   // reflect at the top
+                // Reverse-loop mode switched on WHILE playback is already going forward (e.g.
+                // pressing Play with nothing selected, then cycling the Loop button mid-playback
+                // -- direction otherwise only ever starts backward at a fresh Play press, see
+                // processBlock's startReversed) -- flip to backward here too, mirroring the
+                // backward branch's own reverseLoop wrap below, instead of silently treating
+                // reverseLoop exactly like a plain forward loop until Play is pressed again.
+                if (reverseLoop) { dir = -1; pos = regionEnd;     continue; }
+                if (loop)        { pos = regionStart; continue; }
                 break;
             }
             const int chunk = (int) juce::jmin((int64_t) (count - written), regionEnd - pos);
@@ -279,9 +286,21 @@ static int gatherRegion(juce::AudioBuffer<float>& dst, int dstOffset, int count,
                     pos = regionEnd;           // wrap back to the tail, still playing backward
                     continue;
                 }
-                dir = 1;
-                pos = regionStart;             // the next frame forward plays
-                continue;
+                // Ping-pong's return leg bounces back to forward here -- pingPong implies loop
+                // (see its own computation at the call site), so this is unreachable with loop
+                // off. Mirrors the forward branch's own `if (loop) ... else break` shape: with
+                // loop truly off (backward only via a reverse-loop pass that was then switched
+                // off mid-playback), there's no mode left to bounce back into -- stop here
+                // instead of unconditionally flipping to forward and continuing forever, which
+                // is what silently made "loop off" never actually stop once direction had ever
+                // gone backward.
+                if (loop)
+                {
+                    dir = 1;
+                    pos = regionStart;             // the next frame forward plays
+                    continue;
+                }
+                break;
             }
             const int chunk = (int) juce::jmin((int64_t) (count - written), pos - regionStart);
             const int64_t from = pos - chunk;  // copy [from+1 .. pos] forward, then reverse it
@@ -874,16 +893,56 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                                                            : (pos <  regionStart || pos >= regionEnd);
                 if (posOutOfRegion)
                 {
-                    // snap a stray playhead into the region
-                    pos = reverseLoopOn ? regionEnd : regionStart;
-                    playbackDir = reverseLoopOn ? -1 : 1;
+                    // Snap a stray playhead into the region -- but ONLY when there's actually
+                    // somewhere to keep playing (loop/ping-pong/reverse). `pos >= regionEnd` is
+                    // true not just for a genuinely stray position (e.g. a document edit shrank
+                    // the buffer) but for the ordinary, expected case of a non-looping pass
+                    // simply reaching its natural end -- which, thanks to block-aligned reads,
+                    // happens to land pos exactly ON regionEnd almost every time. This used to
+                    // unconditionally treat that as "stray" and snap back to regionStart with
+                    // playbackDir=1, restarting playback with loop supposedly off -- and, for
+                    // ping-pong specifically, it always did a plain forward wrap here instead of
+                    // gatherRegion's own backward reflection, so ping-pong could never actually
+                    // bounce once its cycle length happened to land on a block boundary.
+                    if (reverseLoopOn)
+                    {
+                        pos = regionEnd;           // still playing backward, re-enter at the tail
+                        playbackDir = -1;
+                    }
+                    else if (pingPong && pos >= regionEnd)
+                    {
+                        // Mirrors gatherRegion's own forward-hits-end reflection.
+                        pos = juce::jmax(regionStart, regionEnd - 2);
+                        playbackDir = -1;
+                    }
+                    else if (loop)
+                    {
+                        pos = regionStart;
+                        playbackDir = 1;
+                    }
+                    else
+                    {
+                        // Not looping in any mode: don't snap-and-restart. Just clamp into range
+                        // so the ordinary render call below (gatherRegion, via renderPlayback-
+                        // Direct/Stretched) sees a safe, in-bounds position and takes its own
+                        // "reached the end, loop is off -> stop" path, exactly as it already does
+                        // whenever this recovery snap doesn't happen to preempt it.
+                        pos = juce::jlimit(regionStart, regionEnd, pos);
+                    }
 
-                    // That splice is an arbitrary jump in the waveform -- ramp in over a few ms
-                    // so it's a soft thump instead of a pop (see the declick fields' comment).
-                    declickLen = (int) juce::jlimit<int64_t>(1, 512,
-                        (int64_t) (0.008 * currentSampleRate));
-                    declickRemaining = declickLen;
-                    seekCrossfadeActive = false;   // no coherent "old" material for this kind of jump
+                    // A genuine snap-and-continue jump (the three branches above that keep
+                    // playing -- all imply loop, see their own computation) is an arbitrary
+                    // splice in the waveform -- ramp in over a few ms so it's a soft thump
+                    // instead of a pop (see the declick fields' comment). Skipped for the
+                    // not-looping clamp above: nothing is jumping there, gatherRegion below just
+                    // finds the natural end and stops.
+                    if (loop)
+                    {
+                        declickLen = (int) juce::jlimit<int64_t>(1, 512,
+                            (int64_t) (0.008 * currentSampleRate));
+                        declickRemaining = declickLen;
+                        seekCrossfadeActive = false;   // no coherent "old" material for this kind of jump
+                    }
                 }
                 else if (manualSeek)
                 {
@@ -1084,6 +1143,35 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     // pass-through input for a peak loud enough to cross autoRecordThresholdDb. Read-only:
     // it never touches `buffer` or starts recording itself, just flags it for the message
     // thread (see EditorToolbar::timerCallback) to act on -- see AudioDocument's comment.
+
+    // Live input monitor (VST/AU only): feed a scope ring from the still-pristine host input --
+    // same 256-sample-hop min/max shape the isRecording branch's scope feed uses (and
+    // appendDesktopSamples() duplicates for Desktop recording) -- so WaveformDisplay can draw a
+    // live oscilloscope while genuinely idle. Deliberately placed before the reverb/plex/mimeo
+    // tail-ringout blocks below, which additively mutate `buffer` while a decay tail is still
+    // ringing out -- reading here instead means the monitor always shows the real incoming
+    // signal, not a stale effect tail standing in for it.
+    if (wrapperType != wrapperType_Standalone)
+    {
+        constexpr int hop = 256;
+        for (int s = 0; s < numSamples; s += hop)
+        {
+            const int nn = juce::jmin(hop, numSamples - s);
+            float mn = 0.0f, mx = 0.0f;
+            for (int ch = 0; ch < numCh; ++ch)
+            {
+                const auto r = juce::FloatVectorOperations::findMinAndMax(buffer.getReadPointer(ch) + s, nn);
+                mn = juce::jmin(mn, r.getStart());
+                mx = juce::jmax(mx, r.getEnd());
+            }
+            const int wpos = document.monitorScopeWritePos.load(std::memory_order_relaxed);
+            document.monitorScopeMin[wpos] = mn;
+            document.monitorScopeMax[wpos] = mx;
+            document.monitorScopeWritePos.store((wpos + 1) % AudioDocument::monitorScopeSize,
+                                                std::memory_order_release);
+        }
+    }
+
     if (document.autoRecordEnabled.load(std::memory_order_relaxed)
         && ! document.autoRecordTriggered.load(std::memory_order_relaxed))
     {

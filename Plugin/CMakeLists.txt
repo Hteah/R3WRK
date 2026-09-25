@@ -57,6 +57,13 @@ juce_add_plugin(R3WRK
     IS_MIDI_EFFECT FALSE
     EDITOR_WANTS_KEYBOARD_FOCUS TRUE
     COPY_PLUGIN_AFTER_BUILD TRUE   # install VST3 + AU into ~/Library/Audio/Plug-Ins on every build
+    # Without this, JUCE never adds NSMicrophoneUsageDescription to the Standalone app's
+    # Info.plist -- macOS then silently denies mic access at the OS level (no prompt, no entry
+    # in System Settings > Privacy > Microphone at all, just zeroed input samples), which is
+    # what made Standalone recordings capture silence despite the right input device/channels
+    # being selected in Audio Settings.
+    MICROPHONE_PERMISSION_ENABLED TRUE
+    MICROPHONE_PERMISSION_TEXT "R3WRK needs microphone access to record audio."
     PLUGIN_MANUFACTURER_CODE Heat
     PLUGIN_CODE R3wk
     FORMATS VST3 AU Standalone

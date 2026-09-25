@@ -728,7 +728,9 @@ namespace
         int idleRefreshTicks = 0;        // counts 15Hz ticks toward the next idle applySnapshot()
 
         AudioDocument captureDoc;
-        WaveformDisplay waveform { captureDoc };
+        // false: this preview always shows captureDoc's own (static, offline) content, never a
+        // live host input scope, regardless of VST/AU vs Standalone.
+        WaveformDisplay waveform { captureDoc, false };
         juce::Label title, caption;
         juce::TextButton loadButton { "Load into Editor" };
         juce::TextButton saveButton { "Save As..." };

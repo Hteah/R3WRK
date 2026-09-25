@@ -2,7 +2,8 @@
 #include "EditActions.h"
 #include <cmath>
 
-WaveformDisplay::WaveformDisplay(AudioDocument& doc) : document(doc)
+WaveformDisplay::WaveformDisplay(AudioDocument& doc, bool isPluginInstance_)
+    : document(doc), isPluginInstance(isPluginInstance_)
 {
     document.changeBroadcaster.addChangeListener(this);
     theme->addChangeListener(this);
@@ -94,6 +95,23 @@ int64_t WaveformDisplay::playheadDrawSample() const
 
 void WaveformDisplay::timerCallback()
 {
+    // Safety net: document.selectionEdgeDragging is set by a Slider's onDragStart (KnobRow's
+    // Start/End knobs) or our own mouseDrag, and relied on to be cleared again by the matching
+    // onDragEnd/mouseUp. In a hosted plugin editor, a mouse-up right at or past the embedded
+    // view's edge can be swallowed by the host's own window/focus handling before it ever
+    // reaches this component or the slider -- unlike a Standalone app's own native window. If
+    // that happens the flag is stuck nonzero forever, and PluginProcessor::processBlock keeps
+    // routing playback through renderDragScan() (the live-chasing-a-dragged-edge path) instead
+    // of the ordinary one -- which has no ping-pong/reverse-loop support at all, so a stuck flag
+    // reads as "loop mode changes do nothing, always plays forward". If the flag is set but no
+    // mouse button is actually down anywhere, it's stale -- self-heal rather than leave
+    // playback stuck on the reduced-feature path indefinitely.
+    if (document.selectionEdgeDragging.load(std::memory_order_relaxed) != 0
+        && ! juce::ModifierKeys::currentModifiers.isAnyMouseButtonDown())
+    {
+        document.selectionEdgeDragging = 0;
+    }
+
     // A selection drag parked at a side edge: scroll the view that way and re-derive the
     // dragged marker from the (edge-pinned) pointer x, so it tracks over the newly revealed
     // content. Driven here, not from mouseDrag, so it keeps going while the pointer is held
@@ -773,6 +791,54 @@ void WaveformDisplay::paintRecordingScope(juce::Graphics& g)
     g.drawText("REC  " + clock, 28, 8, 220, 18, juce::Justification::centredLeft, false);
 }
 
+void WaveformDisplay::paintInputMonitorScope(juce::Graphics& g)
+{
+    // Same fill-a-min/max-envelope-path shape as paintRecordingScope() above, reading the
+    // separate monitor ring instead -- no "REC" clock/dot here, there's no take to clock; a
+    // small dim label instead just so this reads as distinct from both the recording scope and
+    // the normal loaded-waveform view.
+    const auto& pal = theme->palette();
+
+    juce::Path clip;
+    clip.addRoundedRectangle(getLocalBounds().toFloat(), 10.0f);
+    g.reduceClipRegion(clip);
+
+    g.fillAll(pal.panelBg);
+
+    const float W = (float) getWidth();
+    const float H = (float) getHeight();
+    const float mid = std::floor(H * 0.5f) + 0.5f;
+    const float half = H * 0.46f;
+
+    g.setColour(pal.zeroLine);
+    g.drawHorizontalLine((int) mid, 0.0f, W);
+
+    const int n = AudioDocument::monitorScopeSize;
+    const int wpos = document.monitorScopeWritePos.load(std::memory_order_acquire);
+
+    juce::Path p;
+    p.startNewSubPath(0.0f, mid);
+    for (int i = 0; i < n; ++i)
+    {
+        const int idx = (wpos + i) % n;
+        const float x = W * (float) i / (float) (n - 1);
+        p.lineTo(x, mid - juce::jlimit(-1.0f, 1.0f, document.monitorScopeMax[idx]) * half);
+    }
+    for (int i = n - 1; i >= 0; --i)
+    {
+        const int idx = (wpos + i) % n;
+        const float x = W * (float) i / (float) (n - 1);
+        p.lineTo(x, mid - juce::jlimit(-1.0f, 1.0f, document.monitorScopeMin[idx]) * half);
+    }
+    p.closeSubPath();
+    g.setColour(pal.waveform);
+    g.fillPath(p);
+
+    g.setColour(pal.screenTextDim);
+    g.setFont(juce::FontOptions(13.0f, juce::Font::bold));
+    g.drawText("INPUT", 12, 8, 100, 18, juce::Justification::centredLeft, false);
+}
+
 // Live preview of a pending Amplify/Stretch-Pitch edit, drawn over the selection while its
 // pop-up panel's slider is being dragged (see AudioDocument::previewActive and
 // EditorToolbar's AmplifyPanel/StretchPanel). Rebuilt from a fresh raw copy of just the
@@ -992,6 +1058,21 @@ void WaveformDisplay::paint(juce::Graphics& g)
     if (document.isRecording.load(std::memory_order_relaxed))
     {
         paintRecordingScope(g);
+        return;
+    }
+
+    // VST/AU, genuinely idle (not playing, not scrubbing) AND nothing recorded/loaded yet: show
+    // a live oscilloscope of the host's incoming input in place of the usual "No audio loaded"
+    // text -- see PluginProcessor::processBlock's idle-tail feed of document.monitorScope*.
+    // Gated on isEmpty() so this never covers up a document that's actually there -- stopping a
+    // recording or a play pass should still show what was just recorded/played, not silently
+    // swap back to the live input the moment isRecording/isPlaying goes false.
+    if (isPluginInstance
+        && document.isEmpty()
+        && ! document.isPlaying.load(std::memory_order_relaxed)
+        && ! document.isScrubbing.load(std::memory_order_relaxed))
+    {
+        paintInputMonitorScope(g);
         return;
     }
 
