@@ -1189,6 +1189,19 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             document.autoRecordTriggered.store(true, std::memory_order_relaxed);
     }
 
+    // Once a sample has been recorded/loaded, idle blocks go silent instead of passing the input
+    // through -- live-input monitoring is only for the empty-document state (matching the
+    // oscilloscope's own isEmpty() gate in WaveformDisplay::paint). Done after the monitor scope
+    // and Auto-Record detection above, which both need the real input, and before the FX tail
+    // ring-outs below, which add onto whatever's left in `buffer`. A missed try-lock means the
+    // message thread is mid-edit on the document -- which only happens when there's something
+    // there -- so it counts as non-empty.
+    {
+        const juce::CriticalSection::ScopedTryLockType stl(document.getLock());
+        if (! stl.isLocked() || ! document.isEmpty())
+            buffer.clear();
+    }
+
     // Let a still-ringing reverb tail continue decaying over host passthrough (or silence in the
     // Standalone), additively -- NOT unconditionally on every idle block, which would mean
     // R3WRK reverberating any live signal passing through any time it isn't actively playing its
