@@ -46,11 +46,13 @@ class WaveformDisplay : public juce::Component,
                          private juce::Timer
 {
 public:
-    // isPluginInstance -- true for VST3/AU, false for the Standalone app (see PluginEditor's
-    // standaloneWindow, and KnobRow/FxRow's own `standalone` ctor param for the same idiom).
-    // Drives the idle-state live input oscilloscope (see paint()/paintInputMonitorScope()) --
-    // a plugin has a real host-fed input signal to show while idle; Standalone normally doesn't.
-    WaveformDisplay(AudioDocument& doc, bool isPluginInstance);
+    // showInputMonitor -- true for the editor's own WaveformDisplay (showing `doc`'s real,
+    // live-fed document): drives the idle-state live input oscilloscope (see paint()/
+    // paintInputMonitorScope()), reading PluginProcessor::processBlock's idle-tail feed of
+    // AudioDocument::monitorScope*. False for a WaveformDisplay over some other, unrelated
+    // offline document (e.g. EditorToolbar's Black Box preview panel) that has no live input
+    // feed of its own to show.
+    WaveformDisplay(AudioDocument& doc, bool showInputMonitor);
     ~WaveformDisplay() override;
 
     void paint(juce::Graphics&) override;
@@ -144,7 +146,7 @@ private:
                                                  // this, not maxViewSpan()-span directly
 
     AudioDocument& document;
-    const bool isPluginInstance;
+    const bool showInputMonitor;
     juce::SharedResourcePointer<ThemeManager> theme;
     int64_t viewStart = 0, viewEnd = 0;
     int64_t followViewAnchorSample = -1;   // playhead value the follow scroll last used; -1 = not following

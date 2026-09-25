@@ -1144,16 +1144,19 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     // it never touches `buffer` or starts recording itself, just flags it for the message
     // thread (see EditorToolbar::timerCallback) to act on -- see AudioDocument's comment.
 
-    // Live input monitor (VST/AU only): feed a scope ring from the still-pristine host input --
-    // same 256-sample-hop min/max shape the isRecording branch's scope feed uses (and
-    // appendDesktopSamples() duplicates for Desktop recording) -- so WaveformDisplay can draw a
-    // live oscilloscope while genuinely idle. Deliberately placed before the reverb/plex/mimeo
+    // Live input monitor: feed a scope ring from the still-pristine input -- the host's input in
+    // VST/AU, whatever's selected in Audio Settings in Standalone -- so WaveformDisplay can draw
+    // a live oscilloscope while genuinely idle. Deliberately placed before the reverb/plex/mimeo
     // tail-ringout blocks below, which additively mutate `buffer` while a decay tail is still
     // ringing out -- reading here instead means the monitor always shows the real incoming
     // signal, not a stale effect tail standing in for it.
-    if (wrapperType != wrapperType_Standalone)
+    //
+    // A much finer hop than the recording scope's own 256 (which, over monitorScopeSize's 1024
+    // slots, would span ~6s squeezed across the whole width -- too zoomed out to read as a
+    // waveform at all, more a low-res level meter). 6 samples/hop * 1024 slots is ~140ms of
+    // audio at 44.1kHz filling the same width -- a tight scope-sweep view.
     {
-        constexpr int hop = 256;
+        constexpr int hop = 6;
         for (int s = 0; s < numSamples; s += hop)
         {
             const int nn = juce::jmin(hop, numSamples - s);

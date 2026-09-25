@@ -2,8 +2,8 @@
 #include "EditActions.h"
 #include <cmath>
 
-WaveformDisplay::WaveformDisplay(AudioDocument& doc, bool isPluginInstance_)
-    : document(doc), isPluginInstance(isPluginInstance_)
+WaveformDisplay::WaveformDisplay(AudioDocument& doc, bool showInputMonitor_)
+    : document(doc), showInputMonitor(showInputMonitor_)
 {
     document.changeBroadcaster.addChangeListener(this);
     theme->addChangeListener(this);
@@ -816,19 +816,24 @@ void WaveformDisplay::paintInputMonitorScope(juce::Graphics& g)
     const int n = AudioDocument::monitorScopeSize;
     const int wpos = document.monitorScopeWritePos.load(std::memory_order_acquire);
 
+    // Visual-only gain, not applied to the recording scope above -- an ordinary mic/line signal
+    // (roughly -20 to -12 dBFS) reads as a thin sliver at true scale; a real scope's vertical
+    // scale knob is the model here, zooming in on the signal rather than the full ±1 range.
+    constexpr float displayGain = 4.0f;
+
     juce::Path p;
     p.startNewSubPath(0.0f, mid);
     for (int i = 0; i < n; ++i)
     {
         const int idx = (wpos + i) % n;
         const float x = W * (float) i / (float) (n - 1);
-        p.lineTo(x, mid - juce::jlimit(-1.0f, 1.0f, document.monitorScopeMax[idx]) * half);
+        p.lineTo(x, mid - juce::jlimit(-1.0f, 1.0f, document.monitorScopeMax[idx] * displayGain) * half);
     }
     for (int i = n - 1; i >= 0; --i)
     {
         const int idx = (wpos + i) % n;
         const float x = W * (float) i / (float) (n - 1);
-        p.lineTo(x, mid - juce::jlimit(-1.0f, 1.0f, document.monitorScopeMin[idx]) * half);
+        p.lineTo(x, mid - juce::jlimit(-1.0f, 1.0f, document.monitorScopeMin[idx] * displayGain) * half);
     }
     p.closeSubPath();
     g.setColour(pal.waveform);
@@ -1061,13 +1066,14 @@ void WaveformDisplay::paint(juce::Graphics& g)
         return;
     }
 
-    // VST/AU, genuinely idle (not playing, not scrubbing) AND nothing recorded/loaded yet: show
-    // a live oscilloscope of the host's incoming input in place of the usual "No audio loaded"
-    // text -- see PluginProcessor::processBlock's idle-tail feed of document.monitorScope*.
-    // Gated on isEmpty() so this never covers up a document that's actually there -- stopping a
-    // recording or a play pass should still show what was just recorded/played, not silently
-    // swap back to the live input the moment isRecording/isPlaying goes false.
-    if (isPluginInstance
+    // Genuinely idle (not playing, not scrubbing) AND nothing recorded/loaded yet: show a live
+    // oscilloscope of the incoming input in place of the usual "No audio loaded" text -- see
+    // PluginProcessor::processBlock's idle-tail feed of document.monitorScope* (VST/AU: the
+    // host's input; Standalone: whatever's selected in Audio Settings). Gated on isEmpty() so
+    // this never covers up a document that's actually there -- stopping a recording or a play
+    // pass should still show what was just recorded/played, not silently swap back to the live
+    // input the moment isRecording/isPlaying goes false.
+    if (showInputMonitor
         && document.isEmpty()
         && ! document.isPlaying.load(std::memory_order_relaxed)
         && ! document.isScrubbing.load(std::memory_order_relaxed))
