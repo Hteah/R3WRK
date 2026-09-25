@@ -215,8 +215,8 @@ void MimeophonPanel::applyTheme()
 
 void MimeophonPanel::openFullEditor()
 {
-    juce::CallOutBox::launchAsynchronously(std::make_unique<MimeophonEditorPanel>(document),
-                                           moreButton.getScreenBounds(), nullptr);
+    // Click: transient popup. Double-click: pinned until the button is clicked again.
+    moreCallout.buttonClicked(moreButton, [this] { return std::make_unique<MimeophonEditorPanel>(document); });
 }
 
 void MimeophonPanel::EnablePill::paint(juce::Graphics& g)

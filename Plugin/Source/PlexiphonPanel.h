@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include "PinnableCallout.h"
 #include "AudioDocument.h"
 #include "Theme.h"
 #include "R3WRKLookAndFeel.h"
@@ -65,6 +66,7 @@ private:
     // oval around it.
     R3WRKIconOnlyLookAndFeel moreButtonLnf;
     juce::TextButton moreButton { R3WRKLookAndFeel::iconMore };
+    PinnableCallout moreCallout;   // the full editor popup -- see PinnableCallout.h
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PlexiphonPanel)
 };

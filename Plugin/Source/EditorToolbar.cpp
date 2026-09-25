@@ -49,13 +49,16 @@ namespace
     {
         AmplifyPanel(R3WRKAudioProcessor& proc, AudioDocument& doc) : processor(proc), document(doc)
         {
-            title.setText("Amplify", juce::dontSendNotification);
-            title.setFont(juce::FontOptions(14.0f, juce::Font::bold));
+            // Hardware-LCD look (dot-matrix text, dot-row slider, outlined dot-text button),
+            // same as the FX popups / Loop Crossfade -- see DotMatrixLCD.h.
+            setLookAndFeel(&lnf);
+
+            title.setText("AMPLIFY", juce::dontSendNotification);
             gain.setRange(-48.0, 24.0, 0.1);
             gain.setValue(0.0);
             gain.setTextValueSuffix(" dB");
             gain.setSliderStyle(juce::Slider::LinearHorizontal);
-            gain.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 22);
+            gain.setTextBoxStyle(juce::Slider::TextBoxRight, false, 84, 16);
             // Live preview: WaveformDisplay redraws the selection at this gain as the slider
             // moves, and PluginProcessor's playback path (see processBlock) applies the same
             // gain live to whatever's currently playing -- reverted (both visual and audio) in
@@ -75,7 +78,7 @@ namespace
             addAndMakeVisible(title);
             addAndMakeVisible(gain);
             addAndMakeVisible(apply);
-            setSize(280, 86);
+            setSize(320, 84);
 
             // Audition: loop the selection (or whole clip -- same region playback would pick on
             // its own) for the panel's lifetime, so there's always something playing to hear the
@@ -92,6 +95,7 @@ namespace
         }
         ~AmplifyPanel() override
         {
+            setLookAndFeel(nullptr);   // detach before lnf is destroyed
             document.previewActive = false;
             document.previewGainLinear = 1.0f;
             document.notifyChanged();
@@ -104,8 +108,9 @@ namespace
         void resized() override
         {
             auto r = getLocalBounds().reduced(10);
-            title.setBounds(r.removeFromTop(18));
-            r.removeFromTop(6);
+            title.setBounds(r.removeFromTop(16));
+            r.removeFromTop(10);
+            r = r.removeFromTop(24);
             apply.setBounds(r.removeFromRight(64).reduced(0, 2));
             r.removeFromRight(6);
             gain.setBounds(r);
@@ -116,7 +121,8 @@ namespace
         bool wasLoopEnabledOnOpen = false;
         juce::Label title;
         juce::Slider gain;
-        juce::TextButton apply { "Apply" };
+        juce::TextButton apply { "APPLY" };
+        lcd::HardwareLcdLookAndFeel lnf;
     };
 
     //==============================================================================

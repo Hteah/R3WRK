@@ -181,8 +181,8 @@ void ReverbPanel::applyTheme()
 
 void ReverbPanel::openFullEditor()
 {
-    juce::CallOutBox::launchAsynchronously(std::make_unique<ReverbEditorPanel>(document),
-                                           moreButton.getScreenBounds(), nullptr);
+    // Click: transient popup. Double-click: pinned until the button is clicked again.
+    moreCallout.buttonClicked(moreButton, [this] { return std::make_unique<ReverbEditorPanel>(document); });
 }
 
 void ReverbPanel::EnablePill::paint(juce::Graphics& g)

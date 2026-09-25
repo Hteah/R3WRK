@@ -178,8 +178,8 @@ void PlexiphonPanel::applyTheme()
 
 void PlexiphonPanel::openFullEditor()
 {
-    juce::CallOutBox::launchAsynchronously(std::make_unique<PlexiphonEditorPanel>(document),
-                                           moreButton.getScreenBounds(), nullptr);
+    // Click: transient popup. Double-click: pinned until the button is clicked again.
+    moreCallout.buttonClicked(moreButton, [this] { return std::make_unique<PlexiphonEditorPanel>(document); });
 }
 
 void PlexiphonPanel::EnablePill::paint(juce::Graphics& g)
