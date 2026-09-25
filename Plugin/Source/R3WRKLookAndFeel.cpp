@@ -358,40 +358,37 @@ namespace
         g.fillPath (flag);
     }
 
-    // Follow-playhead: a playhead marker (a downward triangle head + a thin line down the
-    // centre) flanked by two inward-pointing chevrons -- "keep the playhead in view". The
-    // chevrons are the follow cue; ported loosely from Sieve's FollowPlayheadIcon.
+    // Follow-playhead: the playhead (triangle head + line) with three motion streaks trailing
+    // off to its left -- "the view chases the moving playhead". Picked by the user to replace
+    // the old chevrons-around-a-playhead glyph; line weight matches the float-on-top eye.
     void drawFollowIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
     {
-        // Tighter inset than the other icons: keeps the glyph detail large on the small
-        // corner button.
-        auto a = bounds.reduced (bounds.getHeight() * 0.15f);
-        const float w = a.getWidth(), h = a.getHeight();
-        const float cx = a.getCentreX();
-        const float lineW = juce::jmax (1.4f, h * 0.085f);
+        const float h = juce::jmin (bounds.getHeight(), bounds.getWidth() / 1.5f) * 0.88f;
+        const float w = h * 1.5f;
+        const float cx = bounds.getCentreX(), cy = bounds.getCentreY();
+        const float stroke = juce::jmax (1.2f, h * 0.075f);
+        const float top = cy - h * 0.5f, bottom = cy + h * 0.5f;
+        const float left = cx - w * 0.5f;
 
         g.setColour (ink);
 
-        // Playhead: triangle head at the top, thin line straight down.
-        const float tw = w * 0.16f, td = h * 0.26f;
+        // Playhead, right of centre so the streaks have room behind it.
+        const float px = cx + w * 0.22f;
+        const float tw = h * 0.14f, td = h * 0.18f;
         juce::Path head;
-        head.addTriangle (cx - tw, a.getY(), cx + tw, a.getY(), cx, a.getY() + td);
+        head.addTriangle (px - tw, top, px + tw, top, px, top + td);
         g.fillPath (head);
-        g.fillRect (cx - lineW * 0.5f, a.getY(), lineW, h);
+        g.fillRect (px - stroke * 0.5f, top, stroke, bottom - top);
 
-        // Inward chevrons > ... < flanking the line, centred vertically.
-        const float cy = a.getCentreY() + h * 0.06f;
-        const float ch = h * 0.20f, reach = w * 0.40f;
-        juce::Path chev;
-        chev.startNewSubPath (cx - reach + ch, cy - ch);
-        chev.lineTo          (cx - reach,      cy);
-        chev.lineTo          (cx - reach + ch, cy + ch);
-        chev.startNewSubPath (cx + reach - ch, cy - ch);
-        chev.lineTo          (cx + reach,      cy);
-        chev.lineTo          (cx + reach - ch, cy + ch);
-        g.strokePath (chev, juce::PathStrokeType (juce::jmax (1.5f, h * 0.10f),
-                                                  juce::PathStrokeType::curved,
-                                                  juce::PathStrokeType::rounded));
+        // Streaks: all end the same gap short of the line; the middle one is longest.
+        const float gap = w * 0.17f, streakEnd = px - gap;
+        const float span = streakEnd - left;
+        juce::Path streaks;
+        streaks.startNewSubPath (streakEnd - span * 0.62f, cy - h * 0.24f);  streaks.lineTo (streakEnd, cy - h * 0.24f);
+        streaks.startNewSubPath (left,                     cy);              streaks.lineTo (streakEnd, cy);
+        streaks.startNewSubPath (streakEnd - span * 0.62f, cy + h * 0.24f);  streaks.lineTo (streakEnd, cy + h * 0.24f);
+        g.strokePath (streaks, juce::PathStrokeType (stroke, juce::PathStrokeType::curved,
+                                                     juce::PathStrokeType::rounded));
     }
 
     // Drawer toggle: a centre dot with two dashed "orbit" rings, each carrying one solid dot --
