@@ -11,6 +11,7 @@
 #include "../Source/MimeophonEngine.h"
 #include "../Source/Theme.h"
 #include "../Source/DragScanRender.h"
+#include <rubberband/RubberBandStretcher.h>
 
 namespace
 {
@@ -1575,6 +1576,137 @@ int main()
         check(clicksWith == 0,
               juce::String::formatted("with renderReleaseTail: %d of %d releases click (worst step %.3f, 1x material max %.3f)",
                                       clicksWith, trials, worstWith, legitSlope));
+    }
+
+    {
+        std::cout << "\n[DragScan] stretched: dragging and releasing a loop on a time-stretched file" << std::endl;
+        // Real RubberBand (same options as the plugin) at time ratio 2 and 0.5. Mirrors
+        // processBlock's stretched drag: the region slews once per block; "before" snaps the
+        // playhead into the window whenever it falls outside (+ the output-side 8 ms ramp), "after"
+        // feeds RubberBand from dragscan::renderBlock with edges placed by input fed / expected
+        // (as renderDragScanStretched does). Then a release mid-slide: the region snaps to its
+        // target, a stray playhead jumps to the loop start, with and without the input-side
+        // renderReleaseTail blend. Material: two sines -- any step past ~3x the fastest legit
+        // slope (at the 2x catch-up read) is a click.
+        using RB = RubberBand::RubberBandStretcher;
+        const double sr = 44100.0;
+        const int block = 512, xfade = 441, declick = (int) (0.008 * sr);
+        const double twoPi = 2 * juce::MathConstants<double>::pi;
+        juce::AudioBuffer<float> doc(1, (int) (sr * 12));
+        for (int n = 0; n < doc.getNumSamples(); ++n)
+            doc.setSample(0, n, (float) (0.6 * std::sin(twoPi * 110 * n / sr) + 0.2 * std::sin(twoPi * 440 * n / sr)));
+        const float clickStep = (float) ((0.6 * 110 + 0.2 * 440) * twoPi / sr) * 2.0f * 3.0f;
+        auto loopFade = [](int64_t rp, int64_t len, int f) {
+            if (f <= 0) return 1.0; double x;
+            if (rp < f) x = (double) rp / f; else if (rp >= len - f) x = (double) (len - 1 - rp) / f; else return 1.0;
+            const double sn = std::sin(0.5 * juce::MathConstants<double>::pi * juce::jlimit(0.0, 1.0, x)); return sn * sn; };
+
+        struct Sc { const char* name; std::function<double(double)> s, e; };
+        const Sc scs[] = {
+            { "Start dragged forward 3 s", [&](double t) { return std::floor(juce::jmin(1.0, t) * 3 * sr); }, [&](double) { return 6 * sr; } },
+            { "loop moved forward 3 s",    [&](double t) { return std::floor(juce::jmin(1.0, t) * 3 * sr); }, [&](double t) { return std::floor(juce::jmin(1.0, t) * 3 * sr + 0.5 * sr); } },
+            { "loop moved backward 3 s",   [&](double t) { return std::floor(3 * sr - juce::jmin(1.0, t) * 3 * sr); }, [&](double t) { return std::floor(3.5 * sr - juce::jmin(1.0, t) * 3 * sr); } },
+        };
+        int beforeClicks = 0, releaseBeforeClicks = 0;
+        for (double timeRatio : { 2.0, 0.5 })
+        for (const auto& sc : scs)
+        for (int after = 0; after < 2; ++after)
+        {
+            RB rb((size_t) sr, 1, RB::OptionProcessRealTime | RB::OptionPitchHighConsistency);
+            rb.setTimeRatio(timeRatio);
+            juce::AudioBuffer<float> in(1, 16384), outB(1, block), tail;
+            double ds = sc.s(0), de = sc.e(0), dpos = ds;
+            int64_t pos = (int64_t) ds;
+            int outRamp = 0, tailRem = 0;
+            bool released = false;
+            std::vector<float> y;
+            size_t releaseAt = 0;
+            const double releaseT = 0.6;   // mid-slide: the window hasn't arrived yet
+            for (int b = 0; b < (int) (2.0 * sr / block); ++b)
+            {
+                const double t = b * block / sr;
+                const double rs = sc.s(t), re = sc.e(t);
+                double s0 = ds, e0 = de;
+                int64_t R0, R1;
+                if (t < releaseT)
+                {
+                    const double maxSlew = juce::jlimit(sr * 0.1, sr * 1.5, (re - rs) * 8.0 * 0.35);
+                    ds += juce::jlimit(-maxSlew, maxSlew, (rs - ds) * 8.0) * block / sr;
+                    de += juce::jlimit(-maxSlew, maxSlew, (re - de) * 8.0) * block / sr;
+                    R0 = std::llround(ds); R1 = std::max(R0 + 1, (int64_t) std::llround(de));
+                    if (! after && (pos < R0 || pos >= R1)) { pos = R0; outRamp = declick; }
+                }
+                else
+                {
+                    // Released: the selection stops where the mouse let go, and the region snaps to it.
+                    R0 = (int64_t) sc.s(releaseT); R1 = (int64_t) sc.e(releaseT);
+                    if (! released)
+                    {
+                        released = true; releaseAt = y.size();
+                        if (after)
+                        {
+                            dragscan::renderReleaseTail(tail, 1, declick, doc, dpos, ds, std::max(ds + 1.0, de), true, xfade, sr);
+                            tailRem = declick;
+                            pos = std::llround(dpos);
+                        }
+                        if (pos < R0 || pos >= R1) { pos = R0; if (! after) outRamp = declick; }
+                    }
+                }
+                const int64_t L = R1 - R0;
+                const int fl = (int) std::min<int64_t>(xfade, L / 2);
+                const bool dragRender = after && ! released;
+                const double expectIn = block / timeRatio; double fed = 0;
+                int produced = 0, guard = 4000;
+                while (produced < block && --guard > 0)
+                {
+                    const int avail = (int) rb.available();
+                    if (avail > 0) { const int n = std::min(avail, block - produced); float* op[1] = { outB.getWritePointer(0, produced) }; rb.retrieve(op, (size_t) n); produced += n; continue; }
+                    int req = (int) rb.getSamplesRequired(); req = juce::jlimit(1, 16384, req > 0 ? req : 256);
+                    in.clear();
+                    if (dragRender)
+                    {
+                        const double f0 = juce::jmin(1.0, fed / expectIn), f1 = juce::jmin(1.0, (fed + req) / expectIn);
+                        dragscan::renderBlock(in, 1, req, doc, dpos, s0 + (ds - s0) * f0, e0 + (de - e0) * f0,
+                                              s0 + (ds - s0) * f1, e0 + (de - e0) * f1, true, xfade, sr);
+                    }
+                    else
+                    {
+                        for (int i = 0; i < req; ++i)
+                        {
+                            if (pos >= R1) pos = R0;
+                            float v = doc.getSample(0, (int) pos) * (float) loopFade(pos - R0, L, fl);
+                            if (tailRem > 0)
+                            {
+                                const double x = 1.0 - (double) tailRem / declick; const double sn = std::sin(0.5 * juce::MathConstants<double>::pi * x);
+                                v = v * (float) (sn * sn) + tail.getSample(0, declick - tailRem) * (float) (1.0 - sn * sn); --tailRem;
+                            }
+                            in.setSample(0, i, v); ++pos;
+                        }
+                    }
+                    fed += req;
+                    const float* ip[1] = { in.getReadPointer(0) };
+                    rb.process(ip, (size_t) req, false);
+                }
+                for (int i = 0; i < block; ++i)
+                {
+                    float v = outB.getSample(0, i);
+                    if (outRamp > 0) { const double x = 1.0 - (double) outRamp / declick; const double sn = std::sin(0.5 * juce::MathConstants<double>::pi * x); v *= (float) (sn * sn); --outRamp; }
+                    y.push_back(v);
+                }
+            }
+            int dragClicks = 0, relClicks = 0; float worst = 0;
+            for (size_t n = (size_t) (0.3 * sr); n < y.size(); ++n)
+            {
+                const float d = std::abs(y[n] - y[n - 1]); worst = std::max(worst, d);
+                if (d > clickStep) ++(n < releaseAt ? dragClicks : relClicks);
+            }
+            const juce::String label = juce::String::formatted("ratio %.1f, ", timeRatio) + sc.name;
+            if (! after) { beforeClicks += dragClicks; releaseBeforeClicks += relClicks; continue; }
+            check(dragClicks == 0 && relClicks == 0,
+                  label + juce::String::formatted(": %d clicks while dragging, %d after release (worst step %.3f)", dragClicks, relClicks, worst));
+        }
+        check(beforeClicks > 10, juce::String::formatted("the old snap-into-window path does click while dragging (%d) -- the test can see it", beforeClicks));
+        std::cout << "  (old path, releases: " << releaseBeforeClicks << " clicks)" << std::endl;
     }
 
     {

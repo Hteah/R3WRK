@@ -80,7 +80,7 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     lastAppliedPitchScale = -1.0;
     stretchRatioNeedsSnap = true;
 
-    wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false; dragScanActive = false;
+    wasPlaying = false; declickRemaining = 0; releaseInputTailRemaining = 0; dragRegionSeeded = false; dragScanActive = false;
     stretcherPrimed = false;
     rtFinished = false;
     wasScrubbing = false;
@@ -170,7 +170,7 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 void R3WRKAudioProcessor::releaseResources()
 {
     rtStretcher.reset();
-    wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false; dragScanActive = false;
+    wasPlaying = false; declickRemaining = 0; releaseInputTailRemaining = 0; dragRegionSeeded = false; dragScanActive = false;
     stretcherPrimed = false;
     rtFinished = false;
     wasScrubbing = false;
@@ -353,34 +353,7 @@ void R3WRKAudioProcessor::renderPlaybackStretched(juce::AudioBuffer<float>& out,
     pitch   = juce::jlimit(AudioDocument::kMinPitch,   AudioDocument::kMaxPitch,   pitch);
     stretch = juce::jlimit(AudioDocument::kMinStretch, AudioDocument::kMaxStretch, stretch);
 
-    // Ramp the ratios instead of stepping them, so a knob drag mid-playback doesn't machine-gun
-    // RubberBand with abrupt changes (that's the pops/crackle). Sampled once per block; snapped
-    // straight to target on a fresh play pass so playback starts at the right ratio.
-    const double targetTimeRatio  = stretch / juce::jmax(1.0e-4, speed);
-    const double targetPitchScale = speed * std::pow(2.0, pitch / 12.0);
-    if (stretchRatioNeedsSnap)
-    {
-        smoothedTimeRatio.setCurrentAndTargetValue(targetTimeRatio);
-        smoothedPitchScale.setCurrentAndTargetValue(targetPitchScale);
-        stretchRatioNeedsSnap = false;
-    }
-    else
-    {
-        smoothedTimeRatio.setTargetValue(targetTimeRatio);
-        smoothedPitchScale.setTargetValue(targetPitchScale);
-    }
-    const double tr = smoothedTimeRatio.skip(numSamples);
-    const double ps = smoothedPitchScale.skip(numSamples);
-    if (std::abs(tr - lastAppliedTimeRatio) > 1.0e-4 * juce::jmax(1.0, tr))
-    {
-        rtStretcher->setTimeRatio(tr);
-        lastAppliedTimeRatio = tr;
-    }
-    if (std::abs(ps - lastAppliedPitchScale) > 1.0e-4 * juce::jmax(1.0, ps))
-    {
-        rtStretcher->setPitchScale(ps);
-        lastAppliedPitchScale = ps;
-    }
+    updateStretchRatios(numSamples, speed, pitch, stretch);
 
     const int rc = rtChannels;
     const int inCap  = rtScratchIn.getNumSamples();
@@ -420,6 +393,24 @@ void R3WRKAudioProcessor::renderPlaybackStretched(juce::AudioBuffer<float>& out,
             if (gathered < req)
                 rtScratchIn.clear(ch, gathered, req - gathered);
 
+        // Just released a drag on a stretched file -- blend what the drag renderer would have
+        // fed next out of the input (see releaseInputTail's comment).
+        if (releaseInputTailRemaining > 0)
+        {
+            const int n = juce::jmin(releaseInputTailRemaining, gathered);
+            const int done = releaseInputTailLen - releaseInputTailRemaining;
+            for (int i = 0; i < n; ++i)
+            {
+                const double x = (double) (done + i) / (double) releaseInputTailLen;
+                const double sn = std::sin(0.5 * juce::MathConstants<double>::pi * x);
+                const float g = (float) (sn * sn);
+                for (int ch = 0; ch < rc; ++ch)
+                    rtScratchIn.setSample(ch, i, rtScratchIn.getSample(ch, i) * g
+                                                 + releaseInputTail.getSample(juce::jmin(ch, releaseInputTail.getNumChannels() - 1), done + i) * (1.0f - g));
+            }
+            releaseInputTailRemaining -= n;
+        }
+
         const float* ip[2] = { rtScratchIn.getReadPointer(0),
                                rtScratchIn.getReadPointer(rc > 1 ? 1 : 0) };
         const bool finalNow = regionEnded && ! loop;
@@ -429,6 +420,104 @@ void R3WRKAudioProcessor::renderPlaybackStretched(juce::AudioBuffer<float>& out,
     }
 
     document.playhead.store(pos, std::memory_order_relaxed);
+}
+
+void R3WRKAudioProcessor::updateStretchRatios(int numSamples, double speed, double pitch, double stretch)
+{
+    speed   = juce::jlimit(AudioDocument::kMinSpeed,   AudioDocument::kMaxSpeed,   speed);
+    pitch   = juce::jlimit(AudioDocument::kMinPitch,   AudioDocument::kMaxPitch,   pitch);
+    stretch = juce::jlimit(AudioDocument::kMinStretch, AudioDocument::kMaxStretch, stretch);
+
+    // Ramp the ratios instead of stepping them, so a knob drag mid-playback doesn't machine-gun
+    // RubberBand with abrupt changes (that's the pops/crackle). Sampled once per block; snapped
+    // straight to target on a fresh play pass so playback starts at the right ratio.
+    const double targetTimeRatio  = stretch / juce::jmax(1.0e-4, speed);
+    const double targetPitchScale = speed * std::pow(2.0, pitch / 12.0);
+    if (stretchRatioNeedsSnap)
+    {
+        smoothedTimeRatio.setCurrentAndTargetValue(targetTimeRatio);
+        smoothedPitchScale.setCurrentAndTargetValue(targetPitchScale);
+        stretchRatioNeedsSnap = false;
+    }
+    else
+    {
+        smoothedTimeRatio.setTargetValue(targetTimeRatio);
+        smoothedPitchScale.setTargetValue(targetPitchScale);
+    }
+    const double tr = smoothedTimeRatio.skip(numSamples);
+    const double ps = smoothedPitchScale.skip(numSamples);
+    if (std::abs(tr - lastAppliedTimeRatio) > 1.0e-4 * juce::jmax(1.0, tr))
+    {
+        rtStretcher->setTimeRatio(tr);
+        lastAppliedTimeRatio = tr;
+    }
+    if (std::abs(ps - lastAppliedPitchScale) > 1.0e-4 * juce::jmax(1.0, ps))
+    {
+        rtStretcher->setPitchScale(ps);
+        lastAppliedPitchScale = ps;
+    }
+}
+
+void R3WRKAudioProcessor::renderDragScanStretched(juce::AudioBuffer<float>& out, int numCh, int numSamples,
+                                                  const juce::AudioBuffer<float>& docBuf, double& pos,
+                                                  double startA, double endA, double startB, double endB,
+                                                  bool loop, double maxFadeLen,
+                                                  double speed, double pitch, double stretch)
+{
+    if (rtStretcher == nullptr || docBuf.getNumChannels() <= 0)
+        return;
+
+    updateStretchRatios(numSamples, speed, pitch, stretch);
+
+    const int rc = rtChannels;
+    const int inCap  = rtScratchIn.getNumSamples();
+    const int outCap = rtScratchOut.getNumSamples();
+
+    // The region moves across the block in *output* time, but input is pulled in chunks of
+    // whatever RubberBand asks for -- so place each chunk's edges by how much of this block's
+    // expected input (numSamples / time ratio) has been fed so far.
+    const double expectedIn = (double) numSamples / juce::jmax(1.0e-4, lastAppliedTimeRatio);
+    double fed = 0.0;
+    auto edgeAt = [&](double f, double a, double b) { return a + (b - a) * juce::jlimit(0.0, 1.0, f); };
+
+    int produced = 0;
+    int guard = numSamples * 4 + 64;
+    while (produced < numSamples && --guard > 0)
+    {
+        const int avail = (int) rtStretcher->available();
+        if (avail > 0)
+        {
+            const int n = juce::jmin(avail, numSamples - produced, outCap);
+            float* op[2] = { rtScratchOut.getWritePointer(0),
+                             rtScratchOut.getWritePointer(rc > 1 ? 1 : 0) };
+            rtStretcher->retrieve(op, (size_t) n);
+            for (int ch = 0; ch < numCh; ++ch)
+                out.copyFrom(ch, produced, rtScratchOut, juce::jmin(ch, rc - 1), 0, n);
+            produced += n;
+            continue;
+        }
+        if (rtFinished)
+        {
+            document.isPlaying.store(false, std::memory_order_relaxed);
+            break;
+        }
+
+        int req = (int) rtStretcher->getSamplesRequired();
+        req = juce::jlimit(1, inCap, req > 0 ? req : 256);
+        const double f0 = fed / expectedIn, f1 = (fed + req) / expectedIn;
+        for (int ch = 0; ch < rc; ++ch)
+            rtScratchIn.clear(ch, 0, req);
+        const bool stillPlaying = dragscan::renderBlock(rtScratchIn, rc, req, docBuf, pos,
+                                                        edgeAt(f0, startA, startB), edgeAt(f0, endA, endB),
+                                                        edgeAt(f1, startA, startB), edgeAt(f1, endA, endB),
+                                                        loop, maxFadeLen, currentSampleRate);
+        fed += req;
+        const float* ip[2] = { rtScratchIn.getReadPointer(0),
+                               rtScratchIn.getReadPointer(rc > 1 ? 1 : 0) };
+        rtStretcher->process(ip, (size_t) req, ! stillPlaying);
+        if (! stillPlaying)
+            rtFinished = true;
+    }
 }
 
 // Scrub tool: a linear-interpolated, variable-rate (and reversible) read of the stored
@@ -513,7 +602,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         renderBlackBoxPreview(buffer, numCh, numSamples);
         if (blackBoxCapacity > 0)
             appendToBlackBox(blackBoxInputScratch, numCh, numSamples);
-        wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false; dragScanActive = false;
+        wasPlaying = false; declickRemaining = 0; releaseInputTailRemaining = 0; dragRegionSeeded = false; dragScanActive = false;
         return;
     }
 
@@ -524,7 +613,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         buffer.clear();
         if (blackBoxCapacity > 0)
             appendToBlackBox(blackBoxInputScratch, numCh, numSamples);
-        wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false; dragScanActive = false;
+        wasPlaying = false; declickRemaining = 0; releaseInputTailRemaining = 0; dragRegionSeeded = false; dragScanActive = false;
         return;
     }
 
@@ -556,7 +645,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
 
         if (blackBoxCapacity > 0)
             appendToBlackBox(blackBoxInputScratch, numCh, numSamples);
-        wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false; dragScanActive = false;
+        wasPlaying = false; declickRemaining = 0; releaseInputTailRemaining = 0; dragRegionSeeded = false; dragScanActive = false;
         return; // pass input through unchanged so the user can monitor while recording
     }
 
@@ -623,7 +712,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             appendToBlackBox(buffer, numCh, numSamples);
 
         wasScrubbing = true;
-        wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false; dragScanActive = false;   // so normal playback resets the stretcher cleanly if it resumes
+        wasPlaying = false; declickRemaining = 0; releaseInputTailRemaining = 0; dragRegionSeeded = false; dragScanActive = false;   // so normal playback resets the stretcher cleanly if it resumes
         return;
     }
     wasScrubbing = false;
@@ -764,7 +853,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                                             (regionEnd - regionStart) / 2)
                 : 0;
 
-            if (dragEdge != 0 && ! engaged)
+            if (dragEdge != 0)
             {
                 // Dragging, plain path: a continuous fractional read position instead of the
                 // ordinary integer pos below -- see renderDragScan's header comment for why.
@@ -776,7 +865,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                 // audible as a click on the material itself. Crossfade it out exactly like a
                 // manual seek's old tail (same fields, same ramp shape, same application code
                 // below), just captured playing in whatever direction was actually live.
-                if (! dragScanActive)
+                if (! dragScanActive && ! engaged)
                 {
                     declickLen = (int) juce::jlimit<int64_t>(1, 512,
                         (int64_t) (0.008 * currentSampleRate));
@@ -793,20 +882,41 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                     }
                     seekCrossfadeActive = true;
                     declickRemaining = declickLen;
-
+                }
+                if (! dragScanActive)
+                {
+                    // Stretched: the playhead is RubberBand's input read position, so seeding
+                    // from it keeps the input continuous -- no crossfade needed on the way in.
                     dragScanPos = (double) document.playhead.load(std::memory_order_relaxed);
                     dragScanActive = true;
                 }
-                stretcherPrimed = false;
-                rtFinished = false;
-                renderDragScan(buffer, numCh, numSamples, docBuf, dragScanPos,
-                               prevDragRegionStart, prevDragRegionEnd, dragRegionStart, dragRegionEnd,
-                               loop, (loop && xfadeMs > 0.01) ? xfadeMs * currentSampleRate / 1000.0 : 0.0);
+                const double dragFadeLen = (loop && xfadeMs > 0.01) ? xfadeMs * currentSampleRate / 1000.0 : 0.0;
+                if (engaged)
+                {
+                    if (rtStretcher != nullptr && (! wasPlaying || ! stretcherPrimed))
+                    {
+                        rtStretcher->reset();
+                        stretcherPrimed = true;
+                        rtFinished = false;
+                        stretchRatioNeedsSnap = true;
+                    }
+                    renderDragScanStretched(buffer, numCh, numSamples, docBuf, dragScanPos,
+                                            prevDragRegionStart, prevDragRegionEnd, dragRegionStart, dragRegionEnd,
+                                            loop, dragFadeLen, speed, pitch, stretch);
+                }
+                else
+                {
+                    stretcherPrimed = false;
+                    rtFinished = false;
+                    renderDragScan(buffer, numCh, numSamples, docBuf, dragScanPos,
+                                   prevDragRegionStart, prevDragRegionEnd, dragRegionStart, dragRegionEnd,
+                                   loop, dragFadeLen);
+                }
                 document.playhead.store((int64_t) std::llround(dragScanPos), std::memory_order_relaxed);
             }
             else
             {
-                bool releasedFromDrag = false;
+                bool releasedFromDrag = false, releasedIntoStretcher = false;
                 if (dragScanActive)
                 {
                     // Drag just ended (or crossed into the RubberBand-engaged case) -- hand off
@@ -818,12 +928,23 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                     // a manual seek's old tail, so the release is a quick blend, not a click.
                     declickLen = (int) juce::jlimit<int64_t>(1, 512,
                         (int64_t) (0.008 * currentSampleRate));
-                    dragscan::renderReleaseTail(seekOldTail, numCh, declickLen, docBuf, dragScanPos,
-                        dragRegionStart, juce::jmax(dragRegionStart + 1.0, dragRegionEnd), loop,
-                        (loop && xfadeMs > 0.01) ? xfadeMs * currentSampleRate / 1000.0 : 0.0,
-                        currentSampleRate);
-                    seekCrossfadeActive = true;
-                    declickRemaining = declickLen;
+                    const double relFade = (loop && xfadeMs > 0.01) ? xfadeMs * currentSampleRate / 1000.0 : 0.0;
+                    const double relEnd = juce::jmax(dragRegionStart + 1.0, dragRegionEnd);
+                    if (engaged)
+                    {
+                        // Stretched: blend on RubberBand's input instead (releaseInputTail).
+                        dragscan::renderReleaseTail(releaseInputTail, rtChannels, declickLen, docBuf, dragScanPos,
+                                                    dragRegionStart, relEnd, loop, relFade, currentSampleRate);
+                        releaseInputTailLen = releaseInputTailRemaining = declickLen;
+                        releasedIntoStretcher = true;
+                    }
+                    else
+                    {
+                        dragscan::renderReleaseTail(seekOldTail, numCh, declickLen, docBuf, dragScanPos,
+                                                    dragRegionStart, relEnd, loop, relFade, currentSampleRate);
+                        seekCrossfadeActive = true;
+                        declickRemaining = declickLen;
+                    }
                     releasedFromDrag = true;
 
                     document.playhead.store((int64_t) std::llround(dragScanPos), std::memory_order_relaxed);
@@ -886,7 +1007,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                     // instead of a pop (see the declick fields' comment). Skipped for the
                     // not-looping clamp above: nothing is jumping there, gatherRegion below just
                     // finds the natural end and stops.
-                    if (loop)
+                    if (loop && ! releasedIntoStretcher)   // stretched release blends on the input instead
                     {
                         declickLen = (int) juce::jlimit<int64_t>(1, 512,
                             (int64_t) (0.008 * currentSampleRate));
@@ -1064,7 +1185,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     }
 
     const bool justStoppedPlaying = wasPlaying;
-    wasPlaying = false; declickRemaining = 0; dragRegionSeeded = false; dragScanActive = false;
+    wasPlaying = false; declickRemaining = 0; releaseInputTailRemaining = 0; dragRegionSeeded = false; dragScanActive = false;
 
     // A reverb tail outlives the signal that made it -- start a countdown the instant playback
     // stops (if the reverb was actually engaged), so applyReverb() keeps ticking with silence as

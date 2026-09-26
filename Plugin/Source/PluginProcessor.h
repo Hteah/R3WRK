@@ -443,6 +443,26 @@ private:
                                   int64_t& pos, int& dir, int64_t regionStart, int64_t regionEnd,
                                   bool loop, bool pingPong, bool reverseLoop, int loopFadeLen,
                                   double speed, double pitch, double stretch);
+    // Ramps the stretcher's time ratio / pitch scale toward the knobs (shared by both stretched
+    // renderers below).
+    void updateStretchRatios (int numSamples, double speed, double pitch, double stretch);
+    // Dragging a loop edge on a time-stretched file: RubberBand is fed by the drag renderer
+    // (dragscan::renderBlock -- a continuous read that never jumps) instead of gatherRegion.
+    // The ordinary stretched path snapped the playhead back into the moving window on almost
+    // every block of a drag, feeding RubberBand a splice ~80 times a second -- the crackle heard
+    // until the loop settled (and the output-side declick couldn't hide it: RubberBand's latency
+    // puts the splice tens of ms after the ramp). Measured offline with the real stretcher:
+    // 111-135 clicks in 2 s of dragging before, 0 after (SmokeTest "[DragScan] stretched").
+    void renderDragScanStretched (juce::AudioBuffer<float>& out, int numCh, int numSamples,
+                                  const juce::AudioBuffer<float>& docBuf, double& pos,
+                                  double startA, double endA, double startB, double endB,
+                                  bool loop, double maxFadeLen,
+                                  double speed, double pitch, double stretch);
+    // Releasing a drag on a stretched file: the same release crossfade as the plain path, but
+    // applied to RubberBand's *input* (the output is stretched audio -- an unstretched old tail
+    // can't be blended into it). Mixed into the first gathered input frames after release.
+    juce::AudioBuffer<float> releaseInputTail;
+    int releaseInputTailLen = 0, releaseInputTailRemaining = 0;
 
     // Scrub tool: a plain variable-rate (and reversible) read of the stored audio, driven by
     // AudioDocument::scrubVelocity -- see the class comment there. Deliberately *not* run
