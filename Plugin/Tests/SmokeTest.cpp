@@ -10,6 +10,7 @@
 #include "../Source/PlexiphonEngine.h"
 #include "../Source/MimeophonEngine.h"
 #include "../Source/Theme.h"
+#include "../Source/DragScanRender.h"
 
 namespace
 {
@@ -1426,6 +1427,67 @@ int main()
         check(echo1L > echo1R * 3.0f, "mono-source echo 1 stays on the left (mono dry only enters the left line)");
         check(echo2R > echo2L * 3.0f, "mono-source echo 2 bounces to the right");
         check(echo3L > echo3R * 3.0f, "mono-source echo 3 bounces back to the left");
+    }
+
+    {
+        std::cout << "\n[DragScan] no clicks while dragging a loop edge" << std::endl;
+        // Drives the real dragscan::renderBlock with processBlock's own region slew (replicated
+        // here: 8/s distance-proportional, capped at 1.5x, throttled for short loops), over a
+        // constant-1.0 document -- so the output IS the gain envelope, and any sample-to-sample
+        // step in it is a click regardless of material. Before the per-sample-edge fix these
+        // scenarios measured steps of 0.25-1.0 (up to ~12 clicks/s on short loops).
+        const double sr = 44100.0;
+        const int block = 512;
+        juce::AudioBuffer<float> ones(1, (int) (sr * 12));
+        for (int i = 0; i < ones.getNumSamples(); ++i) ones.setSample(0, i, 1.0f);
+
+        struct Scenario { const char* name; std::function<double(double)> start, end; double pos0; };
+        const Scenario scenarios[] = {
+            { "drag End forward (1 s loop)", [](double) { return 0.0; },            [&](double t) { return sr + sr * t; },  0.0 },
+            { "drag End backward",           [](double) { return 0.0; },            [&](double t) { return 3 * sr - 0.6 * sr * t; }, 0.0 },
+            { "drag Start forward",          [&](double t) { return 0.2 * sr * t; }, [&](double) { return 2 * sr; },         0.0 },
+            { "move whole window backward",  [&](double t) { return std::max(0.0, 3 * sr - sr * t); },
+                                             [&](double t) { return 4 * sr - sr * t; }, 3 * sr },
+            { "150 ms loop, drag End forward", [](double) { return 0.0; },          [&](double t) { return 0.15 * sr + 0.5 * sr * t; }, 0.0 },
+            { "30 ms loop, End back and forth", [](double) { return 0.0; },
+                                             [&](double t) { return 0.03 * sr + 0.05 * sr * std::abs(std::sin(5 * t)); }, 0.0 },
+        };
+        juce::Random jitter(42);
+        for (const auto& sc : scenarios)
+        {
+            for (int withJitter = 0; withJitter < 2; ++withJitter)
+            {
+                double ds = std::floor(sc.start(0)), de = std::floor(sc.end(0)), pos = sc.pos0;
+                float prev = -1.0f, maxStep = 0.0f;
+                juce::AudioBuffer<float> out(1, block);
+                for (int b = 0; b < (int) (3.0 * sr / block); ++b)
+                {
+                    const double t = b * block / sr;
+                    double rs = std::floor(sc.start(t)), re = std::floor(sc.end(t));
+                    if (withJitter) { re += jitter.nextInt({ -300, 301 }); if (rs > 0) rs = std::max(0.0, rs + jitter.nextInt({ -300, 301 })); }
+                    const double targetLen = std::max(1.0, re - rs);
+                    const double maxSlew = juce::jlimit(sr * 0.1, sr * 1.5, targetLen * 8.0 * 0.35);
+                    const double dt = block / sr;
+                    const double s0 = ds, e0 = de;
+                    ds += juce::jlimit(-maxSlew, maxSlew, (rs - ds) * 8.0) * dt;
+                    de += juce::jlimit(-maxSlew, maxSlew, (re - de) * 8.0) * dt;
+                    out.clear();
+                    dragscan::renderBlock(out, 1, block, ones, pos, s0, e0, ds, de, true, 0.010 * sr, sr);
+                    for (int i = 0; i < block; ++i)
+                    {
+                        const float y = out.getSample(0, i);
+                        if (prev >= 0.0f) maxStep = std::max(maxStep, std::abs(y - prev));
+                        prev = y;
+                    }
+                }
+                // A 10 ms raised-cosine fade moves at most pi/2 / 441 ~ 0.0036 per sample; allow
+                // a few times that for a window racing toward the playhead.
+                check(maxStep < 0.02f, juce::String(sc.name) + (withJitter ? " + mouse jitter" : "")
+                                          + juce::String::formatted(": largest gain step %.4f", maxStep));
+            }
+        }
+        check(dragscan::edgeFadeGain(-0.3, 1000, 441) < 0.001 && dragscan::edgeFadeGain(999.4, 1000, 441) < 0.001,
+              "edge fade is ~0 just outside either edge (crossing an edge is silent)");
     }
 
     {

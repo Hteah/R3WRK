@@ -257,8 +257,8 @@ private:
     // sped-up, read of the actual buffer, not a synthesized stand-in. Once inside
     // [regionStart, regionEnd) it settles to plain 1x forward and genuinely loops within it,
     // wrapping by subtracting the region length so the fractional position stays continuous
-    // across the wrap too (with the same loopFadeGain crossfade gatherRegion itself uses, so
-    // *that* doesn't click either). Plain (non-RubberBand) path only -- continuously perturbing
+    // across the wrap too (with a loop-edge crossfade, so *that* doesn't click either -- see
+    // DragScanRender.h for why its region edges move per sample, not per block). Plain (non-RubberBand) path only -- continuously perturbing
     // the read position under renderPlaybackStretched confused it into sustained distortion
     // when a discrete version of this was first tried (reverted as eb4ec70/9376798); the
     // RubberBand-engaged case keeps the ordinary hard-snap-and-declick path, unimproved but no
@@ -268,9 +268,12 @@ private:
     // `document.playhead`.
     double dragScanPos = 0.0;
     bool   dragScanActive = false;
+    // The region moves from [startA, endA) to [startB, endB) across the block (the previous and
+    // current slewed edges), so the loop-crossfade envelope never steps at a block boundary.
     void renderDragScan(juce::AudioBuffer<float>& out, int numCh, int numSamples,
                         const juce::AudioBuffer<float>& docBuf, double& pos,
-                        int64_t regionStart, int64_t regionEnd, bool loop, int fadeLen);
+                        double startA, double endA, double startB, double endB,
+                        bool loop, double maxFadeLen);
 
     // Modelled Monomachine multimode filter on the playback output (after the stretcher). One
     // MultiModeFilter per channel; all four knob values are continuously smoothed (see
