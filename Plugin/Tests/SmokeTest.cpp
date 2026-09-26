@@ -1491,6 +1491,93 @@ int main()
     }
 
     {
+        std::cout << "\n[DragScan] no click when a dragged loop is let go" << std::endl;
+        // Random drag-then-release gestures (loop 50 ms-1 s, dropped 0-6 s away, released 0-0.3 s
+        // after the mouse stops) over two-sine material. The drag half is the real renderer;
+        // after release, the ordinary path is mirrored here (region snaps to the target, a stray
+        // playhead jumps to the loop start, raised-cosine loop fade, 8 ms sin^2 ramp -- see
+        // processBlock), with and without the real renderReleaseTail as the crossfade's old side.
+        const double sr = 44100.0;
+        const int block = 512, xfade = 441, declick = (int) (0.008 * sr);
+        juce::AudioBuffer<float> doc(1, (int) (sr * 9));
+        for (int n = 0; n < doc.getNumSamples(); ++n)
+            doc.setSample(0, n, (float) (0.8 * std::sin(2 * juce::MathConstants<double>::pi * 97 * n / sr)
+                                         + 0.2 * std::sin(2 * juce::MathConstants<double>::pi * 1234 * n / sr)));
+        const float legitSlope = (float) (0.8 * 2 * juce::MathConstants<double>::pi * 97 / sr
+                                          + 0.2 * 2 * juce::MathConstants<double>::pi * 1234 / sr);
+        auto oldLoopFade = [](int64_t rp, int64_t len, int fadeLen)
+        {
+            double x;
+            if (rp < fadeLen)                  x = (double) rp / fadeLen;
+            else if (rp >= len - fadeLen)      x = (double) (len - 1 - rp) / fadeLen;
+            else                               return 1.0;
+            const double sn = std::sin(0.5 * juce::MathConstants<double>::pi * juce::jlimit(0.0, 1.0, x));
+            return sn * sn;
+        };
+
+        juce::Random rng(3);
+        int clicksWithout = 0, clicksWith = 0;
+        float worstWith = 0.0f;
+        const int trials = 300;
+        for (int t = 0; t < trials; ++t)
+        {
+            const int64_t loopLen = (int64_t) ((0.05 + 0.95 * rng.nextDouble()) * sr);
+            const double start0 = std::floor(rng.nextDouble() * 2 * sr);
+            const double dest = std::floor(rng.nextDouble() * 6 * sr);
+            const double dragSecs = 0.3 + 0.9 * rng.nextDouble();
+            const double holds[] = { 0.0, 0.0, 0.05, 0.1, 0.3 };
+            const double holdSecs = holds[rng.nextInt(5)];
+
+            double ds = start0, de = start0 + (double) loopLen, pos = start0;
+            juce::AudioBuffer<float> out(1, block);
+            float last = 0.0f;
+            for (int b = 0; b < (int) ((dragSecs + holdSecs) * sr / block); ++b)
+            {
+                const double frac = juce::jmin(1.0, b * block / sr / dragSecs);
+                const double rs = std::floor(start0 + (dest - start0) * frac), re = rs + (double) loopLen;
+                const double maxSlew = juce::jlimit(sr * 0.1, sr * 1.5, (double) loopLen * 8.0 * 0.35);
+                const double s0 = ds, e0 = de;
+                ds += juce::jlimit(-maxSlew, maxSlew, (rs - ds) * 8.0) * block / sr;
+                de += juce::jlimit(-maxSlew, maxSlew, (re - de) * 8.0) * block / sr;
+                out.clear();
+                dragscan::renderBlock(out, 1, block, doc, pos, s0, e0, ds, de, true, xfade, sr);
+                last = out.getSample(0, block - 1);
+            }
+
+            juce::AudioBuffer<float> tail;
+            dragscan::renderReleaseTail(tail, 1, declick, doc, pos, ds, juce::jmax(ds + 1.0, de), true, xfade, sr);
+
+            for (int withTail = 0; withTail < 2; ++withTail)
+            {
+                const int64_t rs = (int64_t) dest, re = rs + loopLen;
+                int64_t p = std::llround(pos);
+                const bool snapped = p < rs || p >= re;
+                if (snapped) p = rs;
+                float prev = last, worst = 0.0f;
+                for (int i = 0; i < block; ++i)
+                {
+                    float y = doc.getSample(0, (int) p) * (float) oldLoopFade(p - rs, loopLen, (int) juce::jmin<int64_t>(xfade, loopLen / 2));
+                    const double sn = std::sin(0.5 * juce::MathConstants<double>::pi * juce::jmin(1.0, (double) i / declick));
+                    const float g = (float) (sn * sn);
+                    if (withTail)     y = y * g + (i < declick ? tail.getSample(0, i) * (1.0f - g) : 0.0f);
+                    else if (snapped) y = y * g;   // before: ramp-in only, the old audio just stops
+                    worst = std::max(worst, std::abs(y - prev));
+                    prev = y;
+                    if (++p >= re) p = rs;
+                }
+                const bool click = worst > legitSlope * 3.0f;
+                if (withTail) { clicksWith += click ? 1 : 0; worstWith = std::max(worstWith, worst); }
+                else          clicksWithout += click ? 1 : 0;
+            }
+        }
+        check(clicksWithout > trials / 5,
+              juce::String::formatted("without the release tail these gestures do click (%d of %d) -- the test can see it", clicksWithout, trials));
+        check(clicksWith == 0,
+              juce::String::formatted("with renderReleaseTail: %d of %d releases click (worst step %.3f, 1x material max %.3f)",
+                                      clicksWith, trials, worstWith, legitSlope));
+    }
+
+    {
         std::cout << "\n[Theme] shared text format (R3WRK <-> Sieve)" << std::endl;
         // Pure Palette parsing only -- no ThemeManager, so the real settings file and the
         // shared themes folder are never touched.

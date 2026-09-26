@@ -105,4 +105,20 @@ namespace dragscan
         }
         return true;
     }
+
+    // What the drag renderer *would* have played next, from `pos` over a region now frozen at
+    // [regionStart, regionEnd) -- the "old" side of the crossfade when a drag is released. On
+    // release the region snaps to where the mouse left it (the slew was still catching up), and
+    // the playhead often lands outside it and gets jumped to the loop start; without an old tail
+    // to fade out, whatever was playing just stopped mid-waveform (a click on ~1 release in 3).
+    inline void renderReleaseTail(juce::AudioBuffer<float>& tail, int numCh, int len,
+                                  const juce::AudioBuffer<float>& docBuf, double pos,
+                                  double regionStart, double regionEnd,
+                                  bool loop, double maxFadeLen, double sampleRate)
+    {
+        tail.setSize(numCh, len, false, false, true);
+        tail.clear();
+        renderBlock(tail, numCh, len, docBuf, pos, regionStart, regionEnd, regionStart, regionEnd,
+                    loop, maxFadeLen, sampleRate);
+    }
 }

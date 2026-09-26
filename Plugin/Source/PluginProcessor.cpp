@@ -806,12 +806,26 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             }
             else
             {
+                bool releasedFromDrag = false;
                 if (dragScanActive)
                 {
                     // Drag just ended (or crossed into the RubberBand-engaged case) -- hand off
-                    // to the ordinary path from wherever the scan landed. It was already
-                    // tracking/looping within the live region, so this is already valid or a
-                    // few samples off it at most.
+                    // to the ordinary path from wherever the scan landed. The region snaps from
+                    // its slewed position to where the mouse actually left it, so the playhead
+                    // can end up outside it (jumped to the loop start just below) or with the
+                    // loop edges moved under it -- either way a splice. Crossfade out what the
+                    // drag renderer would have played next (see renderReleaseTail), exactly like
+                    // a manual seek's old tail, so the release is a quick blend, not a click.
+                    declickLen = (int) juce::jlimit<int64_t>(1, 512,
+                        (int64_t) (0.008 * currentSampleRate));
+                    dragscan::renderReleaseTail(seekOldTail, numCh, declickLen, docBuf, dragScanPos,
+                        dragRegionStart, juce::jmax(dragRegionStart + 1.0, dragRegionEnd), loop,
+                        (loop && xfadeMs > 0.01) ? xfadeMs * currentSampleRate / 1000.0 : 0.0,
+                        currentSampleRate);
+                    seekCrossfadeActive = true;
+                    declickRemaining = declickLen;
+                    releasedFromDrag = true;
+
                     document.playhead.store((int64_t) std::llround(dragScanPos), std::memory_order_relaxed);
                     dragScanActive = false;
                 }
@@ -877,7 +891,10 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                         declickLen = (int) juce::jlimit<int64_t>(1, 512,
                             (int64_t) (0.008 * currentSampleRate));
                         declickRemaining = declickLen;
-                        seekCrossfadeActive = false;   // no coherent "old" material for this kind of jump
+                        // No coherent "old" material for this kind of jump -- except right after
+                        // a drag release, which just captured the drag renderer's own tail.
+                        if (! releasedFromDrag)
+                            seekCrossfadeActive = false;
                     }
                 }
                 else if (manualSeek)
