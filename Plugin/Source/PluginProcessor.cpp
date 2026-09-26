@@ -507,7 +507,7 @@ void R3WRKAudioProcessor::renderDragScanStretched(juce::AudioBuffer<float>& out,
         const double f0 = fed / expectedIn, f1 = (fed + req) / expectedIn;
         for (int ch = 0; ch < rc; ++ch)
             rtScratchIn.clear(ch, 0, req);
-        const bool stillPlaying = dragscan::renderBlock(rtScratchIn, rc, req, docBuf, pos,
+        const bool stillPlaying = dragscan::renderBlock(rtScratchIn, rc, req, docBuf, pos, dragRelocation,
                                                         edgeAt(f0, startA, startB), edgeAt(f0, endA, endB),
                                                         edgeAt(f1, startA, startB), edgeAt(f1, endA, endB),
                                                         loop, maxFadeLen, currentSampleRate);
@@ -564,15 +564,15 @@ void R3WRKAudioProcessor::renderScrub(juce::AudioBuffer<float>& out, int numCh, 
 }
 
 // See dragScanPos's header comment for the reasoning, and DragScanRender.h for the renderer
-// itself (shared with the smoke test). `pos` never jumps here -- it either closes in on the
-// region start at a capped, distance-proportional speed (still behind the window), or advances
-// at plain 1x and wraps within the region (already inside it), with a loop-edge crossfade.
+// itself (shared with the smoke test). Always reads at 1x (so the pitch never rises); when the
+// moving window passes the playhead it relocates to the same point in the loop's cycle with a
+// short crossfade (dragRelocation) instead of racing to catch up.
 void R3WRKAudioProcessor::renderDragScan(juce::AudioBuffer<float>& out, int numCh, int numSamples,
                                          const juce::AudioBuffer<float>& docBuf, double& pos,
                                          double startA, double endA, double startB, double endB,
                                          bool loop, double maxFadeLen)
 {
-    if (! dragscan::renderBlock(out, numCh, numSamples, docBuf, pos,
+    if (! dragscan::renderBlock(out, numCh, numSamples, docBuf, pos, dragRelocation,
                                 startA, endA, startB, endB, loop, maxFadeLen, currentSampleRate))
         document.isPlaying.store(false, std::memory_order_relaxed);   // rest of the block stays silent
 }
@@ -773,39 +773,16 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             // 0..docLen" -- without it the very first dragging block would slew from the wrong
             // starting point.
             const int dragEdge = document.selectionEdgeDragging.load(std::memory_order_relaxed);
-            constexpr double slewGainPerSec = 8.0;   // catch-up rate = distance * this
-            // Must match renderDragScan's own internal catch-up gain -- kept as a literal there
-            // too (not plumbed through as a parameter) so the two constants can't drift apart
-            // silently; see the comment below on why raising *that* one instead of this cap was
-            // tried and made things worse.
-            constexpr double catchUpGainPerSec = 8.0;
-            // This cap is also, in effect, the forward-drag pitch-shift cap: renderDragScan's
-            // playhead has to keep pace with however fast this window is moving in order to
-            // stay caught up, and (unlike a backward drag, which never needs to chase at all
-            // -- see its comment) a forward drag runs at close to this speed continuously
-            // for as long as the mouse keeps moving forward, not just as a brief catch-up.
-            // Kept modest (rather than the ~6x this used to be) so that's a mild lift instead
-            // of "extreme pitch" -- renderDragScan's own cap is set a little above this one,
-            // so the gap can still actually close.
-            const double baseMaxSlewSpeed = currentSampleRate * 1.5;   // cap: ~1.5x normal speed
-            // A loop shorter than baseMaxSlewSpeed/catchUpGainPerSec (~187ms at the stock
-            // constants) can never actually be re-entered during a sustained drag: the window
-            // keeps outrunning the catch-up forever, leaving the playhead permanently trailing
-            // outside it, reading unrelated material further back in the file at a pitched-up
-            // rate -- confirmed by simulation, this was the "distortion on a small selection"
-            // bug. First attempt raised catchUpGainPerSec itself to compensate, which made things
-            // *worse*: a much higher proportional gain turns the gentle, already-proven catch-up
-            // response into a near-bang-bang one that amplifies ordinary drag-input jitter into
-            // audible chatter, instead of just closing the gap. Throttling the window's own top
-            // speed for a short loop leaves that catch-up response completely untouched --
-            // it only creeps slower, which is exactly the "slowly steps toward the new loop"
-            // behavior already confirmed to feel right for big loops, just scaled down to fit a
-            // small one. Based on the *target* length (rawRegionEnd-rawRegionStart), known before
-            // slewing, so it doesn't chase a moving figure while the loop itself resizes.
+            // (The window-speed limits below date from when the drag renderer caught up by reading
+            // faster -- it now relocates at 1x instead, see DragScanRender.h -- but they still set
+            // how the loop slides, which is what's been tuned by ear, so they stay.)
+            constexpr double slewGainPerSec = 8.0;   // window glide rate = distance * this
+            // Window speed limit -- see dragscan::maxWindowSpeed: just under the playhead's own
+            // 1x read speed (scaled for time-stretch), so the window never outruns it and the
+            // drag renderer never has to read faster (the pitch rise) or relocate constantly.
             const double targetRegionLen = (double) juce::jmax((int64_t) 1, rawRegionEnd - rawRegionStart);
-            constexpr double maxTrailingFractionOfLoop = 0.35;
-            const double maxSlewSpeed = juce::jlimit(currentSampleRate * 0.1, baseMaxSlewSpeed,
-                targetRegionLen * catchUpGainPerSec * maxTrailingFractionOfLoop);
+            const double maxSlewSpeed = dragscan::maxWindowSpeed(currentSampleRate,
+                engaged ? stretch / juce::jmax(1.0e-4, speed) : 1.0, targetRegionLen);
             int64_t regionStart, regionEnd;
             double prevDragRegionStart = 0.0, prevDragRegionEnd = 0.0;   // edges at this block's start
             if (dragEdge != 0)
@@ -888,6 +865,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                     // Stretched: the playhead is RubberBand's input read position, so seeding
                     // from it keeps the input continuous -- no crossfade needed on the way in.
                     dragScanPos = (double) document.playhead.load(std::memory_order_relaxed);
+                    dragRelocation = {};
                     dragScanActive = true;
                 }
                 const double dragFadeLen = (loop && xfadeMs > 0.01) ? xfadeMs * currentSampleRate / 1000.0 : 0.0;
@@ -933,14 +911,14 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                     if (engaged)
                     {
                         // Stretched: blend on RubberBand's input instead (releaseInputTail).
-                        dragscan::renderReleaseTail(releaseInputTail, rtChannels, declickLen, docBuf, dragScanPos,
+                        dragscan::renderReleaseTail(releaseInputTail, rtChannels, declickLen, docBuf, dragScanPos, dragRelocation,
                                                     dragRegionStart, relEnd, loop, relFade, currentSampleRate);
                         releaseInputTailLen = releaseInputTailRemaining = declickLen;
                         releasedIntoStretcher = true;
                     }
                     else
                     {
-                        dragscan::renderReleaseTail(seekOldTail, numCh, declickLen, docBuf, dragScanPos,
+                        dragscan::renderReleaseTail(seekOldTail, numCh, declickLen, docBuf, dragScanPos, dragRelocation,
                                                     dragRegionStart, relEnd, loop, relFade, currentSampleRate);
                         seekCrossfadeActive = true;
                         declickRemaining = declickLen;

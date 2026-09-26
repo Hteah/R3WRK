@@ -1459,6 +1459,7 @@ int main()
             for (int withJitter = 0; withJitter < 2; ++withJitter)
             {
                 double ds = std::floor(sc.start(0)), de = std::floor(sc.end(0)), pos = sc.pos0;
+                dragscan::Relocation rel;
                 float prev = -1.0f, maxStep = 0.0f;
                 juce::AudioBuffer<float> out(1, block);
                 for (int b = 0; b < (int) (3.0 * sr / block); ++b)
@@ -1467,13 +1468,13 @@ int main()
                     double rs = std::floor(sc.start(t)), re = std::floor(sc.end(t));
                     if (withJitter) { re += jitter.nextInt({ -300, 301 }); if (rs > 0) rs = std::max(0.0, rs + jitter.nextInt({ -300, 301 })); }
                     const double targetLen = std::max(1.0, re - rs);
-                    const double maxSlew = juce::jlimit(sr * 0.1, sr * 1.5, targetLen * 8.0 * 0.35);
+                    const double maxSlew = dragscan::maxWindowSpeed(sr, 1.0, targetLen);
                     const double dt = block / sr;
                     const double s0 = ds, e0 = de;
                     ds += juce::jlimit(-maxSlew, maxSlew, (rs - ds) * 8.0) * dt;
                     de += juce::jlimit(-maxSlew, maxSlew, (re - de) * 8.0) * dt;
                     out.clear();
-                    dragscan::renderBlock(out, 1, block, ones, pos, s0, e0, ds, de, true, 0.010 * sr, sr);
+                    dragscan::renderBlock(out, 1, block, ones, pos, rel, s0, e0, ds, de, true, 0.010 * sr, sr);
                     for (int i = 0; i < block; ++i)
                     {
                         const float y = out.getSample(0, i);
@@ -1489,6 +1490,99 @@ int main()
         }
         check(dragscan::edgeFadeGain(-0.3, 1000, 441) < 0.001 && dragscan::edgeFadeGain(999.4, 1000, 441) < 0.001,
               "edge fade is ~0 just outside either edge (crossing an edge is silent)");
+    }
+
+    {
+        std::cout << "\n[DragScan] a dragged loop never rises in pitch" << std::endl;
+        // Doc value == sample index, loop fades off: every output step IS the read speed. The
+        // renderer used to catch up to a window that outran it by reading up to 2x fast (steps of
+        // ~2 for long runs -- the pitch rise); it now always reads at 1x and relocates instead.
+        // Anything longer than a crossfade (10 ms) at a step clearly above 1 is a speed-up.
+        const double sr = 44100.0;
+        const int block = 512;
+        juce::AudioBuffer<float> ramp(1, (int) (sr * 12));
+        for (int n = 0; n < ramp.getNumSamples(); ++n) ramp.setSample(0, n, (float) n);
+        struct Sc { const char* name; std::function<double(double)> s, e; };
+        const Sc scs[] = {
+            { "Start dragged forward fast", [&](double t) { return std::floor(juce::jmin(1.0, t / 0.5) * 4 * sr); }, [&](double) { return 6 * sr; } },
+            { "loop moved forward 4 s",     [&](double t) { return std::floor(juce::jmin(1.0, t) * 4 * sr); }, [&](double t) { return std::floor(juce::jmin(1.0, t) * 4 * sr + 0.5 * sr); } },
+            { "short loop moved forward",   [&](double t) { return std::floor(juce::jmin(1.0, t) * 2 * sr); }, [&](double t) { return std::floor(juce::jmin(1.0, t) * 2 * sr + 0.08 * sr); } },
+            { "loop moved backward 4 s",    [&](double t) { return std::floor(4 * sr - juce::jmin(1.0, t) * 4 * sr); }, [&](double t) { return std::floor(4.5 * sr - juce::jmin(1.0, t) * 4 * sr); } },
+        };
+        for (const auto& sc : scs)
+        {
+            double ds = sc.s(0), de = sc.e(0), pos = ds;
+            dragscan::Relocation rel;
+            juce::AudioBuffer<float> out(1, block);
+            float prev = -1.0f;
+            int run = 0, longestFastRun = 0, oneX = 0, total = 0;
+            for (int b = 0; b < (int) (2.0 * sr / block); ++b)
+            {
+                const double t = b * block / sr;
+                const double rs = sc.s(t), re = sc.e(t);
+                const double maxSlew = dragscan::maxWindowSpeed(sr, 1.0, (re - rs));
+                const double s0 = ds, e0 = de;
+                ds += juce::jlimit(-maxSlew, maxSlew, (rs - ds) * 8.0) * block / sr;
+                de += juce::jlimit(-maxSlew, maxSlew, (re - de) * 8.0) * block / sr;
+                out.clear();
+                dragscan::renderBlock(out, 1, block, ramp, pos, rel, s0, e0, ds, de, true, 0.0, sr);
+                for (int i = 0; i < block; ++i)
+                {
+                    const float y = out.getSample(0, i);
+                    if (prev >= 0.0f)
+                    {
+                        const float step = y - prev;
+                        ++total;
+                        if (std::abs(step - 1.0f) < 1.0e-3f) ++oneX;
+                        run = (step > 1.2f && step < 3.0f) ? run + 1 : 0;
+                        longestFastRun = std::max(longestFastRun, run);
+                    }
+                    prev = y;
+                }
+            }
+            check(longestFastRun < (int) (0.010 * sr),
+                  juce::String(sc.name) + juce::String::formatted(": %.1f%% of samples at exactly 1x, longest sped-up run %d samples",
+                                                                  100.0 * oneX / juce::jmax(1, total), longestFastRun));
+        }
+    }
+
+    {
+        std::cout << "\n[DragScan] a dragged loop keeps playing while it slides" << std::endl;
+        // Reading at 1x only works if the window can't outrun the playhead: with the old 1.5x
+        // window cap a fast forward Start drag pinned the playhead at the loop seam (91% of the
+        // slide silent). Sine material, 10 ms loop fade; a 10 ms stretch peaking under 0.1 is
+        // counted silent.
+        const double sr = 44100.0; const int block = 512;
+        juce::AudioBuffer<float> doc(1, (int) (sr * 12));
+        for (int n = 0; n < doc.getNumSamples(); ++n) doc.setSample(0, n, (float) std::sin(2 * juce::MathConstants<double>::pi * 110 * n / sr));
+        struct Sc { const char* name; std::function<double(double)> s, e; };
+        const Sc scs[] = {
+            { "Start dragged forward fast", [&](double t) { return std::floor(juce::jmin(1.0, t / 0.5) * 4 * sr); }, [&](double) { return 6 * sr; } },
+            { "loop moved forward 4 s",     [&](double t) { return std::floor(juce::jmin(1.0, t) * 4 * sr); }, [&](double t) { return std::floor(juce::jmin(1.0, t) * 4 * sr + 0.5 * sr); } },
+            { "loop moved backward 4 s",    [&](double t) { return std::floor(4 * sr - juce::jmin(1.0, t) * 4 * sr); }, [&](double t) { return std::floor(4.5 * sr - juce::jmin(1.0, t) * 4 * sr); } },
+        };
+        for (const auto& sc : scs)
+        {
+            double ds = sc.s(0), de = sc.e(0), pos = ds; dragscan::Relocation rel;
+            juce::AudioBuffer<float> out(1, block);
+            int quiet = 0, total = 0, wn = 0; float win = 0;
+            for (int b = 0; b < (int) (3.0 * sr / block); ++b)
+            {
+                const double t = b * block / sr; const double rs = sc.s(t), re = sc.e(t);
+                const double maxSlew = dragscan::maxWindowSpeed(sr, 1.0, re - rs);
+                const double s0 = ds, e0 = de;
+                ds += juce::jlimit(-maxSlew, maxSlew, (rs - ds) * 8.0) * block / sr;
+                de += juce::jlimit(-maxSlew, maxSlew, (re - de) * 8.0) * block / sr;
+                out.clear();
+                dragscan::renderBlock(out, 1, block, doc, pos, rel, s0, e0, ds, de, true, 441, sr);
+                for (int i = 0; i < block; ++i)
+                {
+                    win = std::max(win, std::abs(out.getSample(0, i)));
+                    if (++wn == 441) { ++total; quiet += win < 0.1f ? 1 : 0; win = 0; wn = 0; }
+                }
+            }
+            check(quiet * 100 <= total * 3, juce::String(sc.name) + juce::String::formatted(": silent %d%% of the slide", 100 * quiet / juce::jmax(1, total)));
+        }
     }
 
     {
@@ -1530,23 +1624,24 @@ int main()
             const double holdSecs = holds[rng.nextInt(5)];
 
             double ds = start0, de = start0 + (double) loopLen, pos = start0;
+            dragscan::Relocation rel;
             juce::AudioBuffer<float> out(1, block);
             float last = 0.0f;
             for (int b = 0; b < (int) ((dragSecs + holdSecs) * sr / block); ++b)
             {
                 const double frac = juce::jmin(1.0, b * block / sr / dragSecs);
                 const double rs = std::floor(start0 + (dest - start0) * frac), re = rs + (double) loopLen;
-                const double maxSlew = juce::jlimit(sr * 0.1, sr * 1.5, (double) loopLen * 8.0 * 0.35);
+                const double maxSlew = dragscan::maxWindowSpeed(sr, 1.0, (double) loopLen);
                 const double s0 = ds, e0 = de;
                 ds += juce::jlimit(-maxSlew, maxSlew, (rs - ds) * 8.0) * block / sr;
                 de += juce::jlimit(-maxSlew, maxSlew, (re - de) * 8.0) * block / sr;
                 out.clear();
-                dragscan::renderBlock(out, 1, block, doc, pos, s0, e0, ds, de, true, xfade, sr);
+                dragscan::renderBlock(out, 1, block, doc, pos, rel, s0, e0, ds, de, true, xfade, sr);
                 last = out.getSample(0, block - 1);
             }
 
             juce::AudioBuffer<float> tail;
-            dragscan::renderReleaseTail(tail, 1, declick, doc, pos, ds, juce::jmax(ds + 1.0, de), true, xfade, sr);
+            dragscan::renderReleaseTail(tail, 1, declick, doc, pos, rel, ds, juce::jmax(ds + 1.0, de), true, xfade, sr);
 
             for (int withTail = 0; withTail < 2; ++withTail)
             {
@@ -1616,6 +1711,7 @@ int main()
             rb.setTimeRatio(timeRatio);
             juce::AudioBuffer<float> in(1, 16384), outB(1, block), tail;
             double ds = sc.s(0), de = sc.e(0), dpos = ds;
+            dragscan::Relocation rel;
             int64_t pos = (int64_t) ds;
             int outRamp = 0, tailRem = 0;
             bool released = false;
@@ -1630,7 +1726,9 @@ int main()
                 int64_t R0, R1;
                 if (t < releaseT)
                 {
-                    const double maxSlew = juce::jlimit(sr * 0.1, sr * 1.5, (re - rs) * 8.0 * 0.35);
+                    // "before" is the old code as it was: a 1.5x window cap, not scaled for stretch.
+                    const double maxSlew = after ? dragscan::maxWindowSpeed(sr, timeRatio, (re - rs))
+                                                 : juce::jlimit(sr * 0.1, sr * 1.5, (re - rs) * 8.0 * 0.35);
                     ds += juce::jlimit(-maxSlew, maxSlew, (rs - ds) * 8.0) * block / sr;
                     de += juce::jlimit(-maxSlew, maxSlew, (re - de) * 8.0) * block / sr;
                     R0 = std::llround(ds); R1 = std::max(R0 + 1, (int64_t) std::llround(de));
@@ -1645,7 +1743,7 @@ int main()
                         released = true; releaseAt = y.size();
                         if (after)
                         {
-                            dragscan::renderReleaseTail(tail, 1, declick, doc, dpos, ds, std::max(ds + 1.0, de), true, xfade, sr);
+                            dragscan::renderReleaseTail(tail, 1, declick, doc, dpos, rel, ds, std::max(ds + 1.0, de), true, xfade, sr);
                             tailRem = declick;
                             pos = std::llround(dpos);
                         }
@@ -1666,7 +1764,7 @@ int main()
                     if (dragRender)
                     {
                         const double f0 = juce::jmin(1.0, fed / expectIn), f1 = juce::jmin(1.0, (fed + req) / expectIn);
-                        dragscan::renderBlock(in, 1, req, doc, dpos, s0 + (ds - s0) * f0, e0 + (de - e0) * f0,
+                        dragscan::renderBlock(in, 1, req, doc, dpos, rel, s0 + (ds - s0) * f0, e0 + (de - e0) * f0,
                                               s0 + (ds - s0) * f1, e0 + (de - e0) * f1, true, xfade, sr);
                     }
                     else

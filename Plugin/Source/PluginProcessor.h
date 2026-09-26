@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include "DragScanRender.h"
 #include "AudioDocument.h"
 #include "DesktopAudioCapture.h"
 #include "BiquadFilter.h"
@@ -267,6 +268,7 @@ private:
     // handoff to the stretched path) starts fresh and the final position gets committed back to
     // `document.playhead`.
     double dragScanPos = 0.0;
+    dragscan::Relocation dragRelocation;   // crossfade state when the window passes the playhead
     bool   dragScanActive = false;
     // The region moves from [startA, endA) to [startB, endB) across the block (the previous and
     // current slewed edges), so the loop-crossfade envelope never steps at a block boundary.

@@ -37,12 +37,55 @@ namespace dragscan
         return s * s;
     }
 
-    // Renders one block. The loop region moves linearly from [startA, endA) at the block's first
-    // sample to [startB, endB) at its end. `maxFadeLen` is the crossfade length in samples (0 =
-    // off), clamped per sample to half the current region. Returns false if a non-looping region
-    // ran out (the rest of the block is left untouched -- the caller has already cleared it).
+    // How fast the dragged loop window may slide, in source samples per second. Capped just below
+    // the playhead's own read speed -- 1x of the source, i.e. sampleRate / timeRatio when the
+    // file is time-stretched -- so the window can never outrun the playhead: it reads at a
+    // constant 1x (no pitch rise) and simply loops inside a window that's gaining on it more
+    // slowly than it moves. (At the old 1.5x cap a fast forward Start drag overtook the
+    // playhead continuously; at 1x reading that pinned it at the loop seam -- 91% silent in
+    // the smoke test -- and the only alternative was reading faster, i.e. the pitch rise.)
+    // Short loops are throttled further (the original small-loop limit, kept for its feel).
+    inline double maxWindowSpeed(double sampleRate, double timeRatio, double targetRegionLen) noexcept
+    {
+        const double playRate = sampleRate / juce::jmax(1.0e-4, timeRatio);
+        constexpr double gainPerSec = 8.0, maxTrailingFractionOfLoop = 0.35;
+        return juce::jlimit(playRate * 0.1, playRate * 0.95,
+                            targetRegionLen * gainPerSec * maxTrailingFractionOfLoop);
+    }
+
+    // Crossfade state for a relocation (see renderBlock), carried across blocks alongside `pos`.
+    struct Relocation
+    {
+        double oldPos = 0.0;     // where the playhead was -- keeps playing, fading out, at 1x
+        float  oldGain = 0.0f;   // its loop-edge gain at the moment it was left (frozen)
+        int    remaining = 0, len = 0;
+    };
+
+    // `pos` folded into [start, start + len) by whole loop lengths -- the same point in the loop's
+    // cycle, just inside the window.
+    inline double wrapInto(double pos, double start, double len) noexcept
+    {
+        double r = std::fmod(pos - start, len);
+        if (r < 0.0) r += len;
+        return start + r;
+    }
+
+    // Renders one block, always reading at exactly 1x -- the pitch never changes. The loop region
+    // moves linearly from [startA, endA) at the block's first sample to [startB, endB) at its end.
+    // `maxFadeLen` is the loop crossfade length in samples (0 = off), clamped per sample to half
+    // the current region. Returns false if a non-looping region ran out (the rest of the block is
+    // left untouched -- the caller has already cleared it).
+    //
+    // When the moving window passes the playhead (its start edge overtakes it, a retreating end
+    // edge crosses it, or the whole loop jumps elsewhere), the playhead *relocates* to the same
+    // point in the loop's cycle inside the window, with a short equal-power crossfade from where
+    // it was. This used to be a catch-up instead -- reading up to 2x fast until the playhead got
+    // back inside -- which is what made a dragged loop sometimes rise in pitch. In the common
+    // case (an edge passing the playhead) both sides of the relocation sit at an edge, where the
+    // loop fade is ~0, so it's as silent as the ordinary loop seam; the crossfade covers the rest
+    // (a big jump from mid-loop).
     inline bool renderBlock(juce::AudioBuffer<float>& out, int numCh, int numSamples,
-                            const juce::AudioBuffer<float>& docBuf, double& pos,
+                            const juce::AudioBuffer<float>& docBuf, double& pos, Relocation& rel,
                             double startA, double endA, double startB, double endB,
                             bool loop, double maxFadeLen, double sampleRate)
     {
@@ -51,20 +94,16 @@ namespace dragscan
         if (docLen <= 1 || srcChans <= 0 || numSamples <= 0)
             return true;
 
-        // Kept as a fixed, gentle constant rather than raised for a short loop -- a much higher
-        // proportional gain closes the gap faster on paper, but turns this into a near-bang-bang
-        // response that amplifies ordinary drag-input jitter into audible chatter (tried and
-        // reverted -- see processBlock's maxSlewSpeed comment for the actual small-loop fix,
-        // which throttles the *window's* own speed instead and leaves this untouched). Must
-        // match processBlock's own catchUpGainPerSec.
-        constexpr double catchUpGainPerSec = 8.0;
-        // Backward drags never actually need the catch-up branch: the playhead already sits at
-        // the *far* edge from a retreating end, comfortably inside the window at plain 1x. Forward
-        // drags are the opposite -- zero margin at the low edge means catch-up runs for as long
-        // as the window keeps advancing, so this cap *is* the forward-drag pitch you hear. Keep
-        // it a little above processBlock's region-slew cap so the gap can actually close.
-        const double maxCatchUpSpeed = sampleRate * 2.0;
-        const double sr = juce::jmax(1.0, sampleRate);
+        const int relocLen = juce::jmax(1, (int) std::lround(0.010 * sampleRate));
+        auto read = [&](double p, int ch) -> float
+        {
+            if (p < 0.0 || p >= (double) (docLen - 1))
+                return 0.0f;
+            const int64_t i0 = (int64_t) p;
+            const float frac = (float) (p - (double) i0);
+            const float* d = docBuf.getReadPointer(juce::jmin(ch, srcChans - 1));
+            return d[i0] + (d[i0 + 1] - d[i0]) * frac;
+        };
 
         for (int i = 0; i < numSamples; ++i)
         {
@@ -72,35 +111,47 @@ namespace dragscan
             const double regionStart = startA + (startB - startA) * a;
             const double regionEnd   = juce::jmax(regionStart + 1.0, endA + (endB - endA) * a);
             const double regionLen   = regionEnd - regionStart;
+            const double fadeLen = loop ? juce::jmin(maxFadeLen, regionLen * 0.5) : 0.0;
 
-            double velocitySamplesPerSec;
-            if (pos < regionStart)
-                velocitySamplesPerSec = juce::jlimit(sampleRate, maxCatchUpSpeed,
-                                                     (regionStart - pos) * catchUpGainPerSec);
-            else if (pos >= regionEnd)
-                velocitySamplesPerSec = maxCatchUpSpeed;   // overshot a retreating end -- race to the wrap
-            else
-                velocitySamplesPerSec = sampleRate;        // inside the window: plain 1x
-
-            if (pos >= 0.0 && pos < (double) (docLen - 1))
+            if (pos < regionStart || pos >= regionEnd)
             {
-                const int64_t i0 = (int64_t) pos;
-                const float frac = (float) (pos - (double) i0);
-                const double fadeLen = loop ? juce::jmin(maxFadeLen, regionLen * 0.5) : 0.0;
-                const float g = (float) edgeFadeGain(pos - regionStart, regionLen, fadeLen);
-                for (int ch = 0; ch < numCh; ++ch)
-                {
-                    const float* d = docBuf.getReadPointer(juce::jmin(ch, srcChans - 1));
-                    out.setSample(ch, i, (d[i0] + (d[i0 + 1] - d[i0]) * frac) * g);
-                }
+                double target;
+                if (loop)                    target = wrapInto(pos, regionStart, regionLen);
+                else if (pos < regionStart)  target = regionStart;
+                else                         return false;   // not looping, past the end
+                rel.oldPos = pos;
+                rel.oldGain = (float) edgeFadeGain(pos - regionStart, regionLen, fadeLen);
+                rel.len = rel.remaining = relocLen;
+                pos = target;
             }
-            pos += velocitySamplesPerSec / sr;
 
+            const float g = (float) edgeFadeGain(pos - regionStart, regionLen, fadeLen);
+            float gIn = 1.0f, gOut = 0.0f;
+            if (rel.remaining > 0)
+            {
+                const double x = ((double) (rel.len - rel.remaining) + 0.5) / (double) rel.len;
+                gIn  = (float) std::sin(0.5 * juce::MathConstants<double>::pi * x);
+                gOut = (float) std::cos(0.5 * juce::MathConstants<double>::pi * x) * rel.oldGain;
+            }
+            for (int ch = 0; ch < numCh; ++ch)
+            {
+                float y = read(pos, ch) * g * gIn;
+                if (gOut != 0.0f)
+                    y += read(rel.oldPos, ch) * gOut;
+                out.setSample(ch, i, y);
+            }
+            if (rel.remaining > 0)
+            {
+                rel.oldPos += 1.0;
+                --rel.remaining;
+            }
+
+            pos += 1.0;
             if (pos >= regionEnd)
             {
                 if (! loop)
                     return false;
-                pos -= regionLen;   // keeps the fractional remainder -- continuous across the wrap
+                pos -= regionLen;   // the ordinary loop seam -- both sides at the edge fade's 0
             }
         }
         return true;
@@ -112,13 +163,13 @@ namespace dragscan
     // the playhead often lands outside it and gets jumped to the loop start; without an old tail
     // to fade out, whatever was playing just stopped mid-waveform (a click on ~1 release in 3).
     inline void renderReleaseTail(juce::AudioBuffer<float>& tail, int numCh, int len,
-                                  const juce::AudioBuffer<float>& docBuf, double pos,
+                                  const juce::AudioBuffer<float>& docBuf, double pos, Relocation rel,
                                   double regionStart, double regionEnd,
                                   bool loop, double maxFadeLen, double sampleRate)
     {
         tail.setSize(numCh, len, false, false, true);
         tail.clear();
-        renderBlock(tail, numCh, len, docBuf, pos, regionStart, regionEnd, regionStart, regionEnd,
+        renderBlock(tail, numCh, len, docBuf, pos, rel, regionStart, regionEnd, regionStart, regionEnd,
                     loop, maxFadeLen, sampleRate);
     }
 }
