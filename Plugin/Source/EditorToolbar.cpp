@@ -1138,6 +1138,7 @@ void EditorToolbar::paint(juce::Graphics& g)
         dotsBetween(blackBoxButton, scrubButton);
     }
     dotsBetween(sliceButton, toolsButton);
+    dotsBetween(overdubMoreButton, monitorButton);   // Record/Overdub | Monitor
 }
 
 //==============================================================================
@@ -2021,7 +2022,7 @@ void EditorToolbar::resized()
     add(loopButton);
     add(recordButton);
     add(overdubButton, 2);
-    addWide(overdubMoreButton, 20, gap);   // the FX drawer's "more" dot size (20 x 16)
+    addWide(overdubMoreButton, 20, gap + dotGap);   // the FX drawer's "more" dot size (20 x 16); divider before Monitor
     add(monitorButton);
     add(autoRecordButton, (standaloneApp || isPluginBuild) ? gap + dotGap : gap);   // dot before the next section
     if (standaloneApp)
