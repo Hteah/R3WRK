@@ -7,7 +7,8 @@
 
 namespace
 {
-    constexpr int kStateMagic     = 0x52335751;   // 'R3WQ' - adds Overdub level / feedback / monitor
+    constexpr int kStateMagic     = 0x52335752;   // 'R3WR' - adds Plexiphon v2 Couple / Skew
+    constexpr int kStateMagicR3WQ = 0x52335751;   // 'R3WQ' - adds Overdub level / feedback / monitor
     constexpr int kStateMagicR3WP = 0x52335750;   // 'R3WP' - adds Dirt (drive / rate / bits)
     constexpr int kStateMagicR3WO = 0x5233574F;   // 'R3WO' - adds Mimeophon Ping-Pong
     constexpr int kStateMagicR3WN = 0x5233574E;   // 'R3WN' - adds Mimeophon Skew
@@ -143,6 +144,8 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     smoothedPlexDecay.reset(sampleRate, plexRampSeconds);
     smoothedPlexColor.reset(sampleRate, plexRampSeconds);
     smoothedPlexMix.reset(sampleRate, plexRampSeconds);
+    smoothedPlexCouple.reset(sampleRate, plexRampSeconds);
+    smoothedPlexSkew.reset(sampleRate, plexRampSeconds);
     smoothedPlexLevel.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.plexLevel.load()));
     smoothedPlexPlexus.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.plexPlexus.load()));
     smoothedPlexSize.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.plexSize.load()));
@@ -150,6 +153,8 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     smoothedPlexDecay.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.plexDecay.load()));
     smoothedPlexColor.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.plexColor.load()));
     smoothedPlexMix.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.plexMix.load()));
+    smoothedPlexCouple.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.plexCouple.load()));
+    smoothedPlexSkew.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.plexSkew.load()));
     plexTailSamplesLeft = 0;
     plexTailSilentSamples = 0;
     lastPlexEngaged = false;
@@ -1796,6 +1801,8 @@ float R3WRKAudioProcessor::applyPlexiphon(juce::AudioBuffer<float>& buffer, int 
     const double decay01   = juce::jlimit(0.0, 1.0, document.plexDecay.load(std::memory_order_relaxed));
     const double color01   = juce::jlimit(0.0, 1.0, document.plexColor.load(std::memory_order_relaxed));
     const double mix01     = juce::jlimit(0.0, 1.0, document.plexMix.load(std::memory_order_relaxed));
+    const double couple01  = juce::jlimit(0.0, 1.0, document.plexCouple.load(std::memory_order_relaxed));
+    const double skew01    = juce::jlimit(0.0, 1.0, document.plexSkew.load(std::memory_order_relaxed));
 
     if (freshPlayPass)
     {
@@ -1810,6 +1817,8 @@ float R3WRKAudioProcessor::applyPlexiphon(juce::AudioBuffer<float>& buffer, int 
         smoothedPlexDecay.setCurrentAndTargetValue(decay01);
         smoothedPlexColor.setCurrentAndTargetValue(color01);
         smoothedPlexMix.setCurrentAndTargetValue(mix01);
+        smoothedPlexCouple.setCurrentAndTargetValue(couple01);
+        smoothedPlexSkew.setCurrentAndTargetValue(skew01);
     }
 
     smoothedPlexLevel.setTargetValue(level01);
@@ -1819,6 +1828,8 @@ float R3WRKAudioProcessor::applyPlexiphon(juce::AudioBuffer<float>& buffer, int 
     smoothedPlexDecay.setTargetValue(decay01);
     smoothedPlexColor.setTargetValue(color01);
     smoothedPlexMix.setTargetValue(mix01);
+    smoothedPlexCouple.setTargetValue(couple01);
+    smoothedPlexSkew.setTargetValue(skew01);
     const double level   = smoothedPlexLevel.skip(numSamples);
     const double plexus  = smoothedPlexPlexus.skip(numSamples);
     const double size    = smoothedPlexSize.skip(numSamples);
@@ -1826,6 +1837,8 @@ float R3WRKAudioProcessor::applyPlexiphon(juce::AudioBuffer<float>& buffer, int 
     const double decay   = smoothedPlexDecay.skip(numSamples);
     const double color   = smoothedPlexColor.skip(numSamples);
     const double mix     = smoothedPlexMix.skip(numSamples);
+    const double couple  = smoothedPlexCouple.skip(numSamples);
+    const double skew    = smoothedPlexSkew.skip(numSamples);
 
     const bool engaged = document.plexEnabled.load(std::memory_order_relaxed) && mix > 0.001;
 
@@ -1836,7 +1849,7 @@ float R3WRKAudioProcessor::applyPlexiphon(juce::AudioBuffer<float>& buffer, int 
     if (! engaged)
         return 0.0f;
 
-    plexDsp.setParams(level, plexus, size, diffuse, decay, color, mix, numSamples);
+    plexDsp.setParams(level, plexus, size, diffuse, decay, color, mix, numSamples, couple, skew);
 
     float peak = 0.0f;
     if (numCh <= 1)
@@ -2441,6 +2454,8 @@ void R3WRKAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     out.writeDouble(document.overdubLevel.load());      // R3WQ+
     out.writeDouble(document.overdubFeedback.load());
     out.writeBool(document.overdubMonitor.load());
+    out.writeDouble(document.plexCouple.load());        // R3WR+
+    out.writeDouble(document.plexSkew.load());
 
     auto& buf = document.getBuffer();
     for (int ch = 0; ch < buf.getNumChannels(); ++ch)
@@ -2456,12 +2471,12 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     juce::MemoryInputStream in(data, (size_t) sizeInBytes, false);
     const int magic = in.readInt();
-    if (magic != kStateMagic && magic != kStateMagicR3WP && magic != kStateMagicR3WO && magic != kStateMagicR3WN && magic != kStateMagicR3WM && magic != kStateMagicR3WL && magic != kStateMagicR3WK && magic != kStateMagicR3WJ && magic != kStateMagicR3WI && magic != kStateMagicR3WH && magic != kStateMagicR3WG && magic != kStateMagicR3WF && magic != kStateMagicR3WE && magic != kStateMagicR3WD
+    if (magic != kStateMagic && magic != kStateMagicR3WQ && magic != kStateMagicR3WP && magic != kStateMagicR3WO && magic != kStateMagicR3WN && magic != kStateMagicR3WM && magic != kStateMagicR3WL && magic != kStateMagicR3WK && magic != kStateMagicR3WJ && magic != kStateMagicR3WI && magic != kStateMagicR3WH && magic != kStateMagicR3WG && magic != kStateMagicR3WF && magic != kStateMagicR3WE && magic != kStateMagicR3WD
         && magic != kStateMagicR3WC && magic != kStateMagicR3WB && magic != kStateMagicR3WA
         && magic != kStateMagicR3W9 && magic != kStateMagicR3W8 && magic != kStateMagicR3W7
         && magic != kStateMagicR3W6 && magic != kStateMagicR3W5)
         return;
-    // R3WQ: adds Overdub level/feedback/monitor after Dirt. R3WP: adds Dirt drive/rate/bits after Mimeophon Ping-Pong. R3WO: adds Mimeophon Ping-Pong after Skew. R3WN: adds Mimeophon Skew after the other
+    // R3WR: adds Plexiphon Couple/Skew after Overdub. R3WQ: adds Overdub level/feedback/monitor after Dirt. R3WP: adds Dirt drive/rate/bits after Mimeophon Ping-Pong. R3WO: adds Mimeophon Ping-Pong after Skew. R3WN: adds Mimeophon Skew after the other
     // Mimeophon params. R3WM: adds the Mimeophon
     // params after the Plexiphon params. R3WL: adds the Plexiphon
     // params after reverb Width. R3WK: adds reverb Width after Pre-
@@ -2476,7 +2491,8 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     // MnM model). R3W8..R3WA: the old OT-style Base/Width filter with a single resonance
     // (+ later Drive, + later 12/24 slope). R3W6/R3W7: the even older mode/cutoff filter.
     // R3W5: none.
-    const bool hasOverdub          = (magic == kStateMagic);                                  // R3WQ
+    const bool hasPlexStereo       = (magic == kStateMagic);                                  // R3WR
+    const bool hasOverdub          = (hasPlexStereo || magic == kStateMagicR3WQ);             // R3WQ+
     const bool hasDirt             = (hasOverdub || magic == kStateMagicR3WP);                // R3WP+
     const bool hasMimeoPingPong    = (hasDirt || magic == kStateMagicR3WO);                   // R3WO+
     const bool hasMimeoSkew        = (hasMimeoPingPong || magic == kStateMagicR3WN);          // R3WN+
@@ -2657,6 +2673,12 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
         odFeedback = in.readDouble();
         odMonitor  = in.readBool();
     }
+    double pxCouple = 0.5, pxSkew = 0.5;   // older projects: centre
+    if (hasPlexStereo)
+    {
+        pxCouple = in.readDouble();
+        pxSkew   = in.readDouble();
+    }
 
     if (numCh <= 0 || numCh > kMaxStateChannels || numSamples < 0 || numSamples > 0x7fffffff)
         return;
@@ -2741,6 +2763,8 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     document.overdubLevel.store(juce::jlimit(0.0, 2.0, odLevel));
     document.overdubFeedback.store(juce::jlimit(0.0, 1.0, odFeedback));
     document.overdubMonitor.store(odMonitor);
+    document.plexCouple.store(juce::jlimit(0.0, 1.0, pxCouple));
+    document.plexSkew.store(juce::jlimit(0.0, 1.0, pxSkew));
 
     document.setSourceFilePath(sourceFilePath);   // "" on an older state blob -- header shows "Untitled"
 

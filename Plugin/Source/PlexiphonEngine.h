@@ -34,19 +34,18 @@ namespace r3wrk
         static constexpr int N = 8;
         using Row = std::array<double, N>;
 
-        // Sparse endpoint: an 8-cycle permutation (each line's feedback goes to exactly one
-        // OTHER line, forming one loop) -- exactly orthonormal by construction (a permutation
-        // matrix has unit row/column norms and eigenvalues on the unit circle), so it's an
-        // unconditionally stable "independent taps" endpoint with no tuning needed.
+        // Sparse (echo) endpoint: the identity -- each line feeds only ITSELF, so every active
+        // line is an independent echo loop repeating at its own delay time. (v1 used an 8-cycle
+        // permutation, line i -> line i+1: with only one or two lines fed and heard, a sound
+        // then had to travel round all 8 lines before coming back, ~4.4x Size between echoes
+        // instead of the rhythmic ratios.) Exactly orthonormal, so the blend / renormalise /
+        // spectral-radius scheme below applies unchanged.
         static std::array<Row, N> sparseMatrix() noexcept
         {
             std::array<Row, N> m{};
             for (int i = 0; i < N; ++i)
-            {
                 for (int j = 0; j < N; ++j)
-                    m[(size_t) i][(size_t) j] = 0.0;
-                m[(size_t) i][(size_t) ((i + 1) % N)] = 1.0;
-            }
+                    m[(size_t) i][(size_t) j] = (i == j) ? 1.0 : 0.0;
             return m;
         }
 
@@ -193,211 +192,253 @@ namespace r3wrk
     };
 
     /**
-        The Plexiphon's core network: 8 delay lines recirculating through a PlexusMatrix whose
-        blend amount is driven by the Plexus knob. One instance handles a full stereo pair, same
-        reasoning as ErbeVerbReverb: the network is shared across the field in this phase (Couple
-        -- two independent, cross-fed L/R networks -- is deferred to a later pass).
+        Plexiphon v2: two 8-line feedback delay networks (L and R), each a PlexusMatrix-mixed FDN,
+        built to sound unlike the Erbe-Verb (see ~/Downloads/plexiphon-differentiation.md for the
+        diagnosis). PLEXUS now morphs four things together:
+          - how many lines are active (fed and heard): 1 at 0%, all 8 at 100% -- w[l];
+          - their lengths: rhythmic echo ratios at 0%, the irregular reverb spread at 100%;
+          - the feedback wiring: each line feeds only itself at 0%, a dense Hadamard at 100%;
+          - diffusion: the allpass smear only comes in from ~15% up; below that DIFFUSE softens
+            each repeat with the in-loop low-pass instead, so echoes stay discrete.
+        COUPLE rotates each L line into its R partner inside the feedback (energy-preserving);
+        SKEW pushes L and R's PLEXUS / SIZE / COLOR apart in opposite directions. COLOR is a
+        cut-only tilt inside the loop (never boosts, so it can't lift loop gain past DECAY).
+        Delay lengths glide (80 ms slew, interpolated reads), so SIZE/PLEXUS moves bend pitch
+        like tape instead of clicking.
 
-        Reuses r3wrk::DelayLine, AllpassDiffuser, OnePoleLowpass, Biquad (+ shelf helpers) and
-        chebyshevPerturb from ReverbEngine.h. setParams() takes already-smoothed 0..1 knob
-        positions, same division of labour as ErbeVerbReverb (the caller owns anti-zipper
-        smoothing via juce::SmoothedValue).
+        Reuses DelayLine, AllpassDiffuser, OnePoleLowpass, Biquad (+ shelf helpers) and
+        chebyshevPerturb from ReverbEngine.h, unchanged. setParams() takes already-smoothed
+        0..1 knob positions (the caller owns anti-zipper smoothing), called once per block.
     */
     struct PlexiphonEngine
     {
         static constexpr int kNumLines = PlexusMatrix::N;
-        static constexpr int kAllpassesPerLine = 3;   // PLEXIPHON_PLAN.md suggests 2-4
+        static constexpr int kAllpassesPerLine = 3;
 
-        DelayLine       lines[kNumLines];
-        AllpassDiffuser allpass[kNumLines][kAllpassesPerLine];
-        OnePoleLowpass  damping[kNumLines];        // Diffuse's own mild static filtering component
-        Biquad          colorFilter[kNumLines];    // Color's slowly-evolving shelf, see setParams()
-        OnePoleLowpass  saturatorHp[kNumLines];     // for chebyshevPerturb's highpass-via-subtract
-        PlexusMatrix    matrix;
-
-        double sampleRate = 44100.0;
-
-        double diffusionGain = 0.0, dampCoeff = 0.0;
-        double decayGain = 0.0, driveAmt = 0.0;
-        int    sizeInSamplesInt = 0;
-        double mixWet = 0.0, mixDry = 1.0;
-        double levelGain = 1.0;
-
-        // Color: an always-on, internal slow evolution -- see this struct's header comment and
-        // PLEXIPHON_PLAN.md's Color section ("spectral trajectory... brighter/darker over
-        // time", not a static tone control). Not user-routable via the AudioDocument/LFO-panel
-        // modulation system -- that system targets specific existing knobs by design; this is
-        // an intrinsic character of the effect itself, always running whenever it's engaged.
-        double colorPhase = 0.0;
-        double colorRateHz = 0.1;   // sub-1Hz per the plan; own design choice, tune by ear
-        double colorBias = 0.0, colorDepth = 0.0;
-
-        // No ground-truth delay-time table exists for this module (unlike Erbe-Verb's, sourced
-        // from a real reference implementation) -- these are this project's own deliberately
-        // irregular spread (avoiding simple integer ratios between lines, which read as
-        // periodic/metallic), not measurements. Line fractions of the Size-scaled length:
+        // Reverb end: the v1 irregular spread (no simple ratios between lines -> not metallic).
         static constexpr double kLineFrac[kNumLines] =
             { 0.615, 0.774, 0.693, 0.958, 0.842, 1.0, 0.881, 0.727 };
-        // Allpass diffuser delay times (ms), 3 cascaded per line, kept under ~15ms per branch --
-        // the same "short allpasses" convention Erbe-Verb's own (sourced) reference used, though
-        // unconfirmed for this module specifically:
+        // Echo end: rhythmic ratios, ordered so the first lines to fade in are the most musical
+        // (whole, half, dotted half, third, two-thirds, quarter, 7/8, eighth).
+        static constexpr double kLineFracEcho[kNumLines] =
+            { 1.0, 0.5, 0.75, 1.0 / 3.0, 2.0 / 3.0, 0.25, 0.875, 0.125 };
         static constexpr double kAllpassMs[kNumLines][kAllpassesPerLine] = {
             { 2.3, 5.1, 9.8 }, { 3.7, 6.9, 11.2 }, { 2.9, 7.4, 10.1 }, { 4.2, 8.3, 12.6 },
             { 3.1, 6.2, 9.4 }, { 4.8, 7.7, 13.1 }, { 2.6, 8.9, 11.8 }, { 3.9, 6.5, 10.9 },
         };
+        static constexpr double kOutGain = 0.4;       // wet level per sqrt(active lines)
+        static constexpr double kColorShelfHz = 800.0;
+        static constexpr double kColorShelfQ  = 0.5;  // < 0.707: these shelves don't overshoot
+                                                      // 0 dB, so a cut never boosts anywhere
+
+        struct Side
+        {
+            DelayLine       lines[kNumLines];
+            AllpassDiffuser allpass[kNumLines][kAllpassesPerLine];
+            OnePoleLowpass  damping[kNumLines];
+            Biquad          colorLo[kNumLines], colorHi[kNumLines];
+            OnePoleLowpass  saturatorHp[kNumLines];
+            PlexusMatrix    matrix;
+            double lastPlexus = -1.0;
+            double w[kNumLines] {};                 // line activity (input injection + output taps)
+            double targetDelay[kNumLines] {}, curDelay[kNumLines] {};
+            double diffusionGain = 0.0, dampCoeff = 0.0, outGain = kOutGain;
+            double colorPhase = 0.0, colorRateHz = 0.1;
+        };
+        Side side[2];
+
+        double sampleRate = 44100.0;
+        double decayGain = 0.0, driveAmt = 0.0;
+        double levelGain = 1.0, mixWet = 0.0, mixDry = 1.0;
+        double coupleCos = 1.0, coupleSin = 0.0;
+        double delaySlew = 0.0;
+        bool   snapDelays = true;
+
+        static double smoothstep(double e0, double e1, double x) noexcept
+        {
+            const double t = juce::jlimit(0.0, 1.0, (x - e0) / (e1 - e0));
+            return t * t * (3.0 - 2.0 * t);
+        }
 
         void prepare(double newSampleRate)
         {
             sampleRate = juce::jmax(1000.0, newSampleRate);
-            const double maxLineMs = 500.0 * 0.0029411765 * 1000.0 + 5.0;   // same Size scale as Erbe-Verb
-            for (int l = 0; l < kNumLines; ++l)
-            {
-                lines[l].prepare(sampleRate, maxLineMs);
-                for (int a = 0; a < kAllpassesPerLine; ++a)
-                    allpass[l][a].prepare(sampleRate, 20.0);
-            }
+            const double maxLineMs = 500.0 * 0.0029411765 * 1000.0 + 5.0;
+            for (auto& sd : side)
+                for (int l = 0; l < kNumLines; ++l)
+                {
+                    sd.lines[l].prepare(sampleRate, maxLineMs);
+                    for (int a = 0; a < kAllpassesPerLine; ++a)
+                        sd.allpass[l][a].prepare(sampleRate, 20.0);
+                }
+            delaySlew = 1.0 - std::exp(-1.0 / (0.08 * sampleRate));   // ~80 ms glide
+            side[0].colorRateHz = 0.10; side[0].colorPhase = 0.0;
+            side[1].colorRateHz = 0.13; side[1].colorPhase = juce::MathConstants<double>::halfPi;
             reset();
         }
 
         void reset() noexcept
         {
-            for (int l = 0; l < kNumLines; ++l)
+            for (auto& sd : side)
             {
-                lines[l].reset();
-                damping[l].reset();
-                saturatorHp[l].reset();
-                colorFilter[l].reset();
-                for (int a = 0; a < kAllpassesPerLine; ++a)
-                    allpass[l][a].reset();
+                for (int l = 0; l < kNumLines; ++l)
+                {
+                    sd.lines[l].reset();
+                    sd.damping[l].reset();
+                    sd.saturatorHp[l].reset();
+                    sd.colorLo[l].reset();
+                    sd.colorHi[l].reset();
+                    for (int a = 0; a < kAllpassesPerLine; ++a)
+                        sd.allpass[l][a].reset();
+                }
+                sd.lastPlexus = -1.0;
             }
+            snapDelays = true;
         }
 
-        // level01/plexus01/size01/diffuse01/decay01/color01/mix01: 0..1 knob positions, already
-        // smoothed by the caller. blockNumSamples: this call's block length, needed to advance
-        // Color's internal phase by real elapsed time (it evolves continuously, not per-knob-turn).
+        // level/plexus/size/diffuse/decay/color/mix/couple/skew: 0..1 knob positions, already
+        // smoothed by the caller. blockNumSamples advances COLOR's slow internal motion.
         void setParams(double level01, double plexus01, double size01, double diffuse01,
-                       double decay01, double color01, double mix01, int blockNumSamples) noexcept
+                       double decay01, double color01, double mix01, int blockNumSamples,
+                       double couple01 = 0.5, double skew01 = 0.5) noexcept
         {
-            level01   = juce::jlimit(0.0, 1.0, level01);
-            plexus01  = juce::jlimit(0.0, 1.0, plexus01);
-            size01    = juce::jlimit(0.0, 1.0, size01);
+            level01  = juce::jlimit(0.0, 1.0, level01);
+            decay01  = juce::jlimit(0.0, 1.0, decay01);
+            mix01    = juce::jlimit(0.0, 1.0, mix01);
             diffuse01 = juce::jlimit(0.0, 1.0, diffuse01);
-            decay01   = juce::jlimit(0.0, 1.0, decay01);
-            color01   = juce::jlimit(0.0, 1.0, color01);
-            mix01     = juce::jlimit(0.0, 1.0, mix01);
+            couple01 = juce::jlimit(0.0, 1.0, couple01);
+            const double skew = (juce::jlimit(0.0, 1.0, skew01) - 0.5) * 2.0;   // -1..+1
 
             levelGain = juce::Decibels::decibelsToGain(juce::jmap(level01, 0.0, 1.0, -24.0, 12.0));
-
-            // Plexus: the central control -- continuously morphs the feedback matrix's own
-            // topology (see PlexusMatrix::setAmount()), not a gain or filter sweep.
-            matrix.setAmount(plexus01);
-
-            // Size: identical formula to ErbeVerbReverb's (sampleRate/340 physical-travel-time
-            // scale) -- per PLEXIPHON_PLAN.md, no separate mechanism is needed, the delay-time-
-            // vs-room-size dual character falls out of Plexus's own topology, not a special case.
-            const double sizeKnobInternal = juce::jmap(size01, 1.0, 500.0);
-            sizeInSamplesInt = (int) std::round(sizeKnobInternal * sampleRate * 0.0029411765);
-
-            // Diffuse: "a combination filtering and early reflection control" per the manual --
-            // the allpass cascade is the main effect; dampCoeff is a mild secondary static
-            // filtering component (Color, below, is the separate SLOWLY-EVOLVING filter).
-            diffusionGain = juce::jlimit(0.0, 0.75, diffuse01 * 0.75);
-            dampCoeff     = juce::jlimit(0.0, 0.3, diffuse01 * 0.3);
-
-            // Decay: "can be set to super-infinite at max" per the manual -- pushed further past
-            // unity than Erbe-Verb's own range, leaning on the same saturator (chebyshevPerturb,
-            // ReverbEngine.h) for stability at the top. Because PlexusMatrix::setAmount() already
-            // normalizes the matrix's own spectral radius to ~1 (verified offline, SmokeTest.cpp)
-            // across the whole Plexus range, decayGain here more directly *is* the loop gain --
-            // unlike Erbe-Verb's cap, which was compensating for a deliberately-unnormalized
-            // matrix. Starting cap 0.92: real margin under instability, but high enough for
-            // genuinely long sustain; the exact ceiling is a by-ear tuning call, same as Erbe-
-            // Verb's saturator was.
             decayGain = juce::jlimit(0.0, 0.92, decay01 * 0.92);
             driveAmt  = juce::jlimit(0.0, 1.0, (decayGain - 0.75) * 6.0);
 
-            // Color: the one genuinely new design piece here (not a reconstruction) -- an
-            // always-on internal evolution, not a static per-pass tone control. colorBias sets a
-            // static brightness (CCW darker, CW brighter); colorDepth grows with distance from
-            // centre, so the evolution itself is more pronounced the further Color is turned
-            // either way and quiescent near centre. Expect to revise by ear against the
-            // reference demo audio linked in PLEXIPHON_PLAN.md.
-            const double colorSigned = (color01 - 0.5) * 2.0;   // -1..+1
-            colorBias  = colorSigned;
-            colorDepth = std::abs(colorSigned);
-            colorPhase += colorRateHz * ((double) juce::jmax(0, blockNumSamples) / sampleRate)
-                         * juce::MathConstants<double>::twoPi;
-            if (colorPhase > juce::MathConstants<double>::twoPi)
-                colorPhase = std::fmod(colorPhase, juce::MathConstants<double>::twoPi);
+            const double theta = couple01 * juce::MathConstants<double>::pi * 0.25;   // 0 .. 45 deg
+            coupleCos = std::cos(theta);
+            coupleSin = std::sin(theta);
 
-            const double colorGainDb = juce::jlimit(-12.0, 12.0,
-                9.0 * colorBias + 4.0 * colorDepth * std::sin(colorPhase));
-            for (int l = 0; l < kNumLines; ++l)
-                setLowShelfCoeffs(colorFilter[l], 900.0, 0.7, colorGainDb, sampleRate);
+            const double mt = mix01 * juce::MathConstants<double>::halfPi;
+            mixDry = std::cos(mt);
+            mixWet = std::sin(mt);
 
-            // Mix: equal-power (cosine) dry/wet crossfade, same as Erbe-Verb.
-            const double theta = mix01 * juce::MathConstants<double>::halfPi;
-            mixDry = std::cos(theta);
-            mixWet = std::sin(theta);
+            for (int s = 0; s < 2; ++s)
+            {
+                auto& sd = side[s];
+                const double sign = s == 0 ? 1.0 : -1.0;   // SKEW: L one way, R the other
+                const double p  = juce::jlimit(0.0, 1.0, juce::jlimit(0.0, 1.0, plexus01) + sign * 0.25 * skew);
+                const double sz = juce::jlimit(0.0, 1.0, juce::jlimit(0.0, 1.0, size01)  + sign * 0.15 * skew);
+                const double co = juce::jlimit(0.0, 1.0, juce::jlimit(0.0, 1.0, color01) + sign * 0.15 * skew);
+
+                if (std::abs(p - sd.lastPlexus) > 1.0e-4)
+                {
+                    sd.matrix.setAmount(p);   // block-rate, only when it actually moved
+                    sd.lastPlexus = p;
+                }
+
+                // Active lines: line 0 always; line l fades in around PLEXUS = l/8.
+                double wSum = 0.0;
+                for (int l = 0; l < kNumLines; ++l)
+                {
+                    const double c = (double) l / (double) kNumLines;
+                    sd.w[l] = l == 0 ? 1.0 : smoothstep(c - 0.1, c + 0.1, p);
+                    wSum += sd.w[l];
+                }
+                sd.outGain = kOutGain / std::sqrt(juce::jmax(1.0, wSum));
+
+                // Lengths: rhythmic -> irregular, echo character held over the lower third.
+                const double t = std::pow(p, 1.5);
+                const double sizeSamples = (1.0 + 499.0 * sz) * sampleRate * 0.0029411765;
+                for (int l = 0; l < kNumLines; ++l)
+                {
+                    const double frac = kLineFracEcho[l] + (kLineFrac[l] - kLineFracEcho[l]) * t;
+                    // Whole samples: the interpolated read is only fractional *while gliding* --
+                    // once a line settles it reads exactly. (A settled fractional read is a mild
+                    // low-pass, and inside the loop it compounds: every repeat got duller,
+                    // whatever COLOR said. The smoke test's COLOR check caught it.)
+                    sd.targetDelay[l] = juce::jmax(1.0, std::round(frac * sizeSamples));
+                    if (snapDelays)
+                        sd.curDelay[l] = sd.targetDelay[l];
+                }
+
+                // Diffusion only smears from ~15% up; below, DIFFUSE softens each repeat instead.
+                const double tie = smoothstep(0.15, 0.7, p);
+                sd.diffusionGain = diffuse01 * 0.75 * tie;
+                sd.dampCoeff     = diffuse01 * (0.55 + (0.3 - 0.55) * tie);
+
+                // COLOR: cut-only tilt (-1.5 dB max per pass + slow motion); anticlockwise cuts
+                // highs (each repeat darker), clockwise cuts lows (each repeat brighter).
+                const double signedColor = (co - 0.5) * 2.0;
+                sd.colorPhase += sd.colorRateHz * ((double) juce::jmax(0, blockNumSamples) / sampleRate)
+                                 * juce::MathConstants<double>::twoPi;
+                if (sd.colorPhase > juce::MathConstants<double>::twoPi)
+                    sd.colorPhase = std::fmod(sd.colorPhase, juce::MathConstants<double>::twoPi);
+                double g = 1.5 * signedColor + 0.75 * std::abs(signedColor) * std::sin(sd.colorPhase);
+                if (signedColor > 0.0) g = juce::jmax(0.0, g);   // motion never flips the tilt's side
+                if (signedColor < 0.0) g = juce::jmin(0.0, g);
+                const double hiCutDb = juce::jmax(0.0, -g), loCutDb = juce::jmax(0.0, g);
+                for (int l = 0; l < kNumLines; ++l)
+                {
+                    setHighShelfCoeffs(sd.colorHi[l], kColorShelfHz, kColorShelfQ, -hiCutDb, sampleRate);
+                    setLowShelfCoeffs (sd.colorLo[l], kColorShelfHz, kColorShelfQ, -loCutDb, sampleRate);
+                }
+            }
+            snapDelays = false;
         }
 
         inline void processSample(float inL, float inR, float& outL, float& outR) noexcept
         {
-            const float dryMono = 0.5f * (inL + inR) * (float) levelGain;
+            const float in[2] = { inL * (float) levelGain, inR * (float) levelGain };
+            float fdn[2][kNumLines], mix[2][kNumLines];
 
-            // Read each line out, apply Color's evolving shelf, then Decay's saturator -- all
-            // before the matrix mix, mirroring ErbeVerbReverb's "saturate on the way out" order.
-            float fdn[kNumLines];
-            for (int l = 0; l < kNumLines; ++l)
+            for (int s = 0; s < 2; ++s)
             {
-                const int delaySamples = (int) std::round(kLineFrac[l] * (double) sizeInSamplesInt);
-                fdn[l] = lines[l].read(delaySamples);
-                fdn[l] = colorFilter[l].processSample(fdn[l]);
-                fdn[l] = chebyshevPerturb(fdn[l], driveAmt, saturatorHp[l]);
-            }
-
-            // Plexus matrix: the morphing feedback topology itself.
-            float matrixIn[kNumLines], matrixOut[kNumLines];
-            for (int l = 0; l < kNumLines; ++l)
-                matrixIn[l] = fdn[l] * (float) decayGain;
-            matrix.apply(matrixIn, matrixOut);
-
-            // Input injection: evenly into every line (no hardware injection topology to
-            // reference, unlike Erbe-Verb's sourced 2-branch pattern -- a symmetric N-line
-            // network with even injection is the more natural default here).
-            for (int l = 0; l < kNumLines; ++l)
-            {
-                double branchIn = (double) matrixOut[l] + (double) dryMono;
-                branchIn = damping[l].process(branchIn, dampCoeff);
-
-                float x = (float) branchIn;
-                for (int a = 0; a < kAllpassesPerLine; ++a)
+                auto& sd = side[s];
+                float mIn[kNumLines];
+                for (int l = 0; l < kNumLines; ++l)
                 {
-                    const int delaySamples = (int) std::round(kAllpassMs[l][a] * 0.001 * sampleRate);
-                    x = allpass[l][a].process(x, delaySamples, diffusionGain);
+                    const double gap = sd.targetDelay[l] - sd.curDelay[l];
+                    sd.curDelay[l] = std::abs(gap) < 1.0e-3 ? sd.targetDelay[l] : sd.curDelay[l] + gap * delaySlew;
+                    float y = sd.lines[l].readInterpolated(sd.curDelay[l]);
+                    y = sd.colorHi[l].processSample(y);
+                    y = sd.colorLo[l].processSample(y);
+                    y = chebyshevPerturb(y, driveAmt, sd.saturatorHp[l]);
+                    fdn[s][l] = y;
+                    mIn[l] = y * (float) decayGain;
                 }
-                lines[l].write(x);
+                sd.matrix.apply(mIn, mix[s]);
             }
 
-            // Stereo output: even lines weighted toward L, odd toward R, with cross-bleed --
-            // own design (no stereo-tap pattern to reference), the same "asymmetric weighted
-            // sum, not a hard split" spirit as Erbe-Verb's 4-line taps.
-            float sumL = 0.0f, sumR = 0.0f;
+            // COUPLE: rotate each L line into its R partner (energy-preserving).
             for (int l = 0; l < kNumLines; ++l)
             {
-                const bool evenLine = (l % 2) == 0;
-                sumL += fdn[l] * (evenLine ? 1.0f : 0.5f);
-                sumR += fdn[l] * (evenLine ? 0.5f : 1.0f);
+                const float a = mix[0][l], b = mix[1][l];
+                mix[0][l] = (float) ( coupleCos * a + coupleSin * b);
+                mix[1][l] = (float) (-coupleSin * a + coupleCos * b);
             }
-            const float wetL = sumL * 0.18f;
-            const float wetR = sumR * 0.18f;
 
-            outL = (float) (mixDry * inL + mixWet * wetL);
-            outR = (float) (mixDry * inR + mixWet * wetR);
+            float wet[2];
+            for (int s = 0; s < 2; ++s)
+            {
+                auto& sd = side[s];
+                double sum = 0.0;
+                for (int l = 0; l < kNumLines; ++l)
+                {
+                    double branch = (double) mix[s][l] + (double) in[s] * sd.w[l];
+                    branch = sd.damping[l].process(branch, sd.dampCoeff);
+                    float x = (float) branch;
+                    for (int a = 0; a < kAllpassesPerLine; ++a)
+                    {
+                        const int d = (int) std::round(kAllpassMs[l][a] * 0.001 * sampleRate);
+                        x = sd.allpass[l][a].process(x, d, sd.diffusionGain);
+                    }
+                    sd.lines[l].write(x);
+                    sum += sd.w[l] * (double) fdn[s][l];
+                }
+                wet[s] = (float) (sum * sd.outGain);
+            }
 
-            // Safety backstop, same spirit as ErbeVerbReverb's.
-            outL = juce::jlimit(-4.0f, 4.0f, outL);
-            outR = juce::jlimit(-4.0f, 4.0f, outR);
+            outL = juce::jlimit(-4.0f, 4.0f, (float) (mixDry * inL + mixWet * wet[0]));
+            outR = juce::jlimit(-4.0f, 4.0f, (float) (mixDry * inR + mixWet * wet[1]));
         }
     };
 }

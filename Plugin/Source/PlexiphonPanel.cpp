@@ -36,8 +36,17 @@ namespace
                      });
             setUpKnob(mix, "MIX", document.plexMix, 0.0, 1.0,
                      [](double v) { return juce::String(juce::roundToInt(v * 100.0)) + "%"; });
+            // v2 stereo: COUPLE = L/R cross-feed inside the feedback; SKEW = L/R pushed apart.
+            setUpKnob(couple, "COUPLE", document.plexCouple, 0.0, 1.0,
+                     [](double v) { return juce::String(juce::roundToInt(v * 100.0)) + "%"; });
+            setUpKnob(skew, "SKEW", document.plexSkew, 0.0, 1.0,
+                     [](double v) {
+                         const int pct = juce::roundToInt((v - 0.5) * 200.0);
+                         if (pct == 0) return juce::String("CTR");
+                         return (pct > 0 ? "L" : "R") + juce::String(std::abs(pct)) + "%";
+                     });
 
-            setSize(330, 190);
+            setSize(400, 190);
         }
 
         void setUpKnob(Knob& k, const juce::String& caption, std::atomic<double>& target,
@@ -64,7 +73,7 @@ namespace
             title.setBounds(r.removeFromTop(20));
             r.removeFromTop(6);
 
-            const int gridCols = 4;   // fixed so both rows' columns line up, even with row 2's 3
+            const int gridCols = 5;   // fixed so both rows' columns line up, even with row 2's 4
             auto layoutRow = [&](std::initializer_list<Knob*> knobs)
             {
                 auto row = r.removeFromTop(70);
@@ -76,15 +85,15 @@ namespace
                     k->slider.setBounds(col);
                 }
             };
-            layoutRow({ &level, &plexus, &size, &diffuse });
-            layoutRow({ &decay, &color, &mix });
+            layoutRow({ &level, &plexus, &size, &diffuse, &decay });
+            layoutRow({ &color, &couple, &skew, &mix });
         }
 
         ~PlexiphonEditorPanel() override { setLookAndFeel(nullptr); }   // detach before lnf is destroyed
 
         AudioDocument& document;
         juce::Label title;
-        Knob level, plexus, size, diffuse, decay, color, mix;
+        Knob level, plexus, size, diffuse, decay, color, mix, couple, skew;
         lcd::HardwareLcdLookAndFeel lnf;
     };
 }

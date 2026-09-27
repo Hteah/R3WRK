@@ -392,6 +392,11 @@ public:
     std::atomic<double> plexDecay   { 0.5 };
     std::atomic<double> plexColor   { 0.5 };
     std::atomic<double> plexMix     { 0.0 };
+    // Plexiphon v2 stereo (PlexiphonEngine.h): COUPLE = how much each L line rotates into its R
+    // partner inside the feedback (0 = dual mono, 1 = fully interlaced); SKEW = L/R pushed apart
+    // in PLEXUS / SIZE / COLOR (0.5 = centre). Distinct from Mimeophon's mimeoSkew.
+    std::atomic<double> plexCouple  { 0.5 };
+    std::atomic<double> plexSkew    { 0.5 };
 
     //==============================================================================
     // Mimeophon (r3wrk::MimeophonEngine, MimeophonEngine.h) -- phase 1: core delay engine

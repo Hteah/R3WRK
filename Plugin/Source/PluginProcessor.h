@@ -434,6 +434,8 @@ private:
     juce::SmoothedValue<double> smoothedPlexDecay   { 0.5 };
     juce::SmoothedValue<double> smoothedPlexColor   { 0.5 };
     juce::SmoothedValue<double> smoothedPlexMix     { 0.0 };
+    juce::SmoothedValue<double> smoothedPlexCouple  { 0.5 };
+    juce::SmoothedValue<double> smoothedPlexSkew    { 0.5 };
     int  plexTailSamplesLeft   = 0;
     int  plexTailSilentSamples = 0;
     bool lastPlexEngaged = false;

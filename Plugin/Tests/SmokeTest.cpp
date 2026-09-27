@@ -2,6 +2,7 @@
 // Exercises AudioDocument + EditActions + TimeStretchEngine directly.
 
 #include <JuceHeader.h>
+#include <complex>
 #include "../Source/AudioDocument.h"
 #include "../Source/EditActions.h"
 #include "../Source/TimeStretchEngine.h"
@@ -1401,6 +1402,171 @@ int main()
 
         check(! hasNonFinite, "Plexiphon output stays finite under an impulse with Decay pinned at max + a full Plexus sweep");
         check(peak < 4.0f, "Plexiphon output peak stays within the safety clamp (< 4.0) under stress");
+    }
+
+    // --- Plexiphon v2: echo <-> reverb morph, stereo Couple/Skew, cut-only Color ----------
+    {
+        std::cout << "-- Plexiphon v2 (echo/reverb morph, Couple, Skew, Color) --" << std::endl;
+        const double fs = 48000.0;
+        struct P { double level = 0.667, plexus = 0.0, size = 0.3, diffuse = 0.0, decay = 0.5, color = 0.5, mix = 1.0, couple = 0.5, skew = 0.5; };
+        auto render = [&](const P& pr, std::function<float(int)> inL, std::function<float(int)> inR, int n,
+                          std::vector<float>& outL, std::vector<float>& outR)
+        {
+            r3wrk::PlexiphonEngine e; e.prepare(fs);
+            e.setParams(pr.level, pr.plexus, pr.size, pr.diffuse, pr.decay, pr.color, pr.mix, 0, pr.couple, pr.skew);
+            outL.assign((size_t) n, 0.0f); outR.assign((size_t) n, 0.0f);
+            for (int i = 0; i < n; ++i) e.processSample(inL(i), inR(i), outL[(size_t) i], outR[(size_t) i]);
+        };
+        auto impulse = [](int i) { return i == 0 ? 1.0f : 0.0f; };
+        auto silence = [](int) { return 0.0f; };
+        juce::Random rng(11);
+        std::vector<float> noiseL((size_t) fs), noiseR((size_t) fs);
+        for (size_t i = 0; i < noiseL.size(); ++i) { noiseL[i] = rng.nextFloat() - 0.5f; noiseR[i] = rng.nextFloat() - 0.5f; }
+        auto burstL = [&](int i) { return i < (int) (fs * 0.5) ? noiseL[(size_t) i] : 0.0f; };
+        auto burstR = [&](int i) { return i < (int) (fs * 0.5) ? noiseR[(size_t) i] : 0.0f; };
+        std::vector<float> L, R;
+
+        { // Echo discreteness: one line, clean repeats at a steady period, silence between.
+            P pr; pr.couple = 0.0;
+            render(pr, impulse, silence, (int) (fs * 2.0), L, R);
+            float peakAll = 0; for (float v : L) peakAll = std::max(peakAll, std::abs(v));
+            std::vector<int> peaks;
+            for (int i = 1; i + 1 < (int) L.size(); ++i)
+                if (std::abs(L[(size_t) i]) > 0.05f * peakAll && std::abs(L[(size_t) i]) >= std::abs(L[(size_t) i - 1])
+                    && std::abs(L[(size_t) i]) >= std::abs(L[(size_t) i + 1]) && (peaks.empty() || i - peaks.back() > (int) (fs * 0.05)))
+                    peaks.push_back(i);
+            bool steady = peaks.size() >= 3;
+            float between = 0;
+            for (size_t k = 1; k < peaks.size() && steady; ++k)
+            {
+                steady = std::abs((peaks[k] - peaks[k - 1]) - (peaks[1] - peaks[0])) <= (int) (fs * 0.001);
+                for (int i = peaks[k - 1] + (int) (fs * 0.03); i < peaks[k] - (int) (fs * 0.03); ++i) between = std::max(between, std::abs(L[(size_t) i]));
+            }
+            const double sizeMs = (1.0 + 499.0 * pr.size) / 340.0 * 1000.0;
+            const double periodMs = peaks.size() >= 2 ? (peaks[1] - peaks[0]) / fs * 1000.0 : 0.0;
+            check(steady && between < 0.01f * peakAll && periodMs >= sizeMs && periodMs < sizeMs + 25.0,
+                  juce::String::formatted("PLEXUS 0: %d clean repeats every %.1f ms (Size %.1f ms), quiet between (%.4f of peak)",
+                                          (int) peaks.size(), periodMs, sizeMs, between / juce::jmax(1e-9f, peakAll)));
+        }
+        { // Reverb density: far more of the tail is 'busy' at PLEXUS 1 than at 0.
+            auto busy = [&](double plexus)
+            {
+                P pr; pr.plexus = plexus; pr.diffuse = 0.5;
+                render(pr, impulse, impulse, (int) (fs * 1.0), L, R);
+                int n = 0; for (int i = (int) (fs * 0.5); i < (int) (fs * 1.0); ++i) n += std::abs(L[(size_t) i]) > 1.0e-4f ? 1 : 0;
+                return n;
+            };
+            const int echo = busy(0.0), verb = busy(1.0);
+            check(verb > 3 * echo + 1000, juce::String::formatted("PLEXUS 1 is far denser than PLEXUS 0 (%d vs %d busy samples in 0.5-1 s)", verb, echo));
+        }
+        { // Level stays within +-6 dB across the sweep.
+            double lo = 1e9, hi = 0;
+            for (double plexus : { 0.0, 0.25, 0.5, 0.75, 1.0 })
+            {
+                P pr; pr.plexus = plexus; pr.diffuse = 0.5; pr.size = 0.4;
+                render(pr, burstL, burstR, (int) (fs * 2.0), L, R);
+                double e = 0; for (int i = (int) (fs * 0.1); i < (int) (fs * 2.0); ++i) e += L[(size_t) i] * L[(size_t) i] + R[(size_t) i] * R[(size_t) i];
+                const double rms = std::sqrt(e / (2.0 * fs * 1.9));
+                lo = std::min(lo, rms); hi = std::max(hi, rms);
+            }
+            check(hi / lo < 4.0, juce::String::formatted("wet level across PLEXUS 0..1 stays within +-6 dB (span %.1f dB)", 20 * std::log10(hi / lo)));
+        }
+        { // COUPLE 0 keeps L and R apart; COUPLE 1 interlaces them.
+            auto rightRms = [&](double couple)
+            {
+                P pr; pr.plexus = 0.6; pr.diffuse = 0.5; pr.couple = couple;
+                render(pr, burstL, silence, (int) (fs * 1.5), L, R);
+                double e = 0; for (float v : R) e += v * v;
+                return std::sqrt(e / (double) R.size());
+            };
+            const double iso = rightRms(0.0), full = rightRms(1.0);
+            check(iso < 1.0e-7 && full > 0.005, juce::String::formatted("COUPLE 0: input on L never reaches R (rms %.1e); COUPLE 1 does (%.4f)", iso, full));
+        }
+        { // COLOR direction: anticlockwise, each repeat loses highs; clockwise, each loses lows.
+            auto hfShare = [&](double color, int echoIdx)
+            {
+                P pr; pr.color = color; pr.decay = 0.8; pr.couple = 0.0;
+                std::vector<float> nz((size_t) (fs * 0.01)); juce::Random r2(3);
+                for (auto& v : nz) v = r2.nextFloat() - 0.5f;
+                render(pr, [&](int i) { return i < (int) nz.size() ? nz[(size_t) i] : 0.0f; }, silence, (int) (fs * 2.5), L, R);
+                const double sizeS = (1.0 + 499.0 * pr.size) / 340.0 + 0.0172;
+                const int c = (int) std::round(sizeS * fs * echoIdx);
+                // Tilt = high-band energy (first difference) over low-band energy (one-pole
+                // low-pass at ~300 Hz) -- compares the two ends directly, in dB.
+                double low = 0, diff = 0, lp = 0;
+                const double a = std::exp(-2.0 * juce::MathConstants<double>::pi * 300.0 / fs);
+                for (int i = c - (int) (fs * 0.004); i < c + (int) (fs * 0.02); ++i)
+                {
+                    lp = a * lp + (1.0 - a) * L[(size_t) i];
+                    low += lp * lp;
+                    const float d = L[(size_t) i] - L[(size_t) i - 1]; diff += d * d;
+                }
+                return 10.0 * std::log10(diff / juce::jmax(1e-15, low));
+            };
+            const double dark1 = hfShare(0.0, 1), dark4 = hfShare(0.0, 4), bright1 = hfShare(1.0, 1), bright4 = hfShare(1.0, 4);
+            const double flat1 = hfShare(0.5, 1), flat4 = hfShare(0.5, 4);
+            check(std::abs(flat4 - flat1) < 0.5,
+                  juce::String::formatted("COLOR centred: repeats keep their tone (tilt %+.2f dB over 3 repeats)", flat4 - flat1));
+            check(dark4 - dark1 < -2.0 && bright4 - bright1 > 2.0,
+                  juce::String::formatted("COLOR: anticlockwise darkens each repeat (tilt %+.1f dB over 3 repeats), clockwise brightens it (%+.1f dB)", dark4 - dark1, bright4 - bright1));
+        }
+        { // COLOR never boosts: every shelf setting it can reach stays at or under 0 dB everywhere.
+            double worst = 0;
+            for (int g = 0; g <= 24; ++g)
+                for (int hi = 0; hi < 2; ++hi)
+                {
+                    r3wrk::Biquad b;
+                    if (hi) r3wrk::setHighShelfCoeffs(b, 800.0, 0.5, -0.1 * g, fs); else r3wrk::setLowShelfCoeffs(b, 800.0, 0.5, -0.1 * g, fs);
+                    for (int k = 1; k < 400; ++k)
+                    {
+                        const double w = juce::MathConstants<double>::pi * k / 400.0;
+                        const std::complex<double> z = std::polar(1.0, -w), z2 = z * z;
+                        const double mag = std::abs((b.b0 + b.b1 * z + b.b2 * z2) / (1.0 + b.a1 * z + b.a2 * z2));
+                        worst = std::max(worst, mag);
+                    }
+                }
+            check(worst <= 1.0 + 1e-9, juce::String::formatted("COLOR's cut-only shelves never exceed 0 dB at any frequency (max gain %.9f)", worst));
+        }
+        { // Stability: PLEXUS x COUPLE x SKEW x COLOR, DECAY at max, noise then silence, knobs moving per block.
+            const double fsS = 16000.0;
+            bool finite = true; float peak = 0;
+            for (double pl : { 0.0, 0.25, 0.5, 0.75, 1.0 })
+            for (double cp : { 0.0, 0.25, 0.5, 0.75, 1.0 })
+            for (double sk : { 0.0, 0.5, 1.0 })
+            for (double co : { 0.0, 0.5, 1.0 })
+            {
+                r3wrk::PlexiphonEngine e; e.prepare(fsS);
+                juce::Random r3(5);
+                for (int i = 0; i < (int) (fsS * 2.0); ++i)
+                {
+                    if (i % 256 == 0)
+                    {
+                        const double wob = 0.1 * std::sin(i * 0.001);
+                        e.setParams(1.0, juce::jlimit(0.0, 1.0, pl + wob), 0.3, 0.7, 1.0, co, 1.0, 256, cp, sk);
+                    }
+                    const float x = i < (int) fsS ? (r3.nextFloat() - 0.5f) : 0.0f;
+                    float oL, oR; e.processSample(x, -x, oL, oR);
+                    finite = finite && std::isfinite(oL) && std::isfinite(oR);
+                    peak = std::max(peak, std::max(std::abs(oL), std::abs(oR)));
+                }
+            }
+            check(finite && peak < 4.0f, juce::String::formatted("225 PLEXUS/COUPLE/SKEW/COLOR combos at max DECAY: finite, within the clamp (peak %.2f)", peak));
+        }
+        { // SIZE glides: sweeping it in echo mode bends pitch smoothly, no jumps.
+            r3wrk::PlexiphonEngine e; e.prepare(fs);
+            float worst = 0, prevOut = 0; bool first = true;
+            for (int i = 0; i < (int) (fs * 1.5); ++i)
+            {
+                if (i % 512 == 0)
+                    e.setParams(0.667, 0.0, 0.2 + 0.3 * juce::jmin(1.0, i / fs), 0.0, 0.3, 0.5, 1.0, 512, 0.0, 0.5);
+                const float x = 0.3f * (float) std::sin(2 * juce::MathConstants<double>::pi * 220.0 * i / fs);
+                float oL, oR; e.processSample(x, x, oL, oR);
+                if (! first) worst = std::max(worst, std::abs(oL - prevOut));
+                prevOut = oL; first = false;
+            }
+            const float slope = (float) (0.3 * 2 * juce::MathConstants<double>::pi * 220.0 / fs) * 3.0f;   // loop builds up to ~1/(1-0.28)
+            check(worst < slope * 2.0f, juce::String::formatted("sweeping SIZE in echo mode glides, no jumps (worst step %.4f, smooth limit %.4f)", worst, slope * 2.0f));
+        }
     }
 
     // --- Plexiphon engine: real reverberation/echo + decay at a moderate setting -------------
