@@ -1695,11 +1695,11 @@ void EditorToolbar::updateTransportButtonText()
     {
         const bool capturing = processor.isCapturingOutput();
 
-        desktopRecButton.setButtonText(desktopRec ? R3WRKLookAndFeel::iconStop
+        desktopRecButton.setButtonText(desktopRec ? R3WRKLookAndFeel::iconRecDot    // flashing while capturing
                                                   : R3WRKLookAndFeel::iconDesktopRec);
         desktopRecButton.setEnabled((desktopRec || (! micRec && ! playing)) && ! capturing);
 
-        captureOutButton.setButtonText(capturing ? R3WRKLookAndFeel::iconStop
+        captureOutButton.setButtonText(capturing ? R3WRKLookAndFeel::iconRecDot     // flashing while capturing
                                                  : R3WRKLookAndFeel::iconCaptureOut);
         captureOutButton.setEnabled(capturing || ! rec);   // don't run alongside a mic/desktop take
     }
@@ -1753,11 +1753,21 @@ void EditorToolbar::timerCallback()
         if (monitorButton.getToggleState() != document.overdubMonitor.load())   // state load resets it
             monitorButton.setToggleState(document.overdubMonitor.load(), juce::dontSendNotification);
         const bool active = document.overdubbing.load();
-        overdubButton.setColour(juce::TextButton::buttonColourId,
-                                active ? theme->palette().recordButton : juce::Colours::transparentBlack);
+        overdubButton.setButtonText(active ? R3WRKLookAndFeel::iconRecDot : R3WRKLookAndFeel::iconOverdub);
+
+        // "Recording now": pulse the flashing red dot on whichever capture buttons are running
+        // (about once a second).
+        const double t = juce::Time::getMillisecondCounterHiRes() * 0.001;
+        const double pulse = 0.5 + 0.5 * std::sin(t * juce::MathConstants<double>::twoPi * 1.0);
+        for (auto* b : { &overdubButton, &desktopRecButton, &captureOutButton })
+            if (b->getButtonText() == R3WRKLookAndFeel::iconRecDot)
+            {
+                b->getProperties().set("pulse", pulse);
+                b->repaint();
+            }
         const bool can = active || processor.canOverdub();
         overdubButton.setEnabled(can);
-        overdubButton.setTooltip(active ? "Overdub -- click to stop (this pass becomes one Undo step)"
+        overdubButton.setTooltip(active ? "Overdubbing -- click to stop (this pass becomes one Undo step)"
                                  : can  ? "Overdub -- layer onto the loop, sound-on-sound (starts the loop if stopped)"
                                         : (document.isEmpty() ? "Overdub -- load or record something first"
                                                               : "Overdub -- not while Speed / Stretch / Pitch are engaged"));

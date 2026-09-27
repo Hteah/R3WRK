@@ -682,7 +682,8 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
         && text != iconReverse && text != iconClear && text != iconAutoRecord
         && text != iconSlice && text != iconFollow && text != iconDesktopRec
         && text != iconFloatTop && text != iconCaptureOut && text != iconBlackBox
-        && text != iconOrbit && text != iconMore && text != iconOverdub && text != iconMonitor)
+        && text != iconOrbit && text != iconMore && text != iconOverdub && text != iconMonitor
+        && text != iconRecDot)
     {
         juce::LookAndFeel_V4::drawButtonText(g, button, isMouseOverButton, isButtonDown);
         return;
@@ -757,6 +758,17 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     {
         // See iconDesktopRec above -- same white-icon-in-red-ring treatment.
         drawCaptureOutIcon(g, bounds, juce::Colours::white.withMultipliedAlpha(button.isEnabled() ? 1.0f : 0.5f));
+        return;
+    }
+    if (text == iconRecDot)
+    {
+        // "Recording now": a record-red dot whose brightness pulses -- EditorToolbar's timer sets
+        // the button's "pulse" property (0..1) and repaints it.
+        const float pulse = (float) (double) button.getProperties().getWithDefault("pulse", 1.0);
+        const auto red = button.findColour(juce::TextButton::textColourOffId);
+        const float r = bounds.getHeight() * 0.22f;
+        g.setColour(red.withMultipliedAlpha(0.25f + 0.75f * juce::jlimit(0.0f, 1.0f, pulse)));
+        g.fillEllipse(bounds.getCentreX() - r, bounds.getCentreY() - r, r * 2.0f, r * 2.0f);
         return;
     }
     if (text == iconMonitor)
