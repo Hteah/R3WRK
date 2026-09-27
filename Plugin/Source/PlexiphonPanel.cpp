@@ -198,7 +198,7 @@ void PlexiphonPanel::EnablePill::paint(juce::Graphics& g)
     // a proportional UI font stays legible at this pill's small size where the monospace app
     // default reads cramped.
     g.setFont(systemUIFont(11.0f));
-    g.drawText("PLEX", getLocalBounds(), juce::Justification::centred);
+    g.drawText("PLX", getLocalBounds(), juce::Justification::centred);
 }
 
 void PlexiphonPanel::resized()

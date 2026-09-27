@@ -235,7 +235,7 @@ void MimeophonPanel::EnablePill::paint(juce::Graphics& g)
     // a proportional UI font stays legible at this pill's small size where the monospace app
     // default reads cramped.
     g.setFont(systemUIFont(11.0f));
-    g.drawText("MIME", getLocalBounds(), juce::Justification::centred);
+    g.drawText("DLY", getLocalBounds(), juce::Justification::centred);
 }
 
 void MimeophonPanel::resized()

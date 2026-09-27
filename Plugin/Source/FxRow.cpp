@@ -66,8 +66,7 @@ void FxRow::applyTheme()
 {
     // mimeoPanel/plexPanel/reverbPanel each theme themselves (SharedResourcePointer
     // <ThemeManager>, same ChangeListener pattern) -- the only thing left to refresh here is
-    // paint()'s own divider dots, which read the theme directly at paint time -- and the Gain
-    // knob, coloured the same way KnobRow colours its own knobs.
+    // the Gain knob, coloured the same way KnobRow colours its own knobs.
     const auto& pal = theme->palette();
     gainCaption.setColour(juce::Label::textColourId, pal.textDim);
     gainKnob.setColour(juce::Slider::rotarySliderFillColourId, pal.accent);
@@ -111,33 +110,10 @@ void FxRow::resized()
     // Whatever's left on the right stays empty, same as KnobRow leaving the drawer toggle's own
     // margin -- not stretched into it.
 
-    repaint();   // reposition the divider dots for the new layout
+    repaint();
 }
 
-void FxRow::paint(juce::Graphics& g)
+void FxRow::paint(juce::Graphics&)
 {
-    // Same three-dot divider KnobRow uses between its own sections, centred in the gap between
-    // each pair of adjacent effect slots (Delay | Plexiphon | Reverb).
-    constexpr int   count = 3;
-    constexpr float radius = 1.5f, spacing = 5.0f;
-    g.setColour(theme->palette().text.withAlpha(0.4f));
-
-    juce::Array<juce::Rectangle<int>> slots {
-        mimeoPanel.getBounds(), plexPanel.getBounds(), reverbPanel.getBounds()
-    };
-    if (showGain)
-        slots.add(gainKnob.getBounds());   // a divider before Gain too
-
-    for (int i = 1; i < slots.size(); ++i)
-    {
-        const auto a = slots[i - 1];
-        const auto b = slots[i];
-        if (a.isEmpty() || b.isEmpty() || b.getX() <= a.getRight())
-            continue;   // not laid out yet
-
-        const float x = (float) (a.getRight() + b.getX()) * 0.5f;
-        float y = (float) getLocalBounds().getCentreY() - (count - 1) * spacing * 0.5f;
-        for (int c = 0; c < count; ++c, y += spacing)
-            g.fillEllipse(x - radius, y - radius, radius * 2.0f, radius * 2.0f);
-    }
+    // Nothing to draw: the effect slots are separated by spacing alone (no divider dots).
 }
