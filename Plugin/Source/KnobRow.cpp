@@ -394,7 +394,11 @@ void KnobRow::resized()
     // the minimum window width (10: Pitch/Speed/Stretch/Dirt/Base/Width/HP Q/LP Q/Start/End). The rotary disc is sized off the column height, not its width, so a narrower
     // column just packs the knobs closer without shrinking them; the cap keeps the time
     // readouts (Start / End) from clipping.
-    const int avail = juce::jmax(0, r.getWidth() - gap * (n - 1));
+    // Dirt's "more" dot sits in its own slot right of the Dirt knob, at the FX drawer's
+    // "more"-dot size -- reserved here so the knobs auto-fit around it.
+    constexpr int moreW = 20, moreH = 16;
+    const int dirtIndex = dirtKnob != nullptr ? knobs.indexOf(dirtKnob) : -1;
+    const int avail = juce::jmax(0, r.getWidth() - gap * (n - 1) - (dirtIndex >= 0 ? moreW + gap : 0));
     const int knobW = juce::jlimit(46, 53, avail / n);
 
     for (int i = 0; i < knobs.size(); ++i)
@@ -411,6 +415,13 @@ void KnobRow::resized()
         const bool beforeBadge = (i == 2);
         const bool beforeDot   = (i == 7);
         r.removeFromLeft(beforeBadge ? badgeGap : (beforeDot ? dotGap : gap));
+
+        if (i == dirtIndex)
+        {
+            auto slot = r.removeFromLeft(juce::jmin(moreW, r.getWidth()));
+            dirtMoreButton.setBounds(slot.getX(), getHeight() / 2 - moreH / 2, moreW, moreH);
+            r.removeFromLeft(gap);
+        }
     }
 
     if (knobs.size() > 3)
@@ -425,15 +436,6 @@ void KnobRow::resized()
                                  getHeight() / 2 - bh / 2, bw, bh);
         }
     }
-    // Dirt's "more" dot, at the right of its caption.
-    if (dirtKnob != nullptr && ! dirtKnob->caption.getBounds().isEmpty())
-    {
-        auto cap = dirtKnob->caption.getBounds();
-        constexpr int moreW = 14;
-        dirtMoreButton.setBounds(cap.removeFromRight(moreW).withSizeKeepingCentre(moreW, moreW));
-        dirtKnob->caption.setBounds(cap);
-    }
-
     repaint();   // reposition the section dividers for the new knob width
 }
 

@@ -135,7 +135,7 @@ private:
     ModelBadge modelBadge;
 
     // Dirt's popup (Drive / Rate / Bits -- DirtPanel.h): the same small "more" dot the FX
-    // panels use, next to the Dirt caption. One click opens, double-click pins (PinnableCallout);
+    // panels use, in its own slot right of the Dirt knob. One click opens, double-click pins (PinnableCallout);
     // the knob itself keeps double-click-to-reset like every other knob in the row.
     Knob* dirtKnob = nullptr;
     R3WRKIconOnlyLookAndFeel dirtMoreLnF;
