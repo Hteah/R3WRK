@@ -198,6 +198,9 @@ private:
     R3WRKIconOnlyLookAndFeel overdubMoreLnF;
     juce::TextButton overdubMoreButton { R3WRKLookAndFeel::iconMore };
     PinnableCallout overdubCallout;
+    // Input Monitor (headphones): hear the incoming audio over the loop, or while stopped, without
+    // recording it -- DRY or through the FX, set in the Overdub popup. Toggle; lit while on.
+    juce::TextButton monitorButton { R3WRKLookAndFeel::iconMonitor };
     int overdubRefreshTick = 0;   // waveform refresh throttle while overdubbing
     juce::TextButton autoRecordButton { R3WRKLookAndFeel::iconAutoRecord };  // setClickingTogglesState(true)
                                                                              // -- arms record-on-signal

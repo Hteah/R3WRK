@@ -5,9 +5,10 @@
 
 /**
     The Overdub popup (the "more" dot beside the toolbar's Overdub button): LEVEL of the new layer,
-    FEEDBACK (how much of what's already there survives each pass) and MONITOR (hear your input
-    over the loop). Same dot-matrix LCD look as the effect popups; a timer keeps it in step with
-    state loads while it's pinned open.
+    FEEDBACK (how much of what's already there survives each pass) and MONITOR -- whether the
+    toolbar's Monitor button lets your input through DRY or through the FX (Dirt, filter, drawer
+    effects). Same dot-matrix LCD look as the effect popups; a timer keeps it in step with state
+    loads while it's pinned open.
 */
 class OverdubPanel : public juce::Component,
                      private juce::Timer
@@ -38,14 +39,16 @@ public:
         addAndMakeVisible(monitorCaption);
         monitorButton.setClickingTogglesState(true);
         monitorButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
-        monitorButton.setTooltip("Hear your input over the loop while overdubbing (use headphones)");
+        monitorButton.setTooltip("How the toolbar's Monitor button lets your input through: DRY (clean, like "
+                                 "Overdub records it) or FX (through Dirt, the filter and the effects, like "
+                                 "it'll sound in the loop)");
         monitorButton.onClick = [this]
         {
-            document.overdubMonitor.store(monitorButton.getToggleState());
+            document.overdubMonitorFx.store(monitorButton.getToggleState());
             syncMonitorText();
         };
         addAndMakeVisible(monitorButton);
-        monitorButton.setToggleState(document.overdubMonitor.load(), juce::dontSendNotification);
+        monitorButton.setToggleState(document.overdubMonitorFx.load(), juce::dontSendNotification);
         syncMonitorText();
 
         setSize(236, 118);
@@ -98,7 +101,7 @@ private:
         addAndMakeVisible(k.slider);
     }
 
-    void syncMonitorText() { monitorButton.setButtonText(monitorButton.getToggleState() ? "ON" : "OFF"); }
+    void syncMonitorText() { monitorButton.setButtonText(monitorButton.getToggleState() ? "FX" : "DRY"); }
 
     void timerCallback() override
     {
@@ -110,7 +113,7 @@ private:
             if (std::abs(v - k->slider.getValue()) > 1.0e-6)
                 k->slider.setValue(v, juce::dontSendNotification);
         }
-        const bool mon = document.overdubMonitor.load();
+        const bool mon = document.overdubMonitorFx.load();
         if (mon != monitorButton.getToggleState())
         {
             monitorButton.setToggleState(mon, juce::dontSendNotification);

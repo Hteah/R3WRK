@@ -339,11 +339,17 @@ public:
     // beginOverdubPass() snapshots the audio, endOverdubPass() commits it as "Overdub".
     //   overdubLevel    : linear gain on the new layer, 0..2 (-inf..+6 dB); 1 = 0 dB.
     //   overdubFeedback : 0..1 -- how much of what's there survives each pass (1 = keep all).
-    //   overdubMonitor  : hear the input over the loop while overdubbing (off: no speaker feedback).
+    //   overdubMonitor  : the toolbar Monitor button -- hear the incoming audio over the loop (or
+    //                     while stopped) without recording it; also covers overdub passes. Off by
+    //                     default and never restored ON from a saved project (speaker feedback).
+    //   overdubMonitorFx: how monitored input is heard while the loop plays -- false = dry (after
+    //                     the effects, like what Overdub records), true = through Dirt, the filter
+    //                     and the FX drawer, like it'll sound in the loop. Stopped = always dry.
     std::atomic<bool>   overdubbing     { false };
     std::atomic<double> overdubLevel    { 1.0 };
     std::atomic<double> overdubFeedback { 1.0 };
     std::atomic<bool>   overdubMonitor  { false };
+    std::atomic<bool>   overdubMonitorFx { false };
     bool beginOverdubPass();   // message thread; false if there's nothing to overdub onto
     void endOverdubPass();     // message thread; no-op if not overdubbing
     // Audio thread, while holding getLock() -- the overdub writes straight into the loop.

@@ -7,7 +7,8 @@
 
 namespace
 {
-    constexpr int kStateMagic     = 0x52335752;   // 'R3WR' - adds Plexiphon v2 Couple / Skew
+    constexpr int kStateMagic     = 0x52335753;   // 'R3WS' - adds Monitor DRY/FX
+    constexpr int kStateMagicR3WR = 0x52335752;   // 'R3WR' - adds Plexiphon v2 Couple / Skew
     constexpr int kStateMagicR3WQ = 0x52335751;   // 'R3WQ' - adds Overdub level / feedback / monitor
     constexpr int kStateMagicR3WP = 0x52335750;   // 'R3WP' - adds Dirt (drive / rate / bits)
     constexpr int kStateMagicR3WO = 0x5233574F;   // 'R3WO' - adds Mimeophon Ping-Pong
@@ -736,10 +737,12 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     {
         // Overdub: grab this block's input before playback overwrites the buffer (see
         // OverdubWriter.h), and track which buffer position every output sample comes from.
-        const bool overdubOn = document.overdubbing.load(std::memory_order_relaxed)
-                               && numSamples <= overdubInput.getNumSamples();
+        const bool inputFits = numSamples <= overdubInput.getNumSamples();
+        const bool overdubOn = document.overdubbing.load(std::memory_order_relaxed) && inputFits;
+        const bool monitorOn = document.overdubMonitor.load(std::memory_order_relaxed) && inputFits;
+        const bool monitorFx = monitorOn && document.overdubMonitorFx.load(std::memory_order_relaxed);
         const int overdubInCh = juce::jmin(2, getTotalNumInputChannels());
-        if (overdubOn)
+        if (overdubOn || monitorOn)
             for (int ch = 0; ch < overdubInCh; ++ch)
                 overdubInput.copyFrom(ch, 0, buffer, ch, 0, numSamples);
         if (! wasPlaying)
@@ -1172,6 +1175,12 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             for (int i = 0; i < n; ++i)
                 lfoDsp[i].reset();
         }
+        // Monitor, FX mode: the incoming audio joins the loop here, so it's heard through Dirt, the
+        // filter and the FX drawer exactly like the loop is (not recorded -- Overdub stays dry).
+        if (monitorFx && overdubInCh > 0)
+            for (int ch = 0; ch < numCh; ++ch)
+                buffer.addFrom(ch, 0, overdubInput, juce::jmin(ch, overdubInCh - 1), 0, numSamples);
+
         // Dirt ahead of the filter -- whichever filter path runs below shapes its harmonics.
         applyDirt(buffer, numCh, numSamples, ! wasPlaying);
         const bool filterLfoActive = applyModulatedFilter(buffer, numCh, numSamples, ! wasPlaying);
@@ -1221,8 +1230,8 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             done += chunk;
         }
 
-        // Overdub monitoring: hear yourself over the loop (after the effects and Gain).
-        if (overdubOn && overdubInCh > 0 && document.overdubMonitor.load(std::memory_order_relaxed))
+        // Monitor, DRY mode: hear the input over the loop, clean (after the effects and Gain).
+        if (monitorOn && ! monitorFx && overdubInCh > 0)
             for (int ch = 0; ch < numCh; ++ch)
                 buffer.addFrom(ch, 0, overdubInput, juce::jmin(ch, overdubInCh - 1), 0, numSamples);
 
@@ -1322,10 +1331,21 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     // ring-outs below, which add onto whatever's left in `buffer`. A missed try-lock means the
     // message thread is mid-edit on the document -- which only happens when there's something
     // there -- so it counts as non-empty.
+    // ...unless Monitor is on: keep a copy of the input and add it back, dry, after the tails and
+    // Gain below (so previewing material works while stopped too).
+    bool idleMonitor = false;
     {
         const juce::CriticalSection::ScopedTryLockType stl(document.getLock());
         if (! stl.isLocked() || ! document.isEmpty())
+        {
+            const int inCh = juce::jmin(2, getTotalNumInputChannels());
+            idleMonitor = document.overdubMonitor.load(std::memory_order_relaxed)
+                          && inCh > 0 && numSamples <= overdubInput.getNumSamples();
+            if (idleMonitor)
+                for (int ch = 0; ch < inCh; ++ch)
+                    overdubInput.copyFrom(ch, 0, buffer, ch, 0, numSamples);
             buffer.clear();
+        }
     }
 
     // Let a still-ringing reverb tail continue decaying over host passthrough (or silence in the
@@ -1391,6 +1411,13 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     {
         applyPlaybackGain(buffer, numCh, 0, numSamples, {});
         tailGainWasApplied = reverbTailSamplesLeft > 0 || plexTailSamplesLeft > 0 || mimeoTailSamplesLeft > 0;
+    }
+
+    if (idleMonitor)
+    {
+        const int inCh = juce::jmin(2, getTotalNumInputChannels());
+        for (int ch = 0; ch < numCh; ++ch)
+            buffer.addFrom(ch, 0, overdubInput, juce::jmin(ch, inCh - 1), 0, numSamples);
     }
 
     // Keep the captured timeline continuous through idle gaps (in the Standalone the input is
@@ -2456,6 +2483,7 @@ void R3WRKAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     out.writeBool(document.overdubMonitor.load());
     out.writeDouble(document.plexCouple.load());        // R3WR+
     out.writeDouble(document.plexSkew.load());
+    out.writeBool(document.overdubMonitorFx.load());    // R3WS+
 
     auto& buf = document.getBuffer();
     for (int ch = 0; ch < buf.getNumChannels(); ++ch)
@@ -2471,12 +2499,12 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     juce::MemoryInputStream in(data, (size_t) sizeInBytes, false);
     const int magic = in.readInt();
-    if (magic != kStateMagic && magic != kStateMagicR3WQ && magic != kStateMagicR3WP && magic != kStateMagicR3WO && magic != kStateMagicR3WN && magic != kStateMagicR3WM && magic != kStateMagicR3WL && magic != kStateMagicR3WK && magic != kStateMagicR3WJ && magic != kStateMagicR3WI && magic != kStateMagicR3WH && magic != kStateMagicR3WG && magic != kStateMagicR3WF && magic != kStateMagicR3WE && magic != kStateMagicR3WD
+    if (magic != kStateMagic && magic != kStateMagicR3WR && magic != kStateMagicR3WQ && magic != kStateMagicR3WP && magic != kStateMagicR3WO && magic != kStateMagicR3WN && magic != kStateMagicR3WM && magic != kStateMagicR3WL && magic != kStateMagicR3WK && magic != kStateMagicR3WJ && magic != kStateMagicR3WI && magic != kStateMagicR3WH && magic != kStateMagicR3WG && magic != kStateMagicR3WF && magic != kStateMagicR3WE && magic != kStateMagicR3WD
         && magic != kStateMagicR3WC && magic != kStateMagicR3WB && magic != kStateMagicR3WA
         && magic != kStateMagicR3W9 && magic != kStateMagicR3W8 && magic != kStateMagicR3W7
         && magic != kStateMagicR3W6 && magic != kStateMagicR3W5)
         return;
-    // R3WR: adds Plexiphon Couple/Skew after Overdub. R3WQ: adds Overdub level/feedback/monitor after Dirt. R3WP: adds Dirt drive/rate/bits after Mimeophon Ping-Pong. R3WO: adds Mimeophon Ping-Pong after Skew. R3WN: adds Mimeophon Skew after the other
+    // R3WS: adds Monitor DRY/FX after Plexiphon Couple/Skew. R3WR: adds Plexiphon Couple/Skew after Overdub. R3WQ: adds Overdub level/feedback/monitor after Dirt. R3WP: adds Dirt drive/rate/bits after Mimeophon Ping-Pong. R3WO: adds Mimeophon Ping-Pong after Skew. R3WN: adds Mimeophon Skew after the other
     // Mimeophon params. R3WM: adds the Mimeophon
     // params after the Plexiphon params. R3WL: adds the Plexiphon
     // params after reverb Width. R3WK: adds reverb Width after Pre-
@@ -2491,7 +2519,8 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     // MnM model). R3W8..R3WA: the old OT-style Base/Width filter with a single resonance
     // (+ later Drive, + later 12/24 slope). R3W6/R3W7: the even older mode/cutoff filter.
     // R3W5: none.
-    const bool hasPlexStereo       = (magic == kStateMagic);                                  // R3WR
+    const bool hasMonitorFx        = (magic == kStateMagic);                                  // R3WS
+    const bool hasPlexStereo       = (hasMonitorFx || magic == kStateMagicR3WR);              // R3WR+
     const bool hasOverdub          = (hasPlexStereo || magic == kStateMagicR3WQ);             // R3WQ+
     const bool hasDirt             = (hasOverdub || magic == kStateMagicR3WP);                // R3WP+
     const bool hasMimeoPingPong    = (hasDirt || magic == kStateMagicR3WO);                   // R3WO+
@@ -2679,6 +2708,7 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
         pxCouple = in.readDouble();
         pxSkew   = in.readDouble();
     }
+    const bool monFx = hasMonitorFx ? in.readBool() : false;
 
     if (numCh <= 0 || numCh > kMaxStateChannels || numSamples < 0 || numSamples > 0x7fffffff)
         return;
@@ -2762,7 +2792,9 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     document.dirtBits.store(juce::jlimit(0.0, 1.0, dBits));
     document.overdubLevel.store(juce::jlimit(0.0, 2.0, odLevel));
     document.overdubFeedback.store(juce::jlimit(0.0, 1.0, odFeedback));
-    document.overdubMonitor.store(odMonitor);
+    juce::ignoreUnused(odMonitor);
+    document.overdubMonitor.store(false);   // Monitor never comes back ON by itself (speaker feedback)
+    document.overdubMonitorFx.store(monFx);
     document.plexCouple.store(juce::jlimit(0.0, 1.0, pxCouple));
     document.plexSkew.store(juce::jlimit(0.0, 1.0, pxSkew));
 

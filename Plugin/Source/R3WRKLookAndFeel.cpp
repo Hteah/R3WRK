@@ -529,6 +529,22 @@ namespace
         g.fillPath (head);
     }
 
+    // Monitor: a pair of headphones -- a headband arc over two ear cups.
+    void drawMonitorIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
+    {
+        auto a = bounds.reduced (bounds.getHeight() * 0.25f);
+        const float stroke = juce::jmax (1.4f, a.getHeight() * 0.11f);
+        g.setColour (ink);
+        juce::Path band;
+        band.addCentredArc (a.getCentreX(), a.getCentreY() + a.getHeight() * 0.08f,
+                            a.getWidth() * 0.42f, a.getHeight() * 0.46f, 0.0f,
+                            -juce::MathConstants<float>::halfPi * 1.05f, juce::MathConstants<float>::halfPi * 1.05f, true);
+        g.strokePath (band, juce::PathStrokeType (stroke, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        const float cw = a.getWidth() * 0.22f, ch = a.getHeight() * 0.42f, cy = a.getBottom() - ch;
+        g.fillRoundedRectangle (a.getX() + a.getWidth() * 0.06f, cy, cw, ch, cw * 0.35f);
+        g.fillRoundedRectangle (a.getRight() - a.getWidth() * 0.06f - cw, cy, cw, ch, cw * 0.35f);
+    }
+
     // Overdub (sound-on-sound): an outlined ring behind and up-right, a filled record dot in
     // front -- a new layer going down on top of an existing one.
     void drawOverdubIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
@@ -666,7 +682,7 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
         && text != iconReverse && text != iconClear && text != iconAutoRecord
         && text != iconSlice && text != iconFollow && text != iconDesktopRec
         && text != iconFloatTop && text != iconCaptureOut && text != iconBlackBox
-        && text != iconOrbit && text != iconMore && text != iconOverdub)
+        && text != iconOrbit && text != iconMore && text != iconOverdub && text != iconMonitor)
     {
         juce::LookAndFeel_V4::drawButtonText(g, button, isMouseOverButton, isButtonDown);
         return;
@@ -741,6 +757,11 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     {
         // See iconDesktopRec above -- same white-icon-in-red-ring treatment.
         drawCaptureOutIcon(g, bounds, juce::Colours::white.withMultipliedAlpha(button.isEnabled() ? 1.0f : 0.5f));
+        return;
+    }
+    if (text == iconMonitor)
+    {
+        drawMonitorIcon(g, bounds, ink);
         return;
     }
     if (text == iconOverdub)

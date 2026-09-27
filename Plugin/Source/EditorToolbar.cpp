@@ -810,6 +810,13 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
         overdubCallout.buttonClicked(overdubMoreButton, [this] { return std::make_unique<OverdubPanel>(document); });
     };
     addAndMakeVisible(overdubMoreButton);
+    monitorButton.setLookAndFeel(&toolbarLnF);
+    monitorButton.setWantsKeyboardFocus(false);
+    monitorButton.setClickingTogglesState(true);
+    monitorButton.setTooltip("Monitor -- hear the incoming audio over the loop without recording it "
+                             "(DRY or through the FX: set it in the Overdub popup). Headphones advised.");
+    monitorButton.onClick = [this] { document.overdubMonitor.store(monitorButton.getToggleState()); };
+    addAndMakeVisible(monitorButton);
     addAndMakeVisible(toolsButton);
     // Named so R3WRKLookAndFeel::drawButtonBackground can give this (and desktopRec/captureOut
     // below) a thicker red outline ring -- see its own comment.
@@ -1000,6 +1007,7 @@ EditorToolbar::~EditorToolbar()
     overdubCallout.close();
     overdubButton.setLookAndFeel(nullptr);
     overdubMoreButton.setLookAndFeel(nullptr);
+    monitorButton.setLookAndFeel(nullptr);
     // The Black Box popup outlives this toolbar otherwise -- see blackBoxCallout's comment.
     if (blackBoxCallout != nullptr)
         blackBoxCallout->dismiss();
@@ -1077,6 +1085,11 @@ void EditorToolbar::applyTheme()
     overdubButton.setColour(juce::TextButton::textColourOffId, pal.recordButton);
     overdubMoreButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
     overdubMoreButton.setColour(juce::TextButton::textColourOffId, pal.textDim);
+    // Monitor: same lit-when-on treatment as Auto-Record.
+    monitorButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+    monitorButton.setColour(juce::TextButton::buttonOnColourId, pal.accent);
+    monitorButton.setColour(juce::TextButton::textColourOffId, pal.screenText);
+    monitorButton.setColour(juce::TextButton::textColourOnId, pal.windowBg);
 
     // Black Box is passive and always running, not an urgent record action -- neutral outline
     // like Tools, not the record red the explicit capture buttons use.
@@ -1736,6 +1749,8 @@ void EditorToolbar::timerCallback()
             overdubRefreshTick = 0;
             document.touchContent();
         }
+        if (monitorButton.getToggleState() != document.overdubMonitor.load())   // state load resets it
+            monitorButton.setToggleState(document.overdubMonitor.load(), juce::dontSendNotification);
         const bool active = document.overdubbing.load();
         overdubButton.setColour(juce::TextButton::buttonColourId,
                                 active ? theme->palette().recordButton : juce::Colours::transparentBlack);
@@ -2007,6 +2022,7 @@ void EditorToolbar::resized()
     add(recordButton);
     add(overdubButton, 2);
     addWide(overdubMoreButton, 20, gap);   // the FX drawer's "more" dot size (20 x 16)
+    add(monitorButton);
     add(autoRecordButton, (standaloneApp || isPluginBuild) ? gap + dotGap : gap);   // dot before the next section
     if (standaloneApp)
     {
