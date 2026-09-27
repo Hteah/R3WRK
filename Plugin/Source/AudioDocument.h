@@ -322,6 +322,17 @@ public:
     // int (0 = Monomachine, 1 = Octatrack). Switched by the KnobRow badge; persisted.
     std::atomic<int> filterModel { 0 };
 
+    // "Dirt": the pre-filter harmonics stage (r3wrk::DirtStage, DirtStage.h) -- Octatrack-style
+    // drive, then sample-rate, then bit reduction, ahead of the filter so the filter shapes what
+    // it adds. All 0..1. KnobRow's Dirt knob is dirtDrive; its popup (DirtPanel) adds Rate/Bits.
+    //   dirtDrive : 0 = off, 1 = hardest into the ceiling.
+    //   dirtRate  : 1 = off; lower = sample-and-hold rate, log down to ~1 kHz at 0.
+    //   dirtBits  : 1 = off; lower = fewer bits, down to 2 at 0.
+    // Defaults are inert (bit-exact bypass). Baked into Save/Export by renderWithPlaybackKnobs.
+    std::atomic<double> dirtDrive { 0.0 };
+    std::atomic<double> dirtRate  { 1.0 };
+    std::atomic<double> dirtBits  { 1.0 };
+
     // Output "Gain" knob (Standalone only -- KnobRow adds the knob just in that build; the
     // atomic sits here for everyone but stays at 0). In dB, 0 = unity (default volume);
     // kMinGainDb reads as a true mute. Applied last on the playback/scrub output and baked

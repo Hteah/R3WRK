@@ -7,7 +7,8 @@
 
 namespace
 {
-    constexpr int kStateMagic     = 0x5233574F;   // 'R3WO' - adds Mimeophon Ping-Pong
+    constexpr int kStateMagic     = 0x52335750;   // 'R3WP' - adds Dirt (drive / rate / bits)
+    constexpr int kStateMagicR3WO = 0x5233574F;   // 'R3WO' - adds Mimeophon Ping-Pong
     constexpr int kStateMagicR3WN = 0x5233574E;   // 'R3WN' - adds Mimeophon Skew
     constexpr int kStateMagicR3WM = 0x5233574D;   // 'R3WM' - adds Mimeophon params
     constexpr int kStateMagicR3WL = 0x5233574C;   // 'R3WL' - adds Plexiphon params
@@ -93,6 +94,8 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     smoothedFilterLpQ.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.filterLpQ.load()));
     playbackFilter[0].reset();
     playbackFilter[1].reset();
+    dirtStage[0].prepare(sampleRate);
+    dirtStage[1].prepare(sampleRate);
     lastFilterEngaged = false;
     modulatedFilter[0].reset();
     modulatedFilter[1].reset();
@@ -691,11 +694,12 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         // applyPlaybackGain's call below): applyPlaybackFilter() is the plain non-modulated path,
         // never applyModulatedFilter(). freshPlayPass = a fresh scrub start (! wasScrubbing),
         // mirroring how the isPlaying branch primes these on ! wasPlaying.
+        applyDirt(buffer, numCh, numSamples, ! wasScrubbing);
         applyPlaybackFilter(buffer, numCh, 0, numSamples, ! wasScrubbing);
-        applyPlaybackGain(buffer, numCh, 0, numSamples, {});   // Gain knob rides scrub monitoring too; LFOs don't run while scrubbing
         applyMimeophon(buffer, numCh, numSamples, ! wasScrubbing);
         applyReverb(buffer, numCh, numSamples, ! wasScrubbing);
         applyPlexiphon(buffer, numCh, numSamples, ! wasScrubbing);
+        applyPlaybackGain(buffer, numCh, 0, numSamples, {});   // volume, last; LFOs don't run while scrubbing
         captureOutput(buffer, numCh, numSamples);
         // R3WRK has taken the buffer over to scrub -- Black Box follows that, not the (now
         // irrelevant) input snapshot; see blackBoxInputScratch's header comment.
@@ -1111,6 +1115,8 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             for (int i = 0; i < n; ++i)
                 lfoDsp[i].reset();
         }
+        // Dirt ahead of the filter -- whichever filter path runs below shapes its harmonics.
+        applyDirt(buffer, numCh, numSamples, ! wasPlaying);
         const bool filterLfoActive = applyModulatedFilter(buffer, numCh, numSamples, ! wasPlaying);
 
         // Ticked/applied in fixed-size sub-chunks, not once for the whole (host-chosen) block:
@@ -1119,7 +1125,10 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         // an audible staircase (heard as crackle, most noticeably modulating Filter Width) --
         // see kLfoModUpdateSamples's comment. freshPlayPass only applies to the very first chunk;
         // later chunks in the same processBlock() call must not re-trigger that reset.
-        int lfoModDone = 0;
+        // Gain is no longer applied here -- it's the volume knob, last in the chain (after
+        // Plexiphon, below) -- but the LFOs still tick here, so each chunk's Gain modulation is
+        // remembered for that later pass.
+        int lfoModDone = 0, numGainChunks = 0;
         while (lfoModDone < numSamples)
         {
             const int chunk = juce::jmin(kLfoModUpdateSamples, numSamples - lfoModDone);
@@ -1127,7 +1136,8 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             const auto lfoMod = tickLfos(chunk);
             if (! filterLfoActive)
                 applyPlaybackFilter(buffer, numCh, lfoModDone, chunk, freshPlayPass);
-            applyPlaybackGain(buffer, numCh, lfoModDone, chunk, lfoMod);
+            if (numGainChunks < kMaxGainChunks)
+                gainChunkMod[numGainChunks++] = lfoMod;
             lfoModDone += chunk;
         }
 
@@ -1144,6 +1154,15 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         // Plexiphon, after Reverb -- an arbitrary but reasonable "read the FX drawer left to
         // right" chain order (LFO | Delay | Reverb | Plexiphon), not a hard requirement.
         applyPlexiphon(buffer, numCh, numSamples, ! wasPlaying);
+
+        // Gain: the volume knob, after everything (effect tails included), in the same chunks
+        // the LFOs ticked in above.
+        for (int c = 0, done = 0; done < numSamples; ++c)
+        {
+            const int chunk = juce::jmin(kLfoModUpdateSamples, numSamples - done);
+            applyPlaybackGain(buffer, numCh, done, chunk, c < numGainChunks ? gainChunkMod[c] : LfoModResult{});
+            done += chunk;
+        }
 
         captureOutput(buffer, numCh, numSamples);
         // R3WRK has taken the buffer over to play/loop -- Black Box follows that, not the (now
@@ -1302,6 +1321,14 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             mimeoTailSilentSamples += n;
         if (mimeoTailSilentSamples > (int) (currentSampleRate * 2.0))
             mimeoTailSamplesLeft = 0;
+    }
+
+    // Gain is the volume knob, after everything -- effect tails ringing out after Stop included.
+    if (reverbTailSamplesLeft > 0 || plexTailSamplesLeft > 0 || mimeoTailSamplesLeft > 0
+        || tailGainWasApplied)
+    {
+        applyPlaybackGain(buffer, numCh, 0, numSamples, {});
+        tailGainWasApplied = reverbTailSamplesLeft > 0 || plexTailSamplesLeft > 0 || mimeoTailSamplesLeft > 0;
     }
 
     // Keep the captured timeline continuous through idle gaps (in the Standalone the input is
@@ -1472,6 +1499,27 @@ bool R3WRKAudioProcessor::applyModulatedFilter(juce::AudioBuffer<float>& buffer,
     }
 
     return true;
+}
+
+void R3WRKAudioProcessor::applyDirt(juce::AudioBuffer<float>& buffer, int numCh, int numSamples, bool freshPlayPass)
+{
+    const double drive = juce::jlimit(0.0, 1.0, document.dirtDrive.load(std::memory_order_relaxed));
+    const double rate  = juce::jlimit(0.0, 1.0, document.dirtRate.load(std::memory_order_relaxed));
+    const double bits  = juce::jlimit(0.0, 1.0, document.dirtBits.load(std::memory_order_relaxed));
+
+    for (int ch = 0; ch < juce::jmin(numCh, 2); ++ch)
+    {
+        auto& d = dirtStage[ch];
+        if (freshPlayPass)
+        {
+            d.reset();
+            d.snapDrive(drive);   // a new play pass starts at the knob's value, no 20 ms fade
+        }
+        // Skipped entirely at default (bit-exact), but kept running while Drive ramps down or
+        // the DC blocker's tail settles, so switching off is as smooth as switching on.
+        if (r3wrk::DirtStage::engaged(drive, rate, bits) || d.busy())
+            d.process(buffer.getWritePointer(ch), numSamples, drive, rate, bits);
+    }
 }
 
 void R3WRKAudioProcessor::applyPlaybackFilter(juce::AudioBuffer<float>& buffer, int numCh, int startSample, int numSamples,
@@ -2301,6 +2349,9 @@ void R3WRKAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     out.writeDouble(document.mimeoMix.load());
     out.writeDouble(document.mimeoSkew.load());   // R3WN+
     out.writeBool(document.mimeoPingPong.load());   // R3WO+
+    out.writeDouble(document.dirtDrive.load());     // R3WP+
+    out.writeDouble(document.dirtRate.load());
+    out.writeDouble(document.dirtBits.load());
 
     auto& buf = document.getBuffer();
     for (int ch = 0; ch < buf.getNumChannels(); ++ch)
@@ -2316,12 +2367,12 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     juce::MemoryInputStream in(data, (size_t) sizeInBytes, false);
     const int magic = in.readInt();
-    if (magic != kStateMagic && magic != kStateMagicR3WN && magic != kStateMagicR3WM && magic != kStateMagicR3WL && magic != kStateMagicR3WK && magic != kStateMagicR3WJ && magic != kStateMagicR3WI && magic != kStateMagicR3WH && magic != kStateMagicR3WG && magic != kStateMagicR3WF && magic != kStateMagicR3WE && magic != kStateMagicR3WD
+    if (magic != kStateMagic && magic != kStateMagicR3WO && magic != kStateMagicR3WN && magic != kStateMagicR3WM && magic != kStateMagicR3WL && magic != kStateMagicR3WK && magic != kStateMagicR3WJ && magic != kStateMagicR3WI && magic != kStateMagicR3WH && magic != kStateMagicR3WG && magic != kStateMagicR3WF && magic != kStateMagicR3WE && magic != kStateMagicR3WD
         && magic != kStateMagicR3WC && magic != kStateMagicR3WB && magic != kStateMagicR3WA
         && magic != kStateMagicR3W9 && magic != kStateMagicR3W8 && magic != kStateMagicR3W7
         && magic != kStateMagicR3W6 && magic != kStateMagicR3W5)
         return;
-    // R3WO: adds Mimeophon Ping-Pong after Skew. R3WN: adds Mimeophon Skew after the other
+    // R3WP: adds Dirt drive/rate/bits after Mimeophon Ping-Pong. R3WO: adds Mimeophon Ping-Pong after Skew. R3WN: adds Mimeophon Skew after the other
     // Mimeophon params. R3WM: adds the Mimeophon
     // params after the Plexiphon params. R3WL: adds the Plexiphon
     // params after reverb Width. R3WK: adds reverb Width after Pre-
@@ -2336,7 +2387,8 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     // MnM model). R3W8..R3WA: the old OT-style Base/Width filter with a single resonance
     // (+ later Drive, + later 12/24 slope). R3W6/R3W7: the even older mode/cutoff filter.
     // R3W5: none.
-    const bool hasMimeoPingPong    = (magic == kStateMagic);                                  // R3WO
+    const bool hasDirt             = (magic == kStateMagic);                                  // R3WP
+    const bool hasMimeoPingPong    = (hasDirt || magic == kStateMagicR3WO);                   // R3WO+
     const bool hasMimeoSkew        = (hasMimeoPingPong || magic == kStateMagicR3WN);          // R3WN+
     const bool hasMimeo            = (hasMimeoSkew || magic == kStateMagicR3WM);              // R3WM+
     const bool hasPlex             = (hasMimeo || magic == kStateMagicR3WL);                  // R3WL+
@@ -2501,6 +2553,13 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
         mxSkew = in.readDouble();
     if (hasMimeoPingPong)
         mxPingPong = in.readBool();
+    double dDrive = 0.0, dRate = 1.0, dBits = 1.0;   // older projects: Dirt off
+    if (hasDirt)
+    {
+        dDrive = in.readDouble();
+        dRate  = in.readDouble();
+        dBits  = in.readDouble();
+    }
 
     if (numCh <= 0 || numCh > kMaxStateChannels || numSamples < 0 || numSamples > 0x7fffffff)
         return;
@@ -2579,6 +2638,9 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     document.mimeoMix.store(juce::jlimit(0.0, 1.0, mxMix));
     document.mimeoSkew.store(juce::jlimit(0.0, 1.0, mxSkew));
     document.mimeoPingPong.store(mxPingPong);
+    document.dirtDrive.store(juce::jlimit(0.0, 1.0, dDrive));
+    document.dirtRate.store(juce::jlimit(0.0, 1.0, dRate));
+    document.dirtBits.store(juce::jlimit(0.0, 1.0, dBits));
 
     document.setSourceFilePath(sourceFilePath);   // "" on an older state blob -- header shows "Untitled"
 

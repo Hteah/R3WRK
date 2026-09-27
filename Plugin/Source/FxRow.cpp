@@ -1,8 +1,9 @@
 #include "FxRow.h"
 
-FxRow::FxRow(AudioDocument& document, bool standalone)
-    : lfoPanel(document, standalone),
-      mimeoPanel(document), plexPanel(document), reverbPanel(document)
+FxRow::FxRow(AudioDocument& doc, bool standalone)
+    : lfoPanel(doc, standalone),
+      mimeoPanel(doc), plexPanel(doc), reverbPanel(doc),
+      document(doc), showGain(standalone)
 {
     // lfoPanel is SHELVED (see class comment) -- constructed and fully wired (its
     // PluginProcessor/AudioDocument side is untouched), just not shown or laid out here.
@@ -12,13 +13,48 @@ FxRow::FxRow(AudioDocument& document, bool standalone)
     addAndMakeVisible(plexPanel);
     addAndMakeVisible(reverbPanel);
 
+    if (showGain)
+    {
+        gainCaption.setText("GAIN", juce::dontSendNotification);
+        gainCaption.setJustificationType(juce::Justification::centred);
+        gainCaption.setFont(juce::FontOptions(14.0f));
+        addAndMakeVisible(gainCaption);
+
+        gainKnob.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+        gainKnob.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 68, 20);
+        gainKnob.setLookAndFeel(&gainLnF);
+        gainKnob.setRange(AudioDocument::kMinGainDb, AudioDocument::kMaxGainDb, 0.0);
+        gainKnob.setDoubleClickReturnValue(true, 0.0);   // 0 dB = default volume
+        gainKnob.textFromValueFunction = [](double db)
+        {
+            if (db <= AudioDocument::kMinGainDb + 0.05)
+                return juce::String::fromUTF8("-\xE2\x88\x9E dB");   // "-inf dB" (mute)
+            return (db > 0.0 ? "+" : "") + juce::String(db, 1) + " dB";
+        };
+        gainKnob.setValue(document.playbackGainDb.load(), juce::dontSendNotification);
+        gainKnob.updateText();
+        gainKnob.onValueChange = [this] { document.playbackGainDb.store(gainKnob.getValue()); };
+        addAndMakeVisible(gainKnob);
+        startTimerHz(15);
+    }
+
     applyTheme();
     theme->addChangeListener(this);
 }
 
 FxRow::~FxRow()
 {
+    gainKnob.setLookAndFeel(nullptr);   // detach before gainLnF is destroyed
     theme->removeChangeListener(this);
+}
+
+void FxRow::timerCallback()
+{
+    if (gainKnob.isMouseButtonDown())
+        return;
+    const double db = document.playbackGainDb.load();
+    if (std::abs(db - gainKnob.getValue()) > 1.0e-6)
+        gainKnob.setValue(db, juce::dontSendNotification);
 }
 
 void FxRow::changeListenerCallback(juce::ChangeBroadcaster*)
@@ -30,7 +66,13 @@ void FxRow::applyTheme()
 {
     // mimeoPanel/plexPanel/reverbPanel each theme themselves (SharedResourcePointer
     // <ThemeManager>, same ChangeListener pattern) -- the only thing left to refresh here is
-    // paint()'s own divider dots, which read the theme directly at paint time.
+    // paint()'s own divider dots, which read the theme directly at paint time -- and the Gain
+    // knob, coloured the same way KnobRow colours its own knobs.
+    const auto& pal = theme->palette();
+    gainCaption.setColour(juce::Label::textColourId, pal.textDim);
+    gainKnob.setColour(juce::Slider::rotarySliderFillColourId, pal.accent);
+    gainKnob.setColour(juce::Slider::textBoxTextColourId, pal.text);
+    gainKnob.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
     repaint();
 }
 
@@ -58,6 +100,14 @@ void FxRow::resized()
     full.removeFromLeft(sectionGap);
 
     reverbPanel.setBounds(full.removeFromLeft(juce::jmin(panelW, full.getWidth())));
+
+    if (showGain && full.getWidth() > sectionGap + 40)
+    {
+        full.removeFromLeft(sectionGap);
+        auto col = full.removeFromLeft(juce::jmin(53, full.getWidth()));   // KnobRow's knob width
+        gainCaption.setBounds(col.removeFromTop(17));
+        gainKnob.setBounds(col);
+    }
     // Whatever's left on the right stays empty, same as KnobRow leaving the drawer toggle's own
     // margin -- not stretched into it.
 
@@ -72,9 +122,11 @@ void FxRow::paint(juce::Graphics& g)
     constexpr float radius = 1.5f, spacing = 5.0f;
     g.setColour(theme->palette().text.withAlpha(0.4f));
 
-    const juce::Array<juce::Rectangle<int>> slots {
+    juce::Array<juce::Rectangle<int>> slots {
         mimeoPanel.getBounds(), plexPanel.getBounds(), reverbPanel.getBounds()
     };
+    if (showGain)
+        slots.add(gainKnob.getBounds());   // a divider before Gain too
 
     for (int i = 1; i < slots.size(); ++i)
     {

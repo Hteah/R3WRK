@@ -4,6 +4,7 @@
 #include "AudioDocument.h"
 #include "Theme.h"
 #include "R3WRKLookAndFeel.h"
+#include "PinnableCallout.h"
 
 /**
     A horizontal strip of small rotary knobs beneath the transport bar.
@@ -22,7 +23,8 @@ class KnobRow : public juce::Component,
                 private juce::ChangeListener
 {
 public:
-    // `standalone` -- the app build, not a plugin -- gets the extra output "Gain" knob.
+    // `standalone` is unused now -- the Standalone-only Gain (volume) knob moved to the end of
+    // the FX drawer (FxRow) to make room for Dirt; kept so the call sites don't change.
     KnobRow(AudioDocument& document, bool standalone);
     ~KnobRow() override;
 
@@ -122,6 +124,14 @@ private:
     Knob* startKnob = nullptr;
     Knob* endKnob   = nullptr;
     ModelBadge modelBadge;
+
+    // Dirt's popup (Drive / Rate / Bits -- DirtPanel.h): the same small "more" dot the FX
+    // panels use, next to the Dirt caption. One click opens, double-click pins (PinnableCallout);
+    // the knob itself keeps double-click-to-reset like every other knob in the row.
+    Knob* dirtKnob = nullptr;
+    R3WRKIconOnlyLookAndFeel dirtMoreLnF;
+    juce::TextButton dirtMoreButton { R3WRKLookAndFeel::iconMore };
+    PinnableCallout dirtCallout;
 
     // FX drawer toggle -- the orbit icon, pinned to the row's right edge. Boxless (see
     // R3WRKIconOnlyLookAndFeel) per the user's request -- no permanent frame around it, only a

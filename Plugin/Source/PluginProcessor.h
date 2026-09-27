@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "DragScanRender.h"
 #include "LofiStretch.h"
+#include "DirtStage.h"
 #include "AudioDocument.h"
 #include "DesktopAudioCapture.h"
 #include "BiquadFilter.h"
@@ -286,6 +287,9 @@ private:
     // offline under that stress -- see Tests/SmokeTest.cpp), so it's kept for the case it's
     // actually good at instead of trying to make it handle both.
     r3wrk::MultiModeFilter playbackFilter[2];   // MnM Base/Width/HP Q/LP Q, per channel
+    // Dirt (drive -> rate -> bits) ahead of the filter, per channel -- see DirtStage.h.
+    r3wrk::DirtStage dirtStage[2];
+    void applyDirt(juce::AudioBuffer<float>& buffer, int numCh, int numSamples, bool freshPlayPass);
     juce::SmoothedValue<double> smoothedFilterBase  { 0.0 };
     juce::SmoothedValue<double> smoothedFilterWidth { 1.0 };
     juce::SmoothedValue<double> smoothedFilterHpQ   { 0.0 };
@@ -356,6 +360,12 @@ private:
     // turned out to be its own noise source. (This constant no longer affects the filter path,
     // which is unconditionally per-sample now, so this limitation is Gain-only.)
     static constexpr int kLfoModUpdateSamples = 64;
+    // Per-chunk LFO Gain modulation from the filter loop, replayed when Gain runs last in the
+    // chain (processBlock). Sized for host blocks up to 16384 samples; any chunks beyond that
+    // just get no LFO offset.
+    static constexpr int kMaxGainChunks = 16384 / kLfoModUpdateSamples;
+    LfoModResult gainChunkMod[kMaxGainChunks];
+    bool tailGainWasApplied = false;   // idle path: Gain was riding an effect tail last block
 
     // Output "Gain" knob -- applied last, as a per-block ramp so a knob drag doesn't zipper.
     // 0 dB by default, so a no-op unless the Standalone's Gain knob is turned (or an LFO targets it).

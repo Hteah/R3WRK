@@ -6,6 +6,7 @@
 #include "PlexiphonPanel.h"
 #include "MimeophonPanel.h"
 #include "Theme.h"
+#include "R3WRKLookAndFeel.h"
 
 /**
     The collapsible "FX drawer" beneath the main KnobRow, revealed by the chevron on its right
@@ -34,7 +35,8 @@
     ever wanted again, not a re-enable.
 */
 class FxRow : public juce::Component,
-              private juce::ChangeListener
+              private juce::ChangeListener,
+              private juce::Timer
 {
 public:
     FxRow(AudioDocument& document, bool standalone);
@@ -45,13 +47,23 @@ public:
 
 private:
     void changeListenerCallback(juce::ChangeBroadcaster*) override;
+    void timerCallback() override;   // Gain knob follows state loads / undo
     void applyTheme();
 
     juce::SharedResourcePointer<ThemeManager> theme;
     LfoPanel lfoPanel;                // shelved -- see class comment; not shown, still fully wired
     MimeophonPanel mimeoPanel;        // 1st slot -- real (replaced the old DELAY placeholder)
     PlexiphonPanel plexPanel;         // 2nd slot -- real
-    ReverbPanel reverbPanel;          // 3rd (last) slot -- real, back after being shelved
+    ReverbPanel reverbPanel;          // 3rd slot -- real, back after being shelved
+
+    // Gain -- the output volume, last in the whole chain (after every effect, tails included;
+    // see PluginProcessor::processBlock). Standalone only, same as before; moved here from the
+    // end of KnobRow to make room for Dirt. Styled like KnobRow's knobs.
+    AudioDocument& document;
+    const bool showGain;
+    R3WRKLookAndFeel gainLnF;
+    juce::Label gainCaption;
+    juce::Slider gainKnob;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(FxRow)
 };

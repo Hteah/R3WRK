@@ -1,5 +1,6 @@
 #include "AudioDocument.h"
 #include "TimeStretchEngine.h"
+#include "DirtStage.h"
 #include "BiquadFilter.h"
 #include <algorithm>
 #include <cmath>
@@ -171,6 +172,9 @@ bool AudioDocument::playbackKnobsEngaged() const
                                 filterWidth.load(std::memory_order_relaxed),
                                 filterHpQ.load(std::memory_order_relaxed),
                                 filterLpQ.load(std::memory_order_relaxed))
+        || r3wrk::DirtStage::engaged(dirtDrive.load(std::memory_order_relaxed),
+                                     dirtRate.load(std::memory_order_relaxed),
+                                     dirtBits.load(std::memory_order_relaxed))
         || std::abs(playbackGainDb.load(std::memory_order_relaxed)) > 1.0e-3;
 }
 
@@ -196,6 +200,23 @@ juce::AudioBuffer<float> AudioDocument::renderWithPlaybackKnobs(const juce::Audi
         if (stretched.getNumSamples() > 0)
             out = std::move(stretched);
         // else: engine failure -- keep the un-stretched audio rather than nothing
+    }
+
+    // 1b. Dirt -- drive / rate / bits ahead of the filter, same DSP as the real-time path.
+    {
+        const double dDrive = juce::jlimit(0.0, 1.0, dirtDrive.load(std::memory_order_relaxed));
+        const double dRate  = juce::jlimit(0.0, 1.0, dirtRate.load(std::memory_order_relaxed));
+        const double dBits  = juce::jlimit(0.0, 1.0, dirtBits.load(std::memory_order_relaxed));
+        if (r3wrk::DirtStage::engaged(dDrive, dRate, dBits) && out.getNumSamples() > 0)
+        {
+            for (int ch = 0; ch < out.getNumChannels(); ++ch)
+            {
+                r3wrk::DirtStage d;
+                d.prepare(sampleRate);
+                d.snapDrive(dDrive);
+                d.process(out.getWritePointer(ch), out.getNumSamples(), dDrive, dRate, dBits);
+            }
+        }
     }
 
     // 2. Filter -- the same modelled Base/Width/HP Q/LP Q filter the real-time path uses

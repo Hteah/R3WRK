@@ -12,6 +12,7 @@
 #include "../Source/Theme.h"
 #include "../Source/DragScanRender.h"
 #include "../Source/LofiStretch.h"
+#include "../Source/DirtStage.h"
 
 namespace
 {
@@ -515,6 +516,99 @@ int main()
         check(ok, "real-time: every block filled, no NaN/inf while the knobs move");
         check(peak < 2.0f, juce::String::formatted("real-time: output stays bounded (peak %.2f)", peak));
         check(silentBlocks == 0, juce::String::formatted("real-time: no dropouts once everything is engaged (%d silent blocks)", silentBlocks));
+    }
+
+    // --- Dirt: Octatrack-style drive -> sample-rate -> bits, ahead of the filter (DirtStage.h)
+    {
+        std::cout << "-- Dirt (pre-filter drive / rate / bits) --" << std::endl;
+        const int n = (int) sr;
+        auto sine = [&](float amp) { return makeSineBuffer(1, n, sr, 440.0, amp); };
+        auto run = [&](juce::AudioBuffer<float> b, double drive, double rate, double bits)
+        {
+            r3wrk::DirtStage d; d.prepare(sr); d.snapDrive(drive);
+            d.process(b.getWritePointer(0), b.getNumSamples(), drive, rate, bits);
+            return b;
+        };
+        auto goertzel = [&](const juce::AudioBuffer<float>& b, double f, int from)
+        {
+            const double w = 2 * juce::MathConstants<double>::pi * f / sr, c = 2 * std::cos(w);
+            double s1 = 0, s2 = 0;
+            for (int i = from; i < b.getNumSamples(); ++i) { const double s0 = b.getSample(0, i) + c * s1 - s2; s2 = s1; s1 = s0; }
+            return std::sqrt(s1 * s1 + s2 * s2 - c * s1 * s2) / (b.getNumSamples() - from);
+        };
+
+        check(! r3wrk::DirtStage::engaged(0.0, 1.0, 1.0), "Dirt at default is not engaged (callers skip it: bit-exact bypass)");
+        {
+            auto in = sine(0.5f), out = run(in, 0.0, 1.0, 1.0);
+            float diff = 0; for (int i = 0; i < n; ++i) diff = std::max(diff, std::abs(out.getSample(0, i) - in.getSample(0, i)));
+            check(diff == 0.0f, "Drive 0, Rate/Bits off: output identical to input");
+        }
+        {
+            auto in = sine(0.3f), out = run(in, 1.0, 1.0, 1.0);
+            const int from = n / 4;
+            const double f1 = goertzel(out, 440, from), f2 = goertzel(out, 880, from), f3 = goertzel(out, 1320, from);
+            const double c2 = goertzel(in, 880, from), c3 = goertzel(in, 1320, from);
+            check(f3 > 20 * (c3 + 1e-9) && f3 > f1 * 0.05, juce::String::formatted("Drive 1 adds odd harmonics (3f/f %.3f)", f3 / f1));
+            check(f2 > 20 * (c2 + 1e-9) && f2 > f1 * 0.02, juce::String::formatted("Drive 1 adds even harmonics too -- the asymmetric clip (2f/f %.3f)", f2 / f1));
+            double mean = 0; for (int i = from; i < n; ++i) mean += out.getSample(0, i);
+            mean /= (n - from);
+            check(std::abs(mean) < 0.005, juce::String::formatted("the DC blocker removes the bias offset (mean %.5f)", mean));
+            check(out.getMagnitude(0, 0, n) <= 1.0f, juce::String::formatted("Drive output stays under the ceiling (peak %.3f)", out.getMagnitude(0, 0, n)));
+        }
+        {
+            juce::AudioBuffer<float> hot(1, n);
+            for (int i = 0; i < n; ++i) hot.setSample(0, i, (float) (4.0 * std::sin(2 * juce::MathConstants<double>::pi * 440 * i / sr)));
+            auto out = run(hot, 1.0, 0.3, 0.2);
+            bool finite = true; for (int i = 0; i < n; ++i) finite = finite && std::isfinite(out.getSample(0, i));
+            check(finite && out.getMagnitude(0, 0, n) <= 2.0f, "+-4 input through everything: finite and within +-2");
+        }
+        {
+            const double rate01 = std::log(4000.0 / 1000.0) / std::log(sr / 1000.0);   // ~4 kHz
+            auto out = run(sine(0.5f), 0.0, rate01, 1.0);
+            int runs = 0, len = 1; double total = 0;
+            for (int i = 1; i < n; ++i)
+            {
+                if (out.getSample(0, i) == out.getSample(0, i - 1)) ++len;
+                else { total += len; ++runs; len = 1; }
+            }
+            checkNear(total / juce::jmax(1, runs), sr / 4000.0, 0.6, "Rate ~4 kHz: held runs average ~11 samples");
+        }
+        {
+            const double bits01 = (4 - 2) / 14.0;   // 4 bits
+            check(r3wrk::DirtStage::bitDepth(bits01) == 4, "Bits knob maps to 4 bits");
+            auto out = run(sine(0.7f), 0.0, 1.0, bits01);
+            bool onGrid = true;
+            for (int i = 0; i < n; ++i) { const float v = out.getSample(0, i) * 8.0f; onGrid = onGrid && std::abs(v - std::round(v)) < 1e-5f; }
+            check(onGrid, "Bits 4: every sample sits on the 4-bit grid");
+        }
+        {
+            // Drive swept 0 -> 1 -> 0 across a block-by-block run: the per-sample ramp means no
+            // step bigger than a hard-clipped sine could make at full drive.
+            auto b = sine(0.3f);
+            r3wrk::DirtStage d; d.prepare(sr);
+            for (int off = 0; off < n; off += 512)
+            {
+                const double t = (double) off / n;
+                const double target = t < 0.5 ? (t < 0.1 ? 0.0 : 1.0) : 0.0;   // hard knob jumps
+                d.process(b.getWritePointer(0, off), std::min(512, n - off), target, 1.0, 1.0);
+            }
+            float worst = 0; for (int i = 1; i < n; ++i) worst = std::max(worst, std::abs(b.getSample(0, i) - b.getSample(0, i - 1)));
+            check(worst < 0.25f, juce::String::formatted("Drive knob jumps are ramped, no clicks (worst step %.3f)", worst));
+            check(! d.busy() || b.getMagnitude(0, n - 512, 512) > 0.0f, "Drive returns to 0 cleanly");
+        }
+        {
+            // Save/Export bakes Dirt in (renderWithPlaybackKnobs), and leaves audio alone when it's off.
+            AudioDocument doc;
+            const auto src = sine(0.3f);
+            const auto dry = doc.renderWithPlaybackKnobs(src);
+            float dryDiff = 0; for (int i = 0; i < n; ++i) dryDiff = std::max(dryDiff, std::abs(dry.getSample(0, i) - src.getSample(0, i)));
+            check(dryDiff == 0.0f, "export with Dirt off: audio unchanged");
+            doc.dirtDrive.store(0.8);
+            doc.dirtBits.store((6 - 2) / 14.0);
+            const auto baked = doc.renderWithPlaybackKnobs(src);
+            float diff = 0; for (int i = 0; i < n; ++i) diff = std::max(diff, std::abs(baked.getSample(0, i) - src.getSample(0, i)));
+            check(diff > 0.05f, juce::String::formatted("export with Dirt on bakes it in (max change %.3f)", diff));
+        }
     }
 
     // --- replaceRangeWith used end-to-end (this is what the stretch tool calls) --
