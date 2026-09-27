@@ -72,6 +72,7 @@ public:
     static constexpr const char* iconCaptureOut    = "icon:captureOut";     // record dot + down arrow (capture the output to a file)
     static constexpr const char* iconBlackBox      = "icon:blackBox";       // rounded box + record dot (VST/AU always-on background capture)
     static constexpr const char* iconOrbit         = "icon:orbit";          // the FX drawer toggle -- concentric dashed orbit rings around a centre dot, from the r3wrk Component Library reference sheet
+    static constexpr const char* iconOverdub       = "icon:overdub";        // sound-on-sound: a record dot over an outlined one (a layer on a layer)
     static constexpr const char* iconMore          = "icon:more";           // a single small filled circle -- the popup-editor "more" buttons (Mimeophon/Plexiphon/Reverb), replacing the old "..." text
 
     void drawButtonText(juce::Graphics&, juce::TextButton&,

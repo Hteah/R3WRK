@@ -1,5 +1,5 @@
 diff --git a/modules/juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h b/modules/juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h
-index d2bd701..66c3671 100644
+index d2bd701..a3167d3 100644
 --- a/modules/juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h
 +++ b/modules/juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h
 @@ -38,6 +38,20 @@
@@ -144,7 +144,7 @@ index d2bd701..66c3671 100644
              shouldShowNotification = newInputMutedValue;
              notification.setVisible (shouldShowNotification);
  
-@@ -1091,4 +1172,16 @@ private:
+@@ -1091,4 +1172,28 @@ private:
      JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (StandaloneFilterWindow)
  };
  
@@ -157,6 +157,18 @@ index d2bd701..66c3671 100644
 +{
 +    if (auto* holder = StandalonePluginHolder::getInstance())
 +        holder->showAudioSettingsDialog();
++}
++
++// R3WRK: the audio device's round-trip latency (input + output, in samples) -- Overdub writes each
++// input sample where the loop was playing when you heard it, which is this many samples back.
++// Same weak-link arrangement as r3wrkShowAudioSettings (StandaloneWindowShape.mm returns 0 for
++// the VST3/AU targets, where the host owns the device).
++extern "C" int r3wrkDeviceRoundTripLatency()
++{
++    if (auto* holder = StandalonePluginHolder::getInstance())
++        if (auto* device = holder->deviceManager.getCurrentAudioDevice())
++            return device->getInputLatencyInSamples() + device->getOutputLatencyInSamples();
++    return 0;
 +}
 +#endif
 +

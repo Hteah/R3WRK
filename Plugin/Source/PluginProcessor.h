@@ -3,6 +3,7 @@
 #include "DragScanRender.h"
 #include "LofiStretch.h"
 #include "DirtStage.h"
+#include "OverdubWriter.h"
 #include "AudioDocument.h"
 #include "DesktopAudioCapture.h"
 #include "BiquadFilter.h"
@@ -48,6 +49,13 @@ public:
     void stopRecording();
     void startPlayback();
     void stopPlayback();
+
+    // Sound-on-sound overdub (message thread). startOverdub() is refused while Speed/Stretch/Pitch
+    // are engaged (canOverdub() false -- no one-to-one buffer position to write to) and starts the
+    // loop if it's stopped; stopOverdub() commits the pass as one undo step.
+    bool canOverdub() const;
+    void startOverdub();
+    void stopOverdub();
 
     // "Record Desktop" (Standalone only): captures the Mac's system audio via ScreenCaptureKit
     // straight into the editor buffer. document.isRecording drives the same UI (scope, stop
@@ -289,6 +297,13 @@ private:
     r3wrk::MultiModeFilter playbackFilter[2];   // MnM Base/Width/HP Q/LP Q, per channel
     // Dirt (drive -> rate -> bits) ahead of the filter, per channel -- see DirtStage.h.
     r3wrk::DirtStage dirtStage[2];
+
+    // Overdub: the block's input (copied before playback overwrites the buffer), the buffer
+    // position each output sample came from, and the writer that lines the two up.
+    r3wrk::OverdubWriter overdubWriter;
+    juce::AudioBuffer<float> overdubInput;
+    std::vector<int64_t> overdubTrace;
+    std::atomic<int> overdubLatency { 0 };   // round trip, samples (Standalone: from the device)
     void applyDirt(juce::AudioBuffer<float>& buffer, int numCh, int numSamples, bool freshPlayPass);
     juce::SmoothedValue<double> smoothedFilterBase  { 0.0 };
     juce::SmoothedValue<double> smoothedFilterWidth { 1.0 };
@@ -449,7 +464,8 @@ private:
     void renderPlaybackDirect (juce::AudioBuffer<float>& out, int numCh, int numSamples,
                                const juce::AudioBuffer<float>& docBuf,
                                int64_t& pos, int& dir, int64_t regionStart, int64_t regionEnd,
-                               bool loop, bool pingPong, bool reverseLoop, int loopFadeLen);
+                               bool loop, bool pingPong, bool reverseLoop, int loopFadeLen,
+                               int64_t* posTrace = nullptr);   // buffer position per output sample (-1 = none)
     void renderPlaybackStretched (juce::AudioBuffer<float>& out, int numCh, int numSamples,
                                   const juce::AudioBuffer<float>& docBuf,
                                   int64_t& pos, int& dir, int64_t regionStart, int64_t regionEnd,

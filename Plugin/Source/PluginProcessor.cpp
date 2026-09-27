@@ -7,7 +7,8 @@
 
 namespace
 {
-    constexpr int kStateMagic     = 0x52335750;   // 'R3WP' - adds Dirt (drive / rate / bits)
+    constexpr int kStateMagic     = 0x52335751;   // 'R3WQ' - adds Overdub level / feedback / monitor
+    constexpr int kStateMagicR3WP = 0x52335750;   // 'R3WP' - adds Dirt (drive / rate / bits)
     constexpr int kStateMagicR3WO = 0x5233574F;   // 'R3WO' - adds Mimeophon Ping-Pong
     constexpr int kStateMagicR3WN = 0x5233574E;   // 'R3WN' - adds Mimeophon Skew
     constexpr int kStateMagicR3WM = 0x5233574D;   // 'R3WM' - adds Mimeophon params
@@ -96,6 +97,12 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     playbackFilter[1].reset();
     dirtStage[0].prepare(sampleRate);
     dirtStage[1].prepare(sampleRate);
+    {
+        const int odCap = juce::jmax(8192, juce::jmax(0, samplesPerBlock) * 4);
+        overdubWriter.prepare();
+        overdubInput.setSize(2, odCap);
+        overdubTrace.assign((size_t) odCap, -1);
+    }
     lastFilterEngaged = false;
     modulatedFilter[0].reset();
     modulatedFilter[1].reset();
@@ -228,7 +235,7 @@ static int gatherRegion(juce::AudioBuffer<float>& dst, int dstOffset, int count,
                         const juce::AudioBuffer<float>& docBuf,
                         int64_t& pos, int& dir,
                         int64_t regionStart, int64_t regionEnd, bool loop, bool pingPong,
-                        bool reverseLoop, int fadeLen)
+                        bool reverseLoop, int fadeLen, int64_t* posTrace = nullptr)
 {
     const int srcChans = docBuf.getNumChannels();
     if (srcChans <= 0 || regionEnd <= regionStart)
@@ -273,6 +280,8 @@ static int gatherRegion(juce::AudioBuffer<float>& dst, int dstOffset, int count,
                 dst.copyFrom(ch, dstOffset + written, docBuf,
                              juce::jmin(ch, srcChans - 1), (int) pos, chunk);
             applyFade(written, chunk, pos - regionStart, +1);
+            if (posTrace != nullptr)   // which buffer position each copied frame came from (Overdub)
+                for (int j = 0; j < chunk; ++j) posTrace[dstOffset + written + j] = pos + j;
             pos     += chunk;
             written += chunk;
         }
@@ -314,6 +323,8 @@ static int gatherRegion(juce::AudioBuffer<float>& dst, int dstOffset, int count,
                 std::reverse(w, w + chunk);
             }
             applyFade(written, chunk, pos - regionStart, -1);   // dst frame 0 == region pos `pos`
+            if (posTrace != nullptr)
+                for (int j = 0; j < chunk; ++j) posTrace[dstOffset + written + j] = pos - j;
             pos     -= chunk;
             written += chunk;
         }
@@ -324,13 +335,17 @@ static int gatherRegion(juce::AudioBuffer<float>& dst, int dstOffset, int count,
 void R3WRKAudioProcessor::renderPlaybackDirect(juce::AudioBuffer<float>& out, int numCh, int numSamples,
                                                const juce::AudioBuffer<float>& docBuf,
                                                int64_t& pos, int& dir, int64_t regionStart, int64_t regionEnd,
-                                               bool loop, bool pingPong, bool reverseLoop, int loopFadeLen)
+                                               bool loop, bool pingPong, bool reverseLoop, int loopFadeLen,
+                                               int64_t* posTrace)
 {
+    if (posTrace != nullptr)
+        std::fill(posTrace, posTrace + numSamples, (int64_t) -1);
     if (docBuf.getNumChannels() <= 0)
         return;
 
     const int written = gatherRegion(out, 0, numSamples, numCh, docBuf,
-                                     pos, dir, regionStart, regionEnd, loop, pingPong, reverseLoop, loopFadeLen);
+                                     pos, dir, regionStart, regionEnd, loop, pingPong, reverseLoop, loopFadeLen,
+                                     posTrace);
 
     document.playhead.store(pos, std::memory_order_relaxed);
     if (! loop && written < numSamples)
@@ -714,6 +729,18 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
 
     if (document.isPlaying.load(std::memory_order_relaxed))
     {
+        // Overdub: grab this block's input before playback overwrites the buffer (see
+        // OverdubWriter.h), and track which buffer position every output sample comes from.
+        const bool overdubOn = document.overdubbing.load(std::memory_order_relaxed)
+                               && numSamples <= overdubInput.getNumSamples();
+        const int overdubInCh = juce::jmin(2, getTotalNumInputChannels());
+        if (overdubOn)
+            for (int ch = 0; ch < overdubInCh; ++ch)
+                overdubInput.copyFrom(ch, 0, buffer, ch, 0, numSamples);
+        if (! wasPlaying)
+            overdubWriter.reset();
+        bool overdubPositionsPushed = false;
+
         buffer.clear();
 
         if (! wasPlaying)
@@ -1037,11 +1064,36 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                 {
                     stretcherPrimed = false;
                     rtFinished = false;
+                    const bool traced = numSamples <= (int) overdubTrace.size();
                     renderPlaybackDirect(buffer, numCh, numSamples, docBuf, pos,
-                                         playbackDir, regionStart, regionEnd, loop, pingPong, reverseLoopOn, loopFadeLen);
+                                         playbackDir, regionStart, regionEnd, loop, pingPong, reverseLoopOn, loopFadeLen,
+                                         traced ? overdubTrace.data() : nullptr);
+                    if (traced)
+                    {
+                        for (int i = 0; i < numSamples; ++i)
+                            overdubWriter.pushPosition(overdubTrace[(size_t) i]);
+                        overdubPositionsPushed = true;
+                        // Sound-on-sound: the input goes where the loop was playing when it was
+                        // heard (overdubLatency back) -- still under this block's lock, so the
+                        // loop being read and written is never swapped out mid-write.
+                        if (overdubOn && overdubInCh > 0)
+                        {
+                            juce::AudioBuffer<float> in(overdubInput.getArrayOfWritePointers(), overdubInCh, numSamples);
+                            overdubWriter.write(document.getBufferForOverdub(), in, numSamples,
+                                                overdubLatency.load(std::memory_order_relaxed),
+                                                (float) juce::jlimit(0.0, 2.0, document.overdubLevel.load(std::memory_order_relaxed)),
+                                                (float) juce::jlimit(0.0, 1.0, document.overdubFeedback.load(std::memory_order_relaxed)));
+                        }
+                    }
                 }
             }
         }
+        // Stretched / dragging / missed lock: nothing from the buffer maps 1:1 onto this block's
+        // output -- keep the position history in step (so the timing stays right when direct
+        // playback resumes), but write nothing.
+        if (! overdubPositionsPushed)
+            for (int i = 0; i < numSamples; ++i)
+                overdubWriter.pushPosition(-1);
 
         // Our own record of where playback last was, kept independent of document.playhead
         // itself so a manual seek overwriting that atomic doesn't erase what "old" means -- see
@@ -1163,6 +1215,11 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             applyPlaybackGain(buffer, numCh, done, chunk, c < numGainChunks ? gainChunkMod[c] : LfoModResult{});
             done += chunk;
         }
+
+        // Overdub monitoring: hear yourself over the loop (after the effects and Gain).
+        if (overdubOn && overdubInCh > 0 && document.overdubMonitor.load(std::memory_order_relaxed))
+            for (int ch = 0; ch < numCh; ++ch)
+                buffer.addFrom(ch, 0, overdubInput, juce::jmin(ch, overdubInCh - 1), 0, numSamples);
 
         captureOutput(buffer, numCh, numSamples);
         // R3WRK has taken the buffer over to play/loop -- Black Box follows that, not the (now
@@ -2247,6 +2304,35 @@ void R3WRKAudioProcessor::finalizeDesktopRecording()
     if (onDesktopStatus) onDesktopStatus("Desktop recording captured");
 }
 
+#if JUCE_MAC
+extern "C" int r3wrkDeviceRoundTripLatency();   // patched Standalone window; weak 0 in VST3/AU
+#endif
+
+bool R3WRKAudioProcessor::canOverdub() const
+{
+    return ! document.isEmpty()
+        && ! knobsEngaged(document.playbackSpeed.load(), document.playbackPitch.load(),
+                          document.playbackStretch.load());
+}
+
+void R3WRKAudioProcessor::startOverdub()
+{
+    if (! canOverdub() || document.isRecording.load())
+        return;
+   #if JUCE_MAC
+    overdubLatency.store(juce::jmax(0, r3wrkDeviceRoundTripLatency()));
+   #endif
+    if (! document.beginOverdubPass())
+        return;
+    if (! document.isPlaying.load())
+        startPlayback();
+}
+
+void R3WRKAudioProcessor::stopOverdub()
+{
+    document.endOverdubPass();
+}
+
 void R3WRKAudioProcessor::startPlayback()
 {
     if (document.isEmpty())
@@ -2352,6 +2438,9 @@ void R3WRKAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     out.writeDouble(document.dirtDrive.load());     // R3WP+
     out.writeDouble(document.dirtRate.load());
     out.writeDouble(document.dirtBits.load());
+    out.writeDouble(document.overdubLevel.load());      // R3WQ+
+    out.writeDouble(document.overdubFeedback.load());
+    out.writeBool(document.overdubMonitor.load());
 
     auto& buf = document.getBuffer();
     for (int ch = 0; ch < buf.getNumChannels(); ++ch)
@@ -2367,12 +2456,12 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     juce::MemoryInputStream in(data, (size_t) sizeInBytes, false);
     const int magic = in.readInt();
-    if (magic != kStateMagic && magic != kStateMagicR3WO && magic != kStateMagicR3WN && magic != kStateMagicR3WM && magic != kStateMagicR3WL && magic != kStateMagicR3WK && magic != kStateMagicR3WJ && magic != kStateMagicR3WI && magic != kStateMagicR3WH && magic != kStateMagicR3WG && magic != kStateMagicR3WF && magic != kStateMagicR3WE && magic != kStateMagicR3WD
+    if (magic != kStateMagic && magic != kStateMagicR3WP && magic != kStateMagicR3WO && magic != kStateMagicR3WN && magic != kStateMagicR3WM && magic != kStateMagicR3WL && magic != kStateMagicR3WK && magic != kStateMagicR3WJ && magic != kStateMagicR3WI && magic != kStateMagicR3WH && magic != kStateMagicR3WG && magic != kStateMagicR3WF && magic != kStateMagicR3WE && magic != kStateMagicR3WD
         && magic != kStateMagicR3WC && magic != kStateMagicR3WB && magic != kStateMagicR3WA
         && magic != kStateMagicR3W9 && magic != kStateMagicR3W8 && magic != kStateMagicR3W7
         && magic != kStateMagicR3W6 && magic != kStateMagicR3W5)
         return;
-    // R3WP: adds Dirt drive/rate/bits after Mimeophon Ping-Pong. R3WO: adds Mimeophon Ping-Pong after Skew. R3WN: adds Mimeophon Skew after the other
+    // R3WQ: adds Overdub level/feedback/monitor after Dirt. R3WP: adds Dirt drive/rate/bits after Mimeophon Ping-Pong. R3WO: adds Mimeophon Ping-Pong after Skew. R3WN: adds Mimeophon Skew after the other
     // Mimeophon params. R3WM: adds the Mimeophon
     // params after the Plexiphon params. R3WL: adds the Plexiphon
     // params after reverb Width. R3WK: adds reverb Width after Pre-
@@ -2387,7 +2476,8 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     // MnM model). R3W8..R3WA: the old OT-style Base/Width filter with a single resonance
     // (+ later Drive, + later 12/24 slope). R3W6/R3W7: the even older mode/cutoff filter.
     // R3W5: none.
-    const bool hasDirt             = (magic == kStateMagic);                                  // R3WP
+    const bool hasOverdub          = (magic == kStateMagic);                                  // R3WQ
+    const bool hasDirt             = (hasOverdub || magic == kStateMagicR3WP);                // R3WP+
     const bool hasMimeoPingPong    = (hasDirt || magic == kStateMagicR3WO);                   // R3WO+
     const bool hasMimeoSkew        = (hasMimeoPingPong || magic == kStateMagicR3WN);          // R3WN+
     const bool hasMimeo            = (hasMimeoSkew || magic == kStateMagicR3WM);              // R3WM+
@@ -2560,6 +2650,13 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
         dRate  = in.readDouble();
         dBits  = in.readDouble();
     }
+    double odLevel = 1.0, odFeedback = 1.0; bool odMonitor = false;   // older projects: defaults
+    if (hasOverdub)
+    {
+        odLevel    = in.readDouble();
+        odFeedback = in.readDouble();
+        odMonitor  = in.readBool();
+    }
 
     if (numCh <= 0 || numCh > kMaxStateChannels || numSamples < 0 || numSamples > 0x7fffffff)
         return;
@@ -2641,6 +2738,9 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     document.dirtDrive.store(juce::jlimit(0.0, 1.0, dDrive));
     document.dirtRate.store(juce::jlimit(0.0, 1.0, dRate));
     document.dirtBits.store(juce::jlimit(0.0, 1.0, dBits));
+    document.overdubLevel.store(juce::jlimit(0.0, 2.0, odLevel));
+    document.overdubFeedback.store(juce::jlimit(0.0, 1.0, odFeedback));
+    document.overdubMonitor.store(odMonitor);
 
     document.setSourceFilePath(sourceFilePath);   // "" on an older state blob -- header shows "Untitled"
 

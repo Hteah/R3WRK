@@ -7,6 +7,7 @@
 #include "DotMatrixLCD.h"
 #include "OutputSettings.h"
 #include "R3WRKLookAndFeel.h"
+#include "PinnableCallout.h"
 
 /**
     A single control strip below the waveform:
@@ -191,6 +192,13 @@ private:
     // not on this transport strip -- see that class's followButton.
     juce::Label timeLabel;   // also carries the "● REC m:ss" elapsed time while recording
     juce::TextButton recordButton;
+    // Sound-on-sound overdub (toggle; filled red while a pass runs) and its "more" dot, which
+    // opens OverdubPanel (Level / Feedback / Monitor) -- same pinnable popup as the effects.
+    juce::TextButton overdubButton { R3WRKLookAndFeel::iconOverdub };
+    R3WRKIconOnlyLookAndFeel overdubMoreLnF;
+    juce::TextButton overdubMoreButton { R3WRKLookAndFeel::iconMore };
+    PinnableCallout overdubCallout;
+    int overdubRefreshTick = 0;   // waveform refresh throttle while overdubbing
     juce::TextButton autoRecordButton { R3WRKLookAndFeel::iconAutoRecord };  // setClickingTogglesState(true)
                                                                              // -- arms record-on-signal
                                                                              // standby; see AudioDocument's

@@ -3,6 +3,7 @@
 #include "TimeStretchEngine.h"
 #include "ThemeEditor.h"
 #include "WaveformDisplay.h"
+#include "OverdubPanel.h"
 
 #if JUCE_MAC
 // Opens JUCE's Audio/MIDI settings dialog. The real implementation lives in the patched
@@ -792,6 +793,23 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     addAndMakeVisible(sliceButton);
     addAndMakeVisible(timeLabel);
     addAndMakeVisible(recordButton);
+    overdubButton.setName("overdub");   // thick red ring, like Record Desktop / Capture Output
+    overdubButton.setLookAndFeel(&toolbarLnF);
+    overdubButton.setWantsKeyboardFocus(false);
+    overdubButton.onClick = [this]
+    {
+        if (document.overdubbing.load()) processor.stopOverdub();
+        else                             processor.startOverdub();
+    };
+    addAndMakeVisible(overdubButton);
+    overdubMoreButton.setLookAndFeel(&overdubMoreLnF);
+    overdubMoreButton.setWantsKeyboardFocus(false);
+    overdubMoreButton.setTooltip("Overdub: Level / Feedback / Monitor (double-click to pin)");
+    overdubMoreButton.onClick = [this]
+    {
+        overdubCallout.buttonClicked(overdubMoreButton, [this] { return std::make_unique<OverdubPanel>(document); });
+    };
+    addAndMakeVisible(overdubMoreButton);
     addAndMakeVisible(toolsButton);
     // Named so R3WRKLookAndFeel::drawButtonBackground can give this (and desktopRec/captureOut
     // below) a thicker red outline ring -- see its own comment.
@@ -979,6 +997,9 @@ EditorToolbar::~EditorToolbar()
     desktopRecButton.setLookAndFeel(nullptr);
     captureOutButton.setLookAndFeel(nullptr);
     blackBoxButton.setLookAndFeel(nullptr);
+    overdubCallout.close();
+    overdubButton.setLookAndFeel(nullptr);
+    overdubMoreButton.setLookAndFeel(nullptr);
     // The Black Box popup outlives this toolbar otherwise -- see blackBoxCallout's comment.
     if (blackBoxCallout != nullptr)
         blackBoxCallout->dismiss();
@@ -1052,6 +1073,10 @@ void EditorToolbar::applyTheme()
     // Capture Output: same outlined record-red treatment as Record Desktop.
     captureOutButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
     captureOutButton.setColour(juce::TextButton::textColourOffId, pal.recordButton);
+    overdubButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+    overdubButton.setColour(juce::TextButton::textColourOffId, pal.recordButton);
+    overdubMoreButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+    overdubMoreButton.setColour(juce::TextButton::textColourOffId, pal.textDim);
 
     // Black Box is passive and always running, not an urgent record action -- neutral outline
     // like Tools, not the record red the explicit capture buttons use.
@@ -1106,8 +1131,8 @@ void EditorToolbar::paint(juce::Graphics& g)
 void EditorToolbar::doCut()   { EditActions::cut(document, clipboard); }
 void EditorToolbar::doCopy()  { EditActions::copy(document, clipboard); }
 void EditorToolbar::doPaste() { EditActions::pasteReplace(document, clipboard); }
-void EditorToolbar::doUndo()  { document.undoManager.undo(); document.notifyChanged(); }
-void EditorToolbar::doRedo()  { document.undoManager.redo(); document.notifyChanged(); }
+void EditorToolbar::doUndo()  { document.endOverdubPass(); document.undoManager.undo(); document.notifyChanged(); }
+void EditorToolbar::doRedo()  { document.endOverdubPass(); document.undoManager.redo(); document.notifyChanged(); }
 
 void EditorToolbar::toggleTransport()
 {
@@ -1699,6 +1724,29 @@ void EditorToolbar::timerCallback()
 
     updateTransportButtonText();
 
+    // Overdub: a pass ends when playback stops (Stop, a non-looping region running out) -- the
+    // audio thread can't commit an undo step itself, so it happens here. While it runs, refresh
+    // the waveform ~5x a second so the layers show up as they go down, and fill the button red.
+    {
+        const bool od = document.overdubbing.load();
+        if (od && ! document.isPlaying.load())
+            processor.stopOverdub();
+        else if (od && ++overdubRefreshTick >= 3)
+        {
+            overdubRefreshTick = 0;
+            document.touchContent();
+        }
+        const bool active = document.overdubbing.load();
+        overdubButton.setColour(juce::TextButton::buttonColourId,
+                                active ? theme->palette().recordButton : juce::Colours::transparentBlack);
+        const bool can = active || processor.canOverdub();
+        overdubButton.setEnabled(can);
+        overdubButton.setTooltip(active ? "Overdub -- click to stop (this pass becomes one Undo step)"
+                                 : can  ? "Overdub -- layer onto the loop, sound-on-sound (starts the loop if stopped)"
+                                        : (document.isEmpty() ? "Overdub -- load or record something first"
+                                                              : "Overdub -- not while Speed / Stretch / Pitch are engaged"));
+    }
+
     const double sr = document.getSampleRate() > 0 ? document.getSampleRate() : 44100.0;
 
     if (document.isRecording.load())
@@ -1957,6 +2005,8 @@ void EditorToolbar::resized()
     add(playButton);
     add(loopButton);
     add(recordButton);
+    add(overdubButton, 2);
+    addWide(overdubMoreButton, 12, gap);
     add(autoRecordButton, (standaloneApp || isPluginBuild) ? gap + dotGap : gap);   // dot before the next section
     if (standaloneApp)
     {

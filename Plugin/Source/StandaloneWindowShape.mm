@@ -10,6 +10,9 @@
 // juce_StandaloneFilterWindow.h, which only compiles into the Standalone target and there wins
 // the link (strong beats weak). Called from EditorToolbar's "Audio Settings…" menu item.
 extern "C" __attribute__((weak)) void r3wrkShowAudioSettings() {}
+// Same arrangement for the audio device's round-trip latency (Overdub's timing): the real one is
+// in the patched juce_StandaloneFilterWindow.h; the VST3/AU targets get 0 (the host owns the device).
+extern "C" __attribute__((weak)) int r3wrkDeviceRoundTripLatency() { return 0; }
 
 void r3wrkApplyRoundedWindowCorners (void* windowPtr, float cornerRadiusPx)
 {

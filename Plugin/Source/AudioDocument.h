@@ -333,6 +333,25 @@ public:
     std::atomic<double> dirtRate  { 1.0 };
     std::atomic<double> dirtBits  { 1.0 };
 
+    // Sound-on-sound overdub (OverdubWriter.h; PluginProcessor::startOverdub/stopOverdub). While
+    // `overdubbing`, the audio thread writes live input into the playing loop:
+    // doc = doc * overdubFeedback + input * overdubLevel. One pass (on -> off) = one undo step:
+    // beginOverdubPass() snapshots the audio, endOverdubPass() commits it as "Overdub".
+    //   overdubLevel    : linear gain on the new layer, 0..2 (-inf..+6 dB); 1 = 0 dB.
+    //   overdubFeedback : 0..1 -- how much of what's there survives each pass (1 = keep all).
+    //   overdubMonitor  : hear the input over the loop while overdubbing (off: no speaker feedback).
+    std::atomic<bool>   overdubbing     { false };
+    std::atomic<double> overdubLevel    { 1.0 };
+    std::atomic<double> overdubFeedback { 1.0 };
+    std::atomic<bool>   overdubMonitor  { false };
+    bool beginOverdubPass();   // message thread; false if there's nothing to overdub onto
+    void endOverdubPass();     // message thread; no-op if not overdubbing
+    // Audio thread, while holding getLock() -- the overdub writes straight into the loop.
+    juce::AudioBuffer<float>& getBufferForOverdub() { return buffer; }
+    // Message thread: the audio changed in place (overdub) -- bump the version so the waveform,
+    // spectrogram and unsaved dot pick it up.
+    void touchContent() { ++bufferVersion; notifyChanged(); }
+
     // Output "Gain" knob (Standalone only -- KnobRow adds the knob just in that build; the
     // atomic sits here for everyone but stays at 0). In dB, 0 = unity (default volume);
     // kMinGainDb reads as a true mute. Applied last on the playback/scrub output and baked

@@ -529,6 +529,20 @@ namespace
         g.fillPath (head);
     }
 
+    // Overdub (sound-on-sound): an outlined ring behind and up-right, a filled record dot in
+    // front -- a new layer going down on top of an existing one.
+    void drawOverdubIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
+    {
+        auto a = bounds.reduced (bounds.getHeight() * 0.26f);
+        const float r = a.getWidth() * 0.30f;
+        const float stroke = juce::jmax (1.3f, a.getHeight() * 0.10f);
+        g.setColour (ink);
+        const float bx = a.getRight() - r, by = a.getY() + r;
+        g.drawEllipse (bx - r, by - r, r * 2.0f, r * 2.0f, stroke);
+        const float fx = a.getX() + r, fy = a.getBottom() - r;
+        g.fillEllipse (fx - r, fy - r, r * 2.0f, r * 2.0f);
+    }
+
     // Black Box: a rounded rectangle (the flight-recorder box) with a record dot inside --
     // reads as "quietly, continuously capturing" rather than an urgent record action, so it's
     // an outline only, no red -- see its neutral colour treatment in the .cpp constructor.
@@ -626,6 +640,7 @@ void R3WRKLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Button& but
         // their text to iconStop while active and text alone can't tell them apart from the
         // main transport's own Stop button.
         const bool thickRing = button.getName() == "desktopRec" || button.getName() == "captureOut"
+                             || button.getName() == "overdub"
                              || button.getName() == "clear";
         g.setColour(ink.withAlpha(0.45f));
         g.drawRoundedRectangle(bounds, radius, thickRing ? 2.2f : 1.2f);
@@ -651,7 +666,7 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
         && text != iconReverse && text != iconClear && text != iconAutoRecord
         && text != iconSlice && text != iconFollow && text != iconDesktopRec
         && text != iconFloatTop && text != iconCaptureOut && text != iconBlackBox
-        && text != iconOrbit && text != iconMore)
+        && text != iconOrbit && text != iconMore && text != iconOverdub)
     {
         juce::LookAndFeel_V4::drawButtonText(g, button, isMouseOverButton, isButtonDown);
         return;
@@ -726,6 +741,12 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     {
         // See iconDesktopRec above -- same white-icon-in-red-ring treatment.
         drawCaptureOutIcon(g, bounds, juce::Colours::white.withMultipliedAlpha(button.isEnabled() ? 1.0f : 0.5f));
+        return;
+    }
+    if (text == iconOverdub)
+    {
+        // Same white-icon-in-red-ring treatment as Record Desktop / Capture Output.
+        drawOverdubIcon(g, bounds, juce::Colours::white.withMultipliedAlpha(button.isEnabled() ? 1.0f : 0.5f));
         return;
     }
     if (text == iconBlackBox)

@@ -63,6 +63,7 @@ AudioDocument::AudioDocument()
 
 void AudioDocument::newEmptyDocument(int numChannels, double sr)
 {
+    endOverdubPass();   // no-op unless overdubbing
     {
         const juce::ScopedLock sl(bufferLock);
         buffer.setSize(numChannels, 0);
@@ -93,6 +94,7 @@ void AudioDocument::newEmptyDocument(int numChannels, double sr)
 
 bool AudioDocument::loadFromFile(const juce::File& file, double resampleToRate)
 {
+    endOverdubPass();   // no-op unless overdubbing
     juce::AudioFormatManager fm;
     fm.registerBasicFormats();
     std::unique_ptr<juce::AudioFormatReader> reader(fm.createReaderFor(file));
@@ -396,8 +398,33 @@ void AudioDocument::resetRecordingScope()
     recordedSamples.store(0, std::memory_order_relaxed);
 }
 
+bool AudioDocument::beginOverdubPass()
+{
+    if (overdubbing.load() || isEmpty())
+        return false;
+    beginChange();   // the pre-overdub audio -- what Undo goes back to
+    overdubbing = true;
+    return true;
+}
+
+void AudioDocument::endOverdubPass()
+{
+    if (! overdubbing.exchange(false))
+        return;
+    juce::AudioBuffer<float> layered;
+    {
+        const juce::ScopedLock sl(bufferLock);
+        layered.makeCopyOf(buffer);
+    }
+    commitChange(std::move(layered), "Overdub");
+}
+
 void AudioDocument::beginChange()
 {
+    // Any edit ends a running overdub pass first (committing it as its own undo step), so an
+    // edit can never land inside -- or be swallowed by -- an overdub's snapshot.
+    if (overdubbing.load())
+        endOverdubPass();
     jassert(! changeInProgress);
     preChangeBuffer.makeCopyOf(buffer);
     preChangeSelStart = getSelectionStart();

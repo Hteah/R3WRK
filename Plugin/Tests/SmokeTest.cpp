@@ -13,6 +13,7 @@
 #include "../Source/DragScanRender.h"
 #include "../Source/LofiStretch.h"
 #include "../Source/DirtStage.h"
+#include "../Source/OverdubWriter.h"
 
 namespace
 {
@@ -608,6 +609,98 @@ int main()
             const auto baked = doc.renderWithPlaybackKnobs(src);
             float diff = 0; for (int i = 0; i < n; ++i) diff = std::max(diff, std::abs(baked.getSample(0, i) - src.getSample(0, i)));
             check(diff > 0.05f, juce::String::formatted("export with Dirt on bakes it in (max change %.3f)", diff));
+        }
+    }
+
+    // --- Overdub (sound-on-sound) writer: timing across wraps/directions, mixing, ceiling ---
+    {
+        std::cout << "-- Overdub (sound-on-sound) --" << std::endl;
+        const int L = 22050, lat = 1000, block = 512;
+
+        // Plays a loop whose read order is `posAt(k)` for `total` samples, feeding back the
+        // output delayed by `lat` as the "input" (the round trip through speakers and mic), and
+        // overdubs it at Level 1 / Feedback 1. An impulse at p must come back exactly onto p.
+        auto roundTrip = [&](int p, int total, std::function<int64_t(int)> posAt, bool& onlyThere)
+        {
+            juce::AudioBuffer<float> doc(1, L); doc.clear();
+            doc.setSample(0, p, 0.5f);
+            std::vector<float> played;
+            r3wrk::OverdubWriter w; w.prepare();
+            juce::AudioBuffer<float> in(1, block);
+            for (int k0 = 0; k0 < total; k0 += block)
+            {
+                const int n = std::min(block, total - k0);
+                for (int i = 0; i < n; ++i)
+                {
+                    const int64_t pos = posAt(k0 + i);
+                    w.pushPosition(pos);
+                    played.push_back(doc.getSample(0, (int) pos));
+                }
+                for (int i = 0; i < n; ++i)
+                {
+                    const int k = k0 + i - lat;
+                    in.setSample(0, i, k >= 0 ? played[(size_t) k] : 0.0f);
+                }
+                w.write(doc, in, n, lat, 1.0f, 1.0f);
+            }
+            onlyThere = true;
+            for (int i = 0; i < L; ++i)
+                if (i != p && doc.getSample(0, i) != 0.0f) onlyThere = false;
+            return doc.getSample(0, p);
+        };
+        bool clean = false;
+        float v = roundTrip(3000, 6000, [](int k) { return (int64_t) (k % L); }, clean);
+        check(v == 1.0f && clean, juce::String::formatted("forward loop: the layer lands exactly in time (%.3f at p, clean elsewhere: %d)", v, clean));
+        v = roundTrip(L - 300, L + 2000, [](int k) { return (int64_t) (k % L); }, clean);
+        check(v == 1.0f && clean, "across a loop wrap: still exactly in time");
+        v = roundTrip(5000, L, [](int k) { return (int64_t) (L - 1 - (k % L)); }, clean);
+        check(v == 1.0f && clean, "reverse loop: exactly in time");
+        // Ping-pong reads p twice per cycle (forward, then on the way back) and both passes get
+        // overdubbed -- correct sound-on-sound. Stop after the first layer is written (which happens
+        // while playback is already on the return leg) and before the second pass is heard.
+        v = roundTrip(L - 200, L + 1000, [](int k) { const int per = 2 * L - 2, m = k % per; return (int64_t) (m < L ? m : per - m); }, clean);
+        check(v == 1.0f && clean, "ping-pong, written while on the return leg: exactly in time");
+
+        {
+            juce::AudioBuffer<float> doc(2, 4096), before, in(2, 512);
+            juce::Random r(9);
+            for (int c = 0; c < 2; ++c) for (int i = 0; i < 4096; ++i) doc.setSample(c, i, r.nextFloat() - 0.5f);
+            for (int c = 0; c < 2; ++c) for (int i = 0; i < 512; ++i) in.setSample(c, i, (r.nextFloat() - 0.5f) * 0.5f);
+            before.makeCopyOf(doc);
+            r3wrk::OverdubWriter w; w.prepare();
+            for (int i = 0; i < 512; ++i) w.pushPosition(100 + i);
+            w.write(doc, in, 512, 0, 0.0f, 1.0f);
+            bool same = true;
+            for (int c = 0; c < 2; ++c) for (int i = 0; i < 4096; ++i) same = same && doc.getSample(c, i) == before.getSample(c, i);
+            check(same, "Level 0, Feedback 100%: the buffer is untouched (bit-exact)");
+
+            w.write(doc, in, 512, 0, 1.0f, 1.0f);
+            float err = 0;
+            for (int c = 0; c < 2; ++c) for (int i = 0; i < 512; ++i)
+                err = std::max(err, std::abs(doc.getSample(c, 100 + i) - (before.getSample(c, 100 + i) + in.getSample(c, i))));
+            check(err < 1e-6f, "Level 1, Feedback 100%: the new layer is added exactly, both channels");
+
+            doc.makeCopyOf(before);
+            in.clear();
+            w.write(doc, in, 512, 0, 1.0f, 0.5f);
+            err = 0;
+            for (int i = 0; i < 512; ++i) err = std::max(err, std::abs(doc.getSample(0, 100 + i) - 0.5f * before.getSample(0, 100 + i)));
+            bool untouched = doc.getSample(0, 99) == before.getSample(0, 99) && doc.getSample(0, 612) == before.getSample(0, 612);
+            check(err < 1e-6f && untouched, "Feedback 50%: the old audio halves where the pass played, untouched elsewhere");
+        }
+        {
+            juce::AudioBuffer<float> doc(1, 512), in(1, 512);
+            doc.clear();
+            for (int i = 0; i < 512; ++i) in.setSample(0, i, 0.9f);
+            r3wrk::OverdubWriter w; w.prepare();
+            for (int pass = 0; pass < 20; ++pass)
+            {
+                for (int i = 0; i < 512; ++i) w.pushPosition(i);
+                w.write(doc, in, 512, 0, 1.0f, 1.0f);
+            }
+            bool ok = true; float peak = 0;
+            for (int i = 0; i < 512; ++i) { ok = ok && std::isfinite(doc.getSample(0, i)); peak = std::max(peak, std::abs(doc.getSample(0, i))); }
+            check(ok && peak <= 1.5f, juce::String::formatted("20 stacked full-level passes stay bounded (peak %.3f)", peak));
         }
     }
 
