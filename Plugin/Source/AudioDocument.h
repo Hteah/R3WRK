@@ -240,7 +240,7 @@ public:
     // Scrub tool: drag across the waveform to play forward or backward at a rate matching
     // how fast you drag -- like moving tape past a playback head by hand, or a turntable
     // under a stylus. Pitch rises and falls with speed (this is a plain variable-rate read,
-    // no RubberBand correction), which is the whole point -- that's the "tape speeding up
+    // no pitch correction), which is the whole point -- that's the "tape speeding up
     // and slowing down" sound, not a clean speed change.
     //   scrubModeEnabled : the *tool* being selected (EditorToolbar's Scrub toggle) --
     //                      message-thread only, like previewActive, so a plain bool.
@@ -290,7 +290,7 @@ public:
 
     //==============================================================================
     // Live playback knobs (KnobRow writes these; the audio thread reads them every block
-    // to drive a real-time RubberBand stretcher -- see PluginProcessor). Live here, not on
+    // to drive the real-time lofi engine -- see PluginProcessor/LofiStretch.h). Live here, not on
     // the processor, so the views (WaveformDisplay, TimeRuler) can read them too, for the
     // visual time-stretch below.
     //   playbackSpeed   : tape-style rate. 1.0 = normal; 2.0 plays twice as fast AND an
@@ -395,7 +395,7 @@ public:
     //
     // Each LFO drives exactly one target with one Amount -- not a many-to-many matrix (routing
     // two LFOs onto the same knob is still possible; their offsets just add, same as two
-    // parallel signals into one summing node). Pitch/Speed (the real-time RubberBand stretch
+    // parallel signals into one summing node). Pitch/Speed (the real-time lofi stretch
     // engine) are deliberately not in r3wrk::ModTarget yet -- that pipeline has its own history
     // of click-storm bugs; modulating it is a later, isolated pass.
     static constexpr int kMaxLfos = 4;

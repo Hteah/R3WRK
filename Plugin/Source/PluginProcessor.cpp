@@ -2,7 +2,6 @@
 #include "DragScanRender.h"
 #include "PluginEditor.h"
 #include "OutputSettings.h"
-#include <rubberband/RubberBandStretcher.h>
 #include <algorithm>
 #include <cmath>
 
@@ -62,22 +61,21 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 
     rtChannels = juce::jlimit(1, 2, juce::jmax(1, getMainBusNumOutputChannels()));
 
-    using RB = RubberBand::RubberBandStretcher;
-    rtStretcher = std::make_unique<RB>((size_t) sampleRate, (size_t) rtChannels,
-                                       RB::OptionProcessRealTime | RB::OptionPitchHighConsistency);
+    rtStretcher = std::make_unique<r3wrk::LofiStretch>();
+    rtStretcher->prepare(sampleRate, rtChannels);
 
     const int inScratch = juce::jmax(8192, juce::jmax(0, samplesPerBlock) * 8);
     rtScratchIn.setSize(rtChannels, inScratch);
     rtScratchOut.setSize(rtChannels, juce::jmax(8192, juce::jmax(0, samplesPerBlock) * 2));
-    rtStretcher->setMaxProcessSize((size_t) inScratch);
 
     constexpr double ratioRampSeconds = 0.12;
-    smoothedTimeRatio.reset(sampleRate, ratioRampSeconds);
-    smoothedPitchScale.reset(sampleRate, ratioRampSeconds);
-    smoothedTimeRatio.setCurrentAndTargetValue(1.0);
-    smoothedPitchScale.setCurrentAndTargetValue(1.0);
-    lastAppliedTimeRatio  = -1.0;
-    lastAppliedPitchScale = -1.0;
+    smoothedSpeed.reset(sampleRate, ratioRampSeconds);
+    smoothedStretch.reset(sampleRate, ratioRampSeconds);
+    smoothedPitchSemis.reset(sampleRate, ratioRampSeconds);
+    smoothedSpeed.setCurrentAndTargetValue(1.0);
+    smoothedStretch.setCurrentAndTargetValue(1.0);
+    smoothedPitchSemis.setCurrentAndTargetValue(0.0);
+    lastAppliedTimeRatio = 1.0;
     stretchRatioNeedsSnap = true;
 
     wasPlaying = false; declickRemaining = 0; releaseInputTailRemaining = 0; dragRegionSeeded = false; dragScanActive = false;
@@ -336,10 +334,10 @@ void R3WRKAudioProcessor::renderPlaybackDirect(juce::AudioBuffer<float>& out, in
         document.isPlaying.store(false, std::memory_order_relaxed);
 }
 
-// Real-time tape / pitch / stretch path. All three knobs are one RubberBand pass:
-//   timeRatio  = stretch / speed   (speed compresses time like tape, stretch dilates it)
-//   pitchScale = speed * 2^(pitch/12)   (pitch tracks the tape speed, then the extra shift;
-//                                        stretch does NOT touch pitch)
+// Real-time tape / pitch / stretch path, through the lofi engine (LofiStretch.h): Speed is
+// tape varispeed (time and pitch together), Stretch is Paulstretch (time only, always smeared),
+// Pitch is the granular shifter + grit (pitch only). Source frames consumed per output frame
+// = speed / stretch.
 void R3WRKAudioProcessor::renderPlaybackStretched(juce::AudioBuffer<float>& out, int numCh, int numSamples,
                                                   const juce::AudioBuffer<float>& docBuf,
                                                   int64_t& pos, int& dir, int64_t regionStart, int64_t regionEnd,
@@ -370,7 +368,7 @@ void R3WRKAudioProcessor::renderPlaybackStretched(juce::AudioBuffer<float>& out,
             const int n = juce::jmin(avail, numSamples - produced, outCap);
             float* op[2] = { rtScratchOut.getWritePointer(0),
                              rtScratchOut.getWritePointer(rc > 1 ? 1 : 0) };
-            rtStretcher->retrieve(op, (size_t) n);
+            rtStretcher->retrieve(op, n);
             for (int ch = 0; ch < numCh; ++ch)
                 out.copyFrom(ch, produced, rtScratchOut, juce::jmin(ch, rc - 1), 0, n);
             produced += n;
@@ -414,7 +412,7 @@ void R3WRKAudioProcessor::renderPlaybackStretched(juce::AudioBuffer<float>& out,
         const float* ip[2] = { rtScratchIn.getReadPointer(0),
                                rtScratchIn.getReadPointer(rc > 1 ? 1 : 0) };
         const bool finalNow = regionEnded && ! loop;
-        rtStretcher->process(ip, (size_t) req, finalNow);
+        rtStretcher->process(ip, req, finalNow);
         if (finalNow)
             rtFinished = true;
     }
@@ -428,34 +426,27 @@ void R3WRKAudioProcessor::updateStretchRatios(int numSamples, double speed, doub
     pitch   = juce::jlimit(AudioDocument::kMinPitch,   AudioDocument::kMaxPitch,   pitch);
     stretch = juce::jlimit(AudioDocument::kMinStretch, AudioDocument::kMaxStretch, stretch);
 
-    // Ramp the ratios instead of stepping them, so a knob drag mid-playback doesn't machine-gun
-    // RubberBand with abrupt changes (that's the pops/crackle). Sampled once per block; snapped
-    // straight to target on a fresh play pass so playback starts at the right ratio.
-    const double targetTimeRatio  = stretch / juce::jmax(1.0e-4, speed);
-    const double targetPitchScale = speed * std::pow(2.0, pitch / 12.0);
+    // Ramp instead of stepping, so a knob drag mid-playback doesn't hand the engine abrupt
+    // changes. Sampled once per block; snapped straight to target on a fresh play pass so
+    // playback starts at the right setting.
     if (stretchRatioNeedsSnap)
     {
-        smoothedTimeRatio.setCurrentAndTargetValue(targetTimeRatio);
-        smoothedPitchScale.setCurrentAndTargetValue(targetPitchScale);
+        smoothedSpeed.setCurrentAndTargetValue(speed);
+        smoothedStretch.setCurrentAndTargetValue(stretch);
+        smoothedPitchSemis.setCurrentAndTargetValue(pitch);
         stretchRatioNeedsSnap = false;
     }
     else
     {
-        smoothedTimeRatio.setTargetValue(targetTimeRatio);
-        smoothedPitchScale.setTargetValue(targetPitchScale);
+        smoothedSpeed.setTargetValue(speed);
+        smoothedStretch.setTargetValue(stretch);
+        smoothedPitchSemis.setTargetValue(pitch);
     }
-    const double tr = smoothedTimeRatio.skip(numSamples);
-    const double ps = smoothedPitchScale.skip(numSamples);
-    if (std::abs(tr - lastAppliedTimeRatio) > 1.0e-4 * juce::jmax(1.0, tr))
-    {
-        rtStretcher->setTimeRatio(tr);
-        lastAppliedTimeRatio = tr;
-    }
-    if (std::abs(ps - lastAppliedPitchScale) > 1.0e-4 * juce::jmax(1.0, ps))
-    {
-        rtStretcher->setPitchScale(ps);
-        lastAppliedPitchScale = ps;
-    }
+    const double sp = smoothedSpeed.skip(numSamples);
+    const double st = smoothedStretch.skip(numSamples);
+    const double ps = smoothedPitchSemis.skip(numSamples);
+    rtStretcher->setParams(sp, st, ps);
+    lastAppliedTimeRatio = st / juce::jmax(1.0e-4, sp);
 }
 
 void R3WRKAudioProcessor::renderDragScanStretched(juce::AudioBuffer<float>& out, int numCh, int numSamples,
@@ -474,7 +465,7 @@ void R3WRKAudioProcessor::renderDragScanStretched(juce::AudioBuffer<float>& out,
     const int outCap = rtScratchOut.getNumSamples();
 
     // The region moves across the block in *output* time, but input is pulled in chunks of
-    // whatever RubberBand asks for -- so place each chunk's edges by how much of this block's
+    // whatever the stretcher asks for -- so place each chunk's edges by how much of this block's
     // expected input (numSamples / time ratio) has been fed so far.
     const double expectedIn = (double) numSamples / juce::jmax(1.0e-4, lastAppliedTimeRatio);
     double fed = 0.0;
@@ -490,7 +481,7 @@ void R3WRKAudioProcessor::renderDragScanStretched(juce::AudioBuffer<float>& out,
             const int n = juce::jmin(avail, numSamples - produced, outCap);
             float* op[2] = { rtScratchOut.getWritePointer(0),
                              rtScratchOut.getWritePointer(rc > 1 ? 1 : 0) };
-            rtStretcher->retrieve(op, (size_t) n);
+            rtStretcher->retrieve(op, n);
             for (int ch = 0; ch < numCh; ++ch)
                 out.copyFrom(ch, produced, rtScratchOut, juce::jmin(ch, rc - 1), 0, n);
             produced += n;
@@ -514,7 +505,7 @@ void R3WRKAudioProcessor::renderDragScanStretched(juce::AudioBuffer<float>& out,
         fed += req;
         const float* ip[2] = { rtScratchIn.getReadPointer(0),
                                rtScratchIn.getReadPointer(rc > 1 ? 1 : 0) };
-        rtStretcher->process(ip, (size_t) req, ! stillPlaying);
+        rtStretcher->process(ip, req, ! stillPlaying);
         if (! stillPlaying)
             rtFinished = true;
     }
@@ -522,7 +513,7 @@ void R3WRKAudioProcessor::renderDragScanStretched(juce::AudioBuffer<float>& out,
 
 // Scrub tool: a linear-interpolated, variable-rate (and reversible) read of the stored
 // audio, at whatever rate WaveformDisplay's drag handling last computed from mouse
-// velocity. No RubberBand involved -- pitch rising/falling with speed, and playing
+// velocity. No stretcher involved -- pitch rising/falling with speed, and playing
 // backwards cleanly at a negative rate, is exactly the point (a physical tape or turntable
 // does the same); this is a much simpler DSP path than the pitch-corrected knobs.
 void R3WRKAudioProcessor::renderScrub(juce::AudioBuffer<float>& out, int numCh, int numSamples,
@@ -768,7 +759,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             // proportional rate (same shape as the loop-crossfade/declick envelopes elsewhere)
             // -- the window that's actually looping/playing below then scans smoothly across
             // the file rather than teleporting, with the ordinary machinery (loop wrap,
-            // crossfade, ping-pong, RubberBand if engaged) still genuinely rendering it the
+            // crossfade, ping-pong, the stretcher if engaged) still genuinely rendering it the
             // whole time. `dragRegionSeeded` means "these are live", not "the file's default
             // 0..docLen" -- without it the very first dragging block would slew from the wrong
             // starting point.
@@ -862,7 +853,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                 }
                 if (! dragScanActive)
                 {
-                    // Stretched: the playhead is RubberBand's input read position, so seeding
+                    // Stretched: the playhead is the stretcher's input read position, so seeding
                     // from it keeps the input continuous -- no crossfade needed on the way in.
                     dragScanPos = (double) document.playhead.load(std::memory_order_relaxed);
                     dragRelocation = {};
@@ -873,6 +864,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                 {
                     if (rtStretcher != nullptr && (! wasPlaying || ! stretcherPrimed))
                     {
+                        rtStretcher->setParams(speed, stretch, pitch);   // so reset() knows which stages are live
                         rtStretcher->reset();
                         stretcherPrimed = true;
                         rtFinished = false;
@@ -897,7 +889,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                 bool releasedFromDrag = false, releasedIntoStretcher = false;
                 if (dragScanActive)
                 {
-                    // Drag just ended (or crossed into the RubberBand-engaged case) -- hand off
+                    // Drag just ended (or crossed into the stretcher-engaged case) -- hand off
                     // to the ordinary path from wherever the scan landed. The region snaps from
                     // its slewed position to where the mouse actually left it, so the playhead
                     // can end up outside it (jumped to the loop start just below) or with the
@@ -910,7 +902,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                     const double relEnd = juce::jmax(dragRegionStart + 1.0, dragRegionEnd);
                     if (engaged)
                     {
-                        // Stretched: blend on RubberBand's input instead (releaseInputTail).
+                        // Stretched: blend on the stretcher's input instead (releaseInputTail).
                         dragscan::renderReleaseTail(releaseInputTail, rtChannels, declickLen, docBuf, dragScanPos, dragRelocation,
                                                     dragRegionStart, relEnd, loop, relFade, currentSampleRate);
                         releaseInputTailLen = releaseInputTailRemaining = declickLen;
@@ -1027,6 +1019,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                 {
                     if (rtStretcher != nullptr && (! wasPlaying || ! stretcherPrimed))
                     {
+                        rtStretcher->setParams(speed, stretch, pitch);   // so reset() knows which stages are live
                         rtStretcher->reset();
                         stretcherPrimed = true;
                         rtFinished = false;

@@ -11,43 +11,6 @@ endif()
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../JUCE JUCE)
 
 #===============================================================================
-# RubberBand (offline time-stretch / pitch-shift).
-# RubberBand ships no CMake build — but it does ship `single/RubberBandSingle.cpp`,
-# an amalgamated unit that pulls in every source with the right config (vDSP FFT +
-# BQ resampler on Apple, no threads). We fetch the source and compile that one file
-# into a small static lib. A system copy via pkg-config wins if one exists.
-find_package(PkgConfig QUIET)
-if(PkgConfig_FOUND)
-    pkg_check_modules(RUBBERBAND QUIET rubberband)
-endif()
-
-if(RUBBERBAND_FOUND)
-    message(STATUS "R3WRK: using system RubberBand ${RUBBERBAND_VERSION}")
-    add_library(rubberband_dep INTERFACE)
-    target_include_directories(rubberband_dep INTERFACE ${RUBBERBAND_INCLUDE_DIRS})
-    target_link_directories(rubberband_dep INTERFACE ${RUBBERBAND_LIBRARY_DIRS})
-    target_link_libraries(rubberband_dep INTERFACE ${RUBBERBAND_LIBRARIES})
-else()
-    message(STATUS "R3WRK: building RubberBand v3.3.0 from its single-file unit")
-    include(FetchContent)
-    FetchContent_Declare(rubberband_src
-        GIT_REPOSITORY https://github.com/breakfastquay/rubberband.git
-        GIT_TAG        v3.3.0
-        GIT_SHALLOW    TRUE)
-    FetchContent_MakeAvailable(rubberband_src)   # no CMakeLists → just populates
-
-    add_library(rubberband_dep STATIC ${rubberband_src_SOURCE_DIR}/single/RubberBandSingle.cpp)
-    set_target_properties(rubberband_dep PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    target_compile_features(rubberband_dep PRIVATE cxx_std_17)
-    target_include_directories(rubberband_dep
-        PUBLIC  ${rubberband_src_SOURCE_DIR}            # <rubberband/RubberBandStretcher.h>
-        PRIVATE ${rubberband_src_SOURCE_DIR}/src)
-    if(APPLE)
-        target_link_libraries(rubberband_dep PUBLIC "-framework Accelerate")
-    endif()
-endif()
-
-#===============================================================================
 juce_add_plugin(R3WRK
     COMPANY_NAME "Heath Audio"
     BUNDLE_ID "com.heathaudio.r3wrk"
@@ -147,7 +110,6 @@ target_link_libraries(R3WRK
         juce::juce_audio_devices
         juce::juce_dsp
         juce::juce_gui_extra
-        rubberband_dep
         R3WRKFonts
         "-framework CoreMedia"
         "-weak_framework ScreenCaptureKit"
@@ -185,6 +147,5 @@ target_link_libraries(R3WRKSmokeTest
         juce::juce_audio_basics
         juce::juce_audio_formats
         juce::juce_gui_basics          # Theme.cpp (Colour, SystemClipboard)
-        rubberband_dep
     PUBLIC
         juce::juce_recommended_config_flags)

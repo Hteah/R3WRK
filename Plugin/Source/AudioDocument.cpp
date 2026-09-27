@@ -182,20 +182,17 @@ juce::AudioBuffer<float> AudioDocument::renderWithPlaybackKnobs(const juce::Audi
     if (out.getNumSamples() <= 0 || out.getNumChannels() <= 0)
         return out;
 
-    // 1. Time / pitch / stretch -- only run the (lossy, slow) RubberBand pass when those
-    //    knobs are actually off-centre.
+    // 1. Speed / stretch / pitch -- only run the lofi engine when those knobs are actually
+    //    off-centre.
     if (timePitchKnobsEngaged())
     {
         const double speed   = juce::jlimit(kMinSpeed,   kMaxSpeed,   playbackSpeed.load(std::memory_order_relaxed));
         const double pitch   = juce::jlimit(kMinPitch,   kMaxPitch,   playbackPitch.load(std::memory_order_relaxed));
         const double stretch = juce::jlimit(kMinStretch, kMaxStretch, playbackStretch.load(std::memory_order_relaxed));
 
-        // Same mapping as PluginProcessor::renderPlaybackStretched -- tape speed compresses
-        // time and lifts pitch, Pitch layers on extra semitones, Stretch dilates time only.
-        const double timeRatio = stretch / juce::jmax(1.0e-4, speed);
-        const double semitones = 12.0 * std::log2(juce::jmax(1.0e-4, speed)) + pitch;
-
-        auto stretched = TimeStretchEngine::process(out, sampleRate, timeRatio, semitones);
+        // The same engine the real-time path runs (LofiStretch.h) -- Speed is tape (time and
+        // pitch together), Stretch is Paulstretch, Pitch is the lofi granular shifter.
+        auto stretched = TimeStretchEngine::process(out, sampleRate, speed, stretch, pitch);
         if (stretched.getNumSamples() > 0)
             out = std::move(stretched);
         // else: engine failure -- keep the un-stretched audio rather than nothing

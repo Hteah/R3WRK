@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "DragScanRender.h"
+#include "LofiStretch.h"
 #include "AudioDocument.h"
 #include "DesktopAudioCapture.h"
 #include "BiquadFilter.h"
@@ -9,7 +10,6 @@
 #include "PlexiphonEngine.h"
 #include "MimeophonEngine.h"
 
-namespace RubberBand { class RubberBandStretcher; }
 
 class R3WRKAudioProcessor : public juce::AudioProcessor
 {
@@ -107,9 +107,9 @@ public:
 
     // Live playback knobs (Speed/Pitch/Stretch) live on `document` now -- see
     // AudioDocument.h -- so the views can read them too, not just the audio thread. All
-    // three are realised by a real-time RubberBand stretcher on the playback stream; the
-    // stored audio is never touched. When all three are centred, playback bypasses
-    // RubberBand entirely (zero latency / zero cost).
+    // three are realised by R3WRK's own lofi engine (LofiStretch.h: tape Speed, Paulstretch
+    // Stretch, granular+grit Pitch) on the playback stream; the stored audio is never touched.
+    // When all three are centred, playback bypasses it entirely (zero latency / zero cost).
 
 private:
     double currentSampleRate = 44100.0;
@@ -179,7 +179,7 @@ private:
 
     //==============================================================================
     // Real-time pitch/tape engine, rebuilt in prepareToPlay().
-    std::unique_ptr<RubberBand::RubberBandStretcher> rtStretcher;
+    std::unique_ptr<r3wrk::LofiStretch> rtStretcher;   // Speed (tape) + Stretch (Paulstretch) + Pitch (lofi granular)
     int rtChannels = 2;
     juce::AudioBuffer<float> rtScratchIn, rtScratchOut;
     bool wasPlaying = false;        // edge-detect play start -> reset the stretcher
@@ -188,15 +188,15 @@ private:
     int  playbackDir = 1;           // +1 forward, -1 backward (ping-pong loop only); reset to
                                     // +1 at the start of every play pass
 
-    // Turning a knob during playback used to feed RubberBand a hard staircase of time-ratio /
-    // pitch-scale steps (one per block), which it renders as zipper noise / pops. Ramp both
-    // toward their target over ~120 ms instead -- multiplicative so equal ratio changes glide
-    // equally -- sampled once per block. `stretchRatioNeedsSnap` jumps straight to target on a
-    // fresh play pass / bypass<->engage flip so playback doesn't start with a 120 ms slide.
-    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Multiplicative> smoothedTimeRatio  { 1.0 };
-    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Multiplicative> smoothedPitchScale { 1.0 };
-    double lastAppliedTimeRatio  = -1.0;
-    double lastAppliedPitchScale = -1.0;
+    // Turning a knob during playback shouldn't hand the stretcher a staircase of steps (one per
+    // block -- zipper noise / pops). Ramp each toward its target over ~120 ms instead (speed and
+    // stretch multiplicatively, so equal ratio changes glide equally), sampled once per block.
+    // `stretchRatioNeedsSnap` jumps straight to target on a fresh play pass / bypass<->engage
+    // flip so playback doesn't start with a 120 ms slide.
+    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Multiplicative> smoothedSpeed   { 1.0 };
+    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Multiplicative> smoothedStretch { 1.0 };
+    juce::SmoothedValue<double, juce::ValueSmoothingTypes::Linear>         smoothedPitchSemis { 0.0 };
+    double lastAppliedTimeRatio = 1.0;   // stretch / speed as last applied -- source frames per output frame, inverted
     bool   stretchRatioNeedsSnap = true;
 
     // Dragging the Start/End knobs during playback moves the region under a live playhead;
@@ -259,11 +259,11 @@ private:
     // [regionStart, regionEnd) it settles to plain 1x forward and genuinely loops within it,
     // wrapping by subtracting the region length so the fractional position stays continuous
     // across the wrap too (with a loop-edge crossfade, so *that* doesn't click either -- see
-    // DragScanRender.h for why its region edges move per sample, not per block). Plain (non-RubberBand) path only -- continuously perturbing
-    // the read position under renderPlaybackStretched confused it into sustained distortion
-    // when a discrete version of this was first tried (reverted as eb4ec70/9376798); the
-    // RubberBand-engaged case keeps the ordinary hard-snap-and-declick path, unimproved but no
-    // worse than it's always been. `dragScanActive` is false until the first dragging block
+    // DragScanRender.h for why its region edges move per sample, not per block). With the
+    // Speed/Pitch/Stretch knobs engaged the same renderer feeds the stretcher's input instead
+    // (renderDragScanStretched) -- a *discrete* per-block version of that once confused the old
+    // Rubber Band stretcher into sustained distortion (reverted as eb4ec70/9376798); the
+    // continuous read is what made it work. `dragScanActive` is false until the first dragging block
     // seeds `dragScanPos` from the live playhead, and again on release so the next drag (or a
     // handoff to the stretched path) starts fresh and the final position gets committed back to
     // `document.playhead`.
@@ -448,11 +448,11 @@ private:
     // Ramps the stretcher's time ratio / pitch scale toward the knobs (shared by both stretched
     // renderers below).
     void updateStretchRatios (int numSamples, double speed, double pitch, double stretch);
-    // Dragging a loop edge on a time-stretched file: RubberBand is fed by the drag renderer
+    // Dragging a loop edge on a time-stretched file: the stretcher is fed by the drag renderer
     // (dragscan::renderBlock -- a continuous read that never jumps) instead of gatherRegion.
     // The ordinary stretched path snapped the playhead back into the moving window on almost
-    // every block of a drag, feeding RubberBand a splice ~80 times a second -- the crackle heard
-    // until the loop settled (and the output-side declick couldn't hide it: RubberBand's latency
+    // every block of a drag, feeding the stretcher a splice ~80 times a second -- the crackle heard
+    // until the loop settled (and the output-side declick couldn't hide it: the stretcher's latency
     // puts the splice tens of ms after the ramp). Measured offline with the real stretcher:
     // 111-135 clicks in 2 s of dragging before, 0 after (SmokeTest "[DragScan] stretched").
     void renderDragScanStretched (juce::AudioBuffer<float>& out, int numCh, int numSamples,
@@ -461,14 +461,14 @@ private:
                                   bool loop, double maxFadeLen,
                                   double speed, double pitch, double stretch);
     // Releasing a drag on a stretched file: the same release crossfade as the plain path, but
-    // applied to RubberBand's *input* (the output is stretched audio -- an unstretched old tail
+    // applied to the stretcher's *input* (the output is stretched audio -- an unstretched old tail
     // can't be blended into it). Mixed into the first gathered input frames after release.
     juce::AudioBuffer<float> releaseInputTail;
     int releaseInputTailLen = 0, releaseInputTailRemaining = 0;
 
     // Scrub tool: a plain variable-rate (and reversible) read of the stored audio, driven by
     // AudioDocument::scrubVelocity -- see the class comment there. Deliberately *not* run
-    // through RubberBand: pitch tracking speed/direction one-to-one is the point (a real
+    // through the stretcher: pitch tracking speed/direction one-to-one is the point (a real
     // tape or turntable does the same), not a separate DSP mode to maintain.
     double scrubReadPos = 0.0;     // audio-thread-only fractional read cursor, raw samples
     bool wasScrubbing = false;     // edge-detect scrub start, so scrubReadPos picks up from

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 R3WRK is an Edison-style pop-out audio recorder/editor, built as a JUCE plugin (VST3 + AU +
 Standalone app): waveform + spectrogram views, record/play/loop, cut/copy/paste/trim/delete/undo,
-normalize/gain/fade/reverse/silence, RubberBand-powered time-stretch & pitch-shift, export-selection
+normalize/gain/fade/reverse/silence, lofi time/pitch effects (tape Speed, Paulstretch Stretch, granular+grit Pitch), export-selection
 to WAV, a live knob row (tape Speed/Pitch/Stretch, a Monomachine-modelled multimode filter,
 Start/End selection), and an FX drawer (Mimeophon delay, Plexiphon reverb-FDN, Erbe-Verb reverb;
 LFO built but currently shelved/hidden). Builds and runs on macOS only (Apple Silicon, Xcode, JUCE
@@ -53,9 +53,9 @@ real bugs for free more than once (e.g. an `inf` under stress in the old direct-
 `add_subdirectory(../JUCE)`. `patches/*.patch` are small local edits to the vendored JUCE checkout
 itself (see `patches/README.md`); `build.sh` applies them automatically after a fresh clone.
 
-RubberBand has no CMake build — `CMakeLists.txt` fetches its source and compiles the single-file
-amalgamated unit (`single/RubberBandSingle.cpp`) into a static lib, unless a system copy is found
-via `pkg-config`.
+No third-party DSP libraries beyond JUCE: time/pitch is R3WRK's own `Source/LofiStretch.h`
+(Rubber Band, GPL, was removed on 2026-09-27 so R3WRK can be sold / closed-source with only a
+JUCE licence — don't reintroduce GPL code).
 
 ### Signing
 
@@ -92,9 +92,10 @@ selection is packed into one `std::atomic<uint64_t>` (`selPacked`) rather than t
 Plays the document region (selection, else loop points, else whole clip) from the buffer under a
 try-lock, then runs a fixed chain: **filter → gain → Mimeophon → Reverb → Plexiphon → capture-output**.
 Speed/Pitch/Stretch atomics on `AudioDocument` decide the playback engine: when all three are
-centred (1/0/1) it's a plain sample copy (zero latency); otherwise it routes through a real-time
-RubberBand stretcher built per `prepareToPlay` (`timeRatio = stretch/speed`,
-`pitchScale = speed * 2^(pitch/12)`). The stored audio is never modified by these — they're
+centred (1/0/1) it's a plain sample copy (zero latency); otherwise it routes through `r3wrk::LofiStretch` (`Source/LofiStretch.h`, built per
+`prepareToPlay`): Speed = tape varispeed (time + pitch together), Stretch = Paulstretch (always
+smeared — an effect, not a clean stretch), Pitch = granular shifter + 14.7 kHz/12-bit grit. The
+same engine does the offline bake (`TimeStretchEngine`), so exports sound like playback. The stored audio is never modified by these — they're
 non-destructive, baked into Save/Export only via `renderWithPlaybackKnobs`. The **scrub** path
 (dragging the playhead) duplicates this same filter/FX sequence rather than sharing code with the
 linear-playback branch, a deliberate small-duplication choice to avoid touching that

@@ -11,7 +11,7 @@
 #include "../Source/MimeophonEngine.h"
 #include "../Source/Theme.h"
 #include "../Source/DragScanRender.h"
-#include <rubberband/RubberBandStretcher.h>
+#include "../Source/LofiStretch.h"
 
 namespace
 {
@@ -404,7 +404,7 @@ int main()
 
     // --- time-stretch / pitch-shift ------------------------------------------
     {
-        std::cout << "-- time-stretch / pitch-shift (RubberBand) --" << std::endl;
+        std::cout << "-- time-stretch / pitch-shift (lofi engine: lengths) --" << std::endl;
         auto region = makeSineBuffer(1, (int) sr, sr, 440.0, 0.4f); // 1 second
 
         auto same = TimeStretchEngine::process(region, sr, 1.0, 0.0);
@@ -423,6 +423,98 @@ int main()
         checkNear((double) pitched.getNumSamples(), (double) region.getNumSamples(), sr * 0.02,
                   "pitch-only shift keeps length constant");
         check(pitched.getMagnitude(0, 0, pitched.getNumSamples()) > 0.05f, "pitched output is not silent");
+    }
+
+    // --- lofi engine character (LofiStretch.h): Paulstretch keeps pitch, Speed is tape,
+    // Pitch is granular + 14.7 kHz / 12-bit grit; never NaN, never silent, safe mid-stream moves
+    {
+        std::cout << "-- lofi engine: pitch, grit, stability --" << std::endl;
+        auto zcFreq = [&](const juce::AudioBuffer<float>& b, int from, int to)
+        {
+            int crossings = 0;
+            for (int i = from + 1; i < to; ++i)
+                if ((b.getSample(0, i - 1) < 0.0f) != (b.getSample(0, i) < 0.0f)) ++crossings;
+            return crossings / 2.0 / ((to - from) / sr);
+        };
+        auto finite = [](const juce::AudioBuffer<float>& b)
+        {
+            for (int c = 0; c < b.getNumChannels(); ++c)
+                for (int i = 0; i < b.getNumSamples(); ++i)
+                    if (! std::isfinite(b.getSample(c, i))) return false;
+            return true;
+        };
+        auto rms = [](const juce::AudioBuffer<float>& b, int from, int to) { return b.getRMSLevel(0, from, to - from); };
+        const auto tone = makeSineBuffer(2, (int) (sr * 2), sr, 440.0, 0.5f);
+        const float toneRms = rms(tone, 0, tone.getNumSamples());
+
+        const auto paul = TimeStretchEngine::process(tone, sr, 1.0, 4.0, 0.0);
+        const int pm0 = paul.getNumSamples() / 4, pm1 = paul.getNumSamples() * 3 / 4;
+        check(finite(paul), "Paulstretch x4: no NaN/inf");
+        checkNear(zcFreq(paul, pm0, pm1), 440.0, 440.0 * 0.03, "Paulstretch x4 keeps the 440 Hz pitch");
+        check(rms(paul, pm0, pm1) > toneRms * 0.3f && rms(paul, pm0, pm1) < toneRms * 2.0f,
+              juce::String::formatted("Paulstretch x4 level is sane (rms %.3f vs %.3f in)", rms(paul, pm0, pm1), toneRms));
+        check(paul.getMagnitude(1, pm0, pm1 - pm0) > 0.05f, "Paulstretch runs the second channel too");
+
+        const auto tape = TimeStretchEngine::process(tone, sr, 2.0, 1.0, 0.0);
+        checkNear((double) tape.getNumSamples(), tone.getNumSamples() * 0.5, 2.0, "Speed x2 halves the length (tape)");
+        checkNear(zcFreq(tape, tape.getNumSamples() / 4, tape.getNumSamples() * 3 / 4), 880.0, 880.0 * 0.03, "Speed x2 doubles the pitch (tape)");
+
+        const auto up = TimeStretchEngine::process(tone, sr, 1.0, 1.0, 12.0);
+        const int um0 = up.getNumSamples() / 4, um1 = up.getNumSamples() * 3 / 4;
+        checkNear((double) up.getNumSamples(), (double) tone.getNumSamples(), 2.0, "Pitch +12 keeps the length");
+        checkNear(zcFreq(up, um0, um1), 880.0, 880.0 * 0.06, "Pitch +12 lands near 880 Hz (granular, so roughly)");
+        int held = 0, onGrid = 0;
+        for (int i = um0 + 1; i < um1; ++i)
+        {
+            const float v = up.getSample(0, i);
+            held += v == up.getSample(0, i - 1) ? 1 : 0;
+            onGrid += std::abs(v * 2048.0f - std::round(v * 2048.0f)) < 1.0e-3f ? 1 : 0;
+        }
+        check(held > (um1 - um0) / 2, "Pitch grit: samples are held (14.7 kHz sample-and-hold)");
+        check(onGrid == um1 - um0 - 1, "Pitch grit: every sample sits on the 12-bit grid");
+        check(finite(up), "Pitch +12: no NaN/inf");
+
+        const auto dry = TimeStretchEngine::process(tone, sr, 1.0, 1.0, 0.0);
+        float maxDiff = 0.0f;
+        for (int i = 0; i < dry.getNumSamples(); ++i) maxDiff = std::max(maxDiff, std::abs(dry.getSample(0, i) - tone.getSample(0, i)));
+        check(maxDiff < 1.0e-6f, "all knobs centred: the engine passes audio through untouched");
+
+        // Real-time use, as PluginProcessor drives it: 512-sample blocks, input on demand, and the
+        // knobs moving mid-stream (speed 1->2, stretch 1->3 switching Paulstretch on, pitch 0->+7).
+        r3wrk::LofiStretch eng;
+        eng.prepare(sr, 2);
+        eng.setParams(1.0, 1.0, 0.0);
+        eng.reset();
+        juce::AudioBuffer<float> inB(2, 8192), outB(2, 512);
+        int64_t readPos = 0;
+        float peak = 0.0f; bool ok = true; int silentBlocks = 0;
+        for (int b = 0; b < (int) (6.0 * sr / 512); ++b)
+        {
+            const double t = b * 512 / sr;
+            eng.setParams(1.0 + juce::jlimit(0.0, 1.0, t - 1.0), 1.0 + 2.0 * juce::jlimit(0.0, 1.0, t - 2.0), 7.0 * juce::jlimit(0.0, 1.0, t - 3.0));
+            int produced = 0, guard = 5000;
+            while (produced < 512 && --guard > 0)
+            {
+                if (eng.available() > 0)
+                {
+                    float* op[2] = { outB.getWritePointer(0, produced), outB.getWritePointer(1, produced) };
+                    produced += eng.retrieve(op, 512 - produced);
+                    continue;
+                }
+                const int req = juce::jlimit(1, 8192, eng.getSamplesRequired() > 0 ? eng.getSamplesRequired() : 256);
+                for (int i = 0; i < req; ++i, ++readPos)
+                    for (int c = 0; c < 2; ++c)
+                        inB.setSample(c, i, tone.getSample(c, (int) (readPos % tone.getNumSamples())));
+                const float* ip[2] = { inB.getReadPointer(0), inB.getReadPointer(1) };
+                eng.process(ip, req, false);
+            }
+            ok = ok && produced == 512;
+            for (int i = 0; i < 512; ++i) { ok = ok && std::isfinite(outB.getSample(0, i)); peak = std::max(peak, std::abs(outB.getSample(0, i))); }
+            if (t > 3.5 && outB.getMagnitude(0, 0, 512) < 0.01f) ++silentBlocks;
+        }
+        check(ok, "real-time: every block filled, no NaN/inf while the knobs move");
+        check(peak < 2.0f, juce::String::formatted("real-time: output stays bounded (peak %.2f)", peak));
+        check(silentBlocks == 0, juce::String::formatted("real-time: no dropouts once everything is engaged (%d silent blocks)", silentBlocks));
     }
 
     // --- replaceRangeWith used end-to-end (this is what the stretch tool calls) --
@@ -1675,7 +1767,7 @@ int main()
 
     {
         std::cout << "\n[DragScan] stretched: dragging and releasing a loop on a time-stretched file" << std::endl;
-        // Real RubberBand (same options as the plugin) at time ratio 2 and 0.5. Mirrors
+        // The real stretcher the plugin runs (LofiStretch: Paulstretch) at stretch 2 and 0.5. Mirrors
         // processBlock's stretched drag: the region slews once per block; "before" snaps the
         // playhead into the window whenever it falls outside (+ the output-side 8 ms ramp), "after"
         // feeds RubberBand from dragscan::renderBlock with edges placed by input fed / expected
@@ -1683,7 +1775,6 @@ int main()
         // target, a stray playhead jumps to the loop start, with and without the input-side
         // renderReleaseTail blend. Material: two sines -- any step past ~3x the fastest legit
         // slope (at the 2x catch-up read) is a click.
-        using RB = RubberBand::RubberBandStretcher;
         const double sr = 44100.0;
         const int block = 512, xfade = 441, declick = (int) (0.008 * sr);
         const double twoPi = 2 * juce::MathConstants<double>::pi;
@@ -1707,8 +1798,10 @@ int main()
         for (const auto& sc : scs)
         for (int after = 0; after < 2; ++after)
         {
-            RB rb((size_t) sr, 1, RB::OptionProcessRealTime | RB::OptionPitchHighConsistency);
-            rb.setTimeRatio(timeRatio);
+            r3wrk::LofiStretch rb;
+            rb.prepare(sr, 1);
+            rb.setParams(1.0, timeRatio, 0.0);
+            rb.reset();
             juce::AudioBuffer<float> in(1, 16384), outB(1, block), tail;
             double ds = sc.s(0), de = sc.e(0), dpos = ds;
             dragscan::Relocation rel;
@@ -1758,7 +1851,7 @@ int main()
                 while (produced < block && --guard > 0)
                 {
                     const int avail = (int) rb.available();
-                    if (avail > 0) { const int n = std::min(avail, block - produced); float* op[1] = { outB.getWritePointer(0, produced) }; rb.retrieve(op, (size_t) n); produced += n; continue; }
+                    if (avail > 0) { const int n = std::min(avail, block - produced); float* op[1] = { outB.getWritePointer(0, produced) }; rb.retrieve(op, n); produced += n; continue; }
                     int req = (int) rb.getSamplesRequired(); req = juce::jlimit(1, 16384, req > 0 ? req : 256);
                     in.clear();
                     if (dragRender)
@@ -1783,7 +1876,7 @@ int main()
                     }
                     fed += req;
                     const float* ip[1] = { in.getReadPointer(0) };
-                    rb.process(ip, (size_t) req, false);
+                    rb.process(ip, req, false);
                 }
                 for (int i = 0; i < block; ++i)
                 {
