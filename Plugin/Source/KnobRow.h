@@ -41,6 +41,15 @@ public:
     void resized() override;
     void paint(juce::Graphics&) override;   // faint group dividers between the knob sections
 
+    // The last knob's (End's) x range, in this component's coordinates -- the FX drawer spaces
+    // its effects so its Gain knob sits right under it (FxRow::setGainColumn).
+    juce::Range<int> getLastColumnXRange() const
+    {
+        if (knobs.isEmpty()) return {};
+        const auto b = knobs.getLast()->slider.getBounds();
+        return { b.getX(), b.getRight() };
+    }
+
 private:
     void timerCallback() override;
     void changeListenerCallback(juce::ChangeBroadcaster*) override;   // theme changed

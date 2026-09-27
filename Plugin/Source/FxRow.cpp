@@ -92,18 +92,29 @@ void FxRow::resized()
     // so these read the same size as the top row's.
     constexpr int panelW = 32 + 3 + (53 + 3) * 2 + 20;   // 167
 
+    // With Gain showing and End's position known, spread the three gaps evenly so Gain's column
+    // starts exactly where End's does (clamped so the effects never touch or drift apart).
+    int gap = sectionGap, lastGap = sectionGap;
+    if (showGain && ! gainColumn.isEmpty())
+    {
+        const int total = gainColumn.getStart() - full.getX() - 3 * panelW;
+        gap = juce::jlimit(4, 40, total / 3);
+        lastGap = juce::jlimit(4, 40, total - 2 * gap);   // takes the rounding remainder -> exact
+    }
+
     mimeoPanel.setBounds(full.removeFromLeft(juce::jmin(panelW, full.getWidth())));
-    full.removeFromLeft(sectionGap);
+    full.removeFromLeft(gap);
 
     plexPanel.setBounds(full.removeFromLeft(juce::jmin(panelW, full.getWidth())));
-    full.removeFromLeft(sectionGap);
+    full.removeFromLeft(gap);
 
     reverbPanel.setBounds(full.removeFromLeft(juce::jmin(panelW, full.getWidth())));
 
-    if (showGain && full.getWidth() > sectionGap + 40)
+    if (showGain && full.getWidth() > lastGap + 40)
     {
-        full.removeFromLeft(sectionGap);
-        auto col = full.removeFromLeft(juce::jmin(53, full.getWidth()));   // KnobRow's knob width
+        full.removeFromLeft(lastGap);
+        const int w = gainColumn.isEmpty() ? 53 : gainColumn.getLength();   // End's width when known
+        auto col = full.removeFromLeft(juce::jmin(w, full.getWidth()));
         gainCaption.setBounds(col.removeFromTop(17));
         gainKnob.setBounds(col);
     }

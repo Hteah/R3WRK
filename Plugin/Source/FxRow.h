@@ -45,6 +45,10 @@ public:
     void resized() override;
     void paint(juce::Graphics&) override;
 
+    // Where the knob row's End knob sits (x range, this component's coordinates): the gaps
+    // between DLY / PLX / RVB are spread evenly so Gain lands right under End at any width.
+    void setGainColumn(juce::Range<int> col) { gainColumn = col; resized(); }
+
 private:
     void changeListenerCallback(juce::ChangeBroadcaster*) override;
     void timerCallback() override;   // Gain knob follows state loads / undo
@@ -61,6 +65,7 @@ private:
     // end of KnobRow to make room for Dirt. Styled like KnobRow's knobs.
     AudioDocument& document;
     const bool showGain;
+    juce::Range<int> gainColumn;   // empty until PluginEditor passes it
     R3WRKLookAndFeel gainLnF;
     juce::Label gainCaption;
     juce::Slider gainKnob;
