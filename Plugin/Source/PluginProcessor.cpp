@@ -9,7 +9,8 @@
 
 namespace
 {
-    constexpr int kStateMagic     = 0x52335753;   // 'R3WS' - adds Monitor DRY/FX
+    constexpr int kStateMagic     = 0x52335754;   // 'R3WT' - adds RTRG; RVB/PLX become one slot
+    constexpr int kStateMagicR3WS = 0x52335753;   // 'R3WS' - adds Monitor DRY/FX
     constexpr int kStateMagicR3WR = 0x52335752;   // 'R3WR' - adds Plexiphon v2 Couple / Skew
     constexpr int kStateMagicR3WQ = 0x52335751;   // 'R3WQ' - adds Overdub level / feedback / monitor
     constexpr int kStateMagicR3WP = 0x52335750;   // 'R3WP' - adds Dirt (drive / rate / bits)
@@ -161,6 +162,10 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     plexTailSamplesLeft = 0;
     plexTailSilentSamples = 0;
     lastPlexEngaged = false;
+
+    rtrgDsp.prepare(sampleRate, juce::jmax(1, getTotalNumOutputChannels()));
+    reverbRingingOut = plexRingingOut = false;
+    lastReverbSelected = document.reverbEnabled.load();
 
     mimeoDsp.prepare(sampleRate);
     constexpr double mimeoRampSeconds = 0.05;
@@ -477,6 +482,17 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     const int numSamples = buffer.getNumSamples();
     const int numCh = buffer.getNumChannels();
 
+    // RTRG's tempo: the host's when it has one (VST/AU), else the popup's BPM (Standalone).
+    {
+        double hostBpm = 0.0;
+        if (auto* ph = getPlayHead())
+            if (auto pos = ph->getPosition())
+                if (auto b = pos->getBpm())
+                    hostBpm = *b;
+        document.rtrgHostBpm.store(hostBpm, std::memory_order_relaxed);
+        rtrgTempo = hostBpm > 0.0 ? hostBpm : document.rtrgBpm.load(std::memory_order_relaxed);
+    }
+
     // Black Box: snapshot the raw input now, before anything below can touch `buffer` --
     // appended for the branches where the input genuinely passes through (idle, recording); the
     // playback/scrub branches append their own rendered `buffer` instead, right where
@@ -597,9 +613,9 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         r3wrk::zeroNonFinite(buffer, numCh, numSamples);   // safety net -- see the playing branch
         applyDirt(buffer, numCh, numSamples, ! wasScrubbing);
         applyPlaybackFilter(buffer, numCh, 0, numSamples, ! wasScrubbing);
+        applyRetrig(buffer, numCh, numSamples, ! wasScrubbing);
         applyMimeophon(buffer, numCh, numSamples, ! wasScrubbing);
-        applyReverb(buffer, numCh, numSamples, ! wasScrubbing);
-        applyPlexiphon(buffer, numCh, numSamples, ! wasScrubbing);
+        applySpaceSlot(buffer, numCh, numSamples, ! wasScrubbing);   // RVB or PLX
         applyPlaybackGain(buffer, numCh, 0, numSamples, {});   // volume, last; LFOs don't run while scrubbing
         r3wrk::zeroNonFinite(buffer, numCh, numSamples);   // safety net: never hand the host a NaN
         captureOutput(buffer, numCh, numSamples);
@@ -1092,6 +1108,9 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             lfoModDone += chunk;
         }
 
+        // RTRG, right after the filter -- the first drawer effect, so DLY/RVB/PLX echo the stutter.
+        applyRetrig(buffer, numCh, numSamples, ! wasPlaying);
+
         // Mimeophon, after filter and gain, before Reverb/Plexiphon -- a conventional "delay
         // before reverb" chain position, and matches the FX drawer's own left-to-right slot
         // order (Delay is the leftmost slot). Unchunked: not LFO-modulated in phase 1.
@@ -1100,11 +1119,8 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         // Reverb, after filter/gain/Mimeophon -- like a send on the end of the strip. Unchunked:
         // not LFO-modulated in phase 1, so nothing here needs kLfoModUpdateSamples's finer
         // update rate. freshPlayPass primes it the same way the filter/gain above do.
-        applyReverb(buffer, numCh, numSamples, ! wasPlaying);
-
-        // Plexiphon, after Reverb -- an arbitrary but reasonable "read the FX drawer left to
-        // right" chain order (LFO | Delay | Reverb | Plexiphon), not a hard requirement.
-        applyPlexiphon(buffer, numCh, numSamples, ! wasPlaying);
+        // RVB and PLX share one slot -- whichever's selected (see applySpaceSlot()).
+        applySpaceSlot(buffer, numCh, numSamples, ! wasPlaying);
 
         // Gain: the volume knob, after everything (effect tails included), in the same chunks
         // the LFOs ticked in above.
@@ -1145,12 +1161,13 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     {
         const bool reverbEngaged = document.reverbEnabled.load(std::memory_order_relaxed)
                                     && document.reverbMix.load(std::memory_order_relaxed) > 0.001;
-        reverbTailSamplesLeft = reverbEngaged ? (int) (currentSampleRate * 300.0) : 0;
+        reverbTailSamplesLeft = (reverbEngaged || reverbRingingOut) ? (int) (currentSampleRate * 300.0) : 0;
         reverbTailSilentSamples = 0;
 
         const bool plexEngaged = document.plexEnabled.load(std::memory_order_relaxed)
                                  && document.plexMix.load(std::memory_order_relaxed) > 0.001;
-        plexTailSamplesLeft = plexEngaged ? (int) (currentSampleRate * 300.0) : 0;
+        plexTailSamplesLeft = (plexEngaged || plexRingingOut) ? (int) (currentSampleRate * 300.0) : 0;
+        reverbRingingOut = plexRingingOut = false;   // (a switch ring-out carries on as the idle tail)
         plexTailSilentSamples = 0;
 
         const bool mimeoEngaged = document.mimeoEnabled.load(std::memory_order_relaxed)
@@ -1663,7 +1680,7 @@ float R3WRKAudioProcessor::applyReverb(juce::AudioBuffer<float>& buffer, int num
     const double predelay = smoothedReverbPredelay.skip(numSamples);
     const double width    = smoothedReverbWidth.skip(numSamples);
 
-    const bool engaged = document.reverbEnabled.load(std::memory_order_relaxed) && mix > 0.001;
+    const bool engaged = (document.reverbEnabled.load(std::memory_order_relaxed) || tailOnly) && mix > 0.001;   // tailOnly: also a deselected model ringing out
 
     // Same reasoning as applyPlaybackFilter()'s: stale delay-line content computed under very
     // different parameters, suddenly fed fresh coefficients, can behave surprisingly. A manual
@@ -1761,7 +1778,7 @@ float R3WRKAudioProcessor::applyPlexiphon(juce::AudioBuffer<float>& buffer, int 
     const double couple  = smoothedPlexCouple.skip(numSamples);
     const double skew    = smoothedPlexSkew.skip(numSamples);
 
-    const bool engaged = document.plexEnabled.load(std::memory_order_relaxed) && mix > 0.001;
+    const bool engaged = (document.plexEnabled.load(std::memory_order_relaxed) || tailOnly) && mix > 0.001;
 
     if (engaged && ! lastPlexEngaged)
         plexDsp.reset();
@@ -1802,6 +1819,50 @@ float R3WRKAudioProcessor::applyPlexiphon(juce::AudioBuffer<float>& buffer, int 
         }
     }
     return peak;
+}
+
+void R3WRKAudioProcessor::applyRetrig(juce::AudioBuffer<float>& buffer, int numCh, int numSamples,
+                                      bool freshPlayPass)
+{
+    if (freshPlayPass)
+        rtrgDsp.reset();   // a new pass never stutters audio left over from the last one
+    rtrgDsp.process(buffer.getArrayOfWritePointers(), numCh, numSamples,
+                    document.rtrgLatched.load(std::memory_order_relaxed),
+                    document.rtrgTime.load(std::memory_order_relaxed),
+                    document.rtrgFade.load(std::memory_order_relaxed),
+                    document.rtrgSync.load(std::memory_order_relaxed), rtrgTempo);
+    document.rtrgStuttering.store(rtrgDsp.isStuttering(), std::memory_order_relaxed);
+}
+
+void R3WRKAudioProcessor::applySpaceSlot(juce::AudioBuffer<float>& buffer, int numCh, int numSamples,
+                                         bool freshPlayPass)
+{
+    const bool reverbSelected = document.reverbEnabled.load(std::memory_order_relaxed);
+    if (reverbSelected != lastReverbSelected)
+    {
+        // Switched: the model you left keeps ringing out (if it was sounding); the one you
+        // switched to stops ringing out and plays normally, its tail carrying straight on.
+        reverbRingingOut = ! reverbSelected && lastReverbEngaged;
+        plexRingingOut   = reverbSelected && lastPlexEngaged;
+        ringOutSilentSamples = 0;
+        ringOutSamplesLeft = (int) (currentSampleRate * 300.0);   // same generous ceiling as the idle tails
+        lastReverbSelected = reverbSelected;
+    }
+
+    if (reverbSelected)
+        applyReverb(buffer, numCh, numSamples, freshPlayPass);
+    else
+        applyPlexiphon(buffer, numCh, numSamples, freshPlayPass);
+
+    if (reverbRingingOut || plexRingingOut)
+    {
+        const float wetPeak = reverbRingingOut ? applyReverb(buffer, numCh, numSamples, false, true)
+                                               : applyPlexiphon(buffer, numCh, numSamples, false, true);
+        ringOutSamplesLeft -= numSamples;
+        ringOutSilentSamples = wetPeak > 0.0005f ? 0 : ringOutSilentSamples + numSamples;
+        if (ringOutSilentSamples > (int) (currentSampleRate * 2.0) || ringOutSamplesLeft <= 0)
+            reverbRingingOut = plexRingingOut = false;
+    }
 }
 
 float R3WRKAudioProcessor::applyMimeophon(juce::AudioBuffer<float>& buffer, int numCh, int numSamples,
@@ -2378,6 +2439,10 @@ void R3WRKAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     out.writeDouble(document.plexCouple.load());        // R3WR+
     out.writeDouble(document.plexSkew.load());
     out.writeBool(document.overdubMonitorFx.load());    // R3WS+
+    out.writeDouble(document.rtrgTime.load());          // R3WT+
+    out.writeDouble(document.rtrgFade.load());
+    out.writeBool(document.rtrgSync.load());
+    out.writeDouble(document.rtrgBpm.load());
 
     auto& buf = document.getBuffer();
     for (int ch = 0; ch < buf.getNumChannels(); ++ch)
@@ -2393,7 +2458,7 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     juce::MemoryInputStream in(data, (size_t) sizeInBytes, false);
     const int magic = in.readInt();
-    if (magic != kStateMagic && magic != kStateMagicR3WR && magic != kStateMagicR3WQ && magic != kStateMagicR3WP && magic != kStateMagicR3WO && magic != kStateMagicR3WN && magic != kStateMagicR3WM && magic != kStateMagicR3WL && magic != kStateMagicR3WK && magic != kStateMagicR3WJ && magic != kStateMagicR3WI && magic != kStateMagicR3WH && magic != kStateMagicR3WG && magic != kStateMagicR3WF && magic != kStateMagicR3WE && magic != kStateMagicR3WD
+    if (magic != kStateMagic && magic != kStateMagicR3WS && magic != kStateMagicR3WR && magic != kStateMagicR3WQ && magic != kStateMagicR3WP && magic != kStateMagicR3WO && magic != kStateMagicR3WN && magic != kStateMagicR3WM && magic != kStateMagicR3WL && magic != kStateMagicR3WK && magic != kStateMagicR3WJ && magic != kStateMagicR3WI && magic != kStateMagicR3WH && magic != kStateMagicR3WG && magic != kStateMagicR3WF && magic != kStateMagicR3WE && magic != kStateMagicR3WD
         && magic != kStateMagicR3WC && magic != kStateMagicR3WB && magic != kStateMagicR3WA
         && magic != kStateMagicR3W9 && magic != kStateMagicR3W8 && magic != kStateMagicR3W7
         && magic != kStateMagicR3W6 && magic != kStateMagicR3W5)
@@ -2413,7 +2478,8 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     // MnM model). R3W8..R3WA: the old OT-style Base/Width filter with a single resonance
     // (+ later Drive, + later 12/24 slope). R3W6/R3W7: the even older mode/cutoff filter.
     // R3W5: none.
-    const bool hasMonitorFx        = (magic == kStateMagic);                                  // R3WS
+    const bool hasRtrg             = (magic == kStateMagic);                                  // R3WT
+    const bool hasMonitorFx        = (hasRtrg || magic == kStateMagicR3WS);                   // R3WS+
     const bool hasPlexStereo       = (hasMonitorFx || magic == kStateMagicR3WR);              // R3WR+
     const bool hasOverdub          = (hasPlexStereo || magic == kStateMagicR3WQ);             // R3WQ+
     const bool hasDirt             = (hasOverdub || magic == kStateMagicR3WP);                // R3WP+
@@ -2603,6 +2669,24 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
         pxSkew   = in.readDouble();
     }
     const bool monFx = hasMonitorFx ? in.readBool() : false;
+    double rtTime = 0.55, rtFade = 0.5, rtBpm = 120.0; bool rtSync = true;   // older projects: defaults
+    if (hasRtrg)
+    {
+        rtTime = in.readDouble();
+        rtFade = in.readDouble();
+        rtSync = in.readBool();
+        rtBpm  = in.readDouble();
+    }
+    else
+    {
+        // Before R3WT, RVB and PLX had their own on/off; now they share one slot and MIX 0 is
+        // "off". A switched-off effect gets MIX 0 so nothing starts sounding, and the selected
+        // model is RVB unless only PLX was on.
+        if (! rvEnabled) rvMix = 0.0;
+        if (! pxEnabled) pxMix = 0.0;
+        rvEnabled = rvEnabled || ! pxEnabled;
+        pxEnabled = ! rvEnabled;
+    }
 
     if (numCh <= 0 || numCh > kMaxStateChannels || numSamples < 0 || numSamples > 0x7fffffff)
         return;
@@ -2691,6 +2775,11 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     document.overdubMonitorFx.store(monFx);
     document.plexCouple.store(juce::jlimit(0.0, 1.0, pxCouple));
     document.plexSkew.store(juce::jlimit(0.0, 1.0, pxSkew));
+    document.rtrgTime.store(juce::jlimit(0.0, 1.0, rtTime));
+    document.rtrgFade.store(juce::jlimit(0.0, 1.0, rtFade));
+    document.rtrgSync.store(rtSync);
+    document.rtrgBpm.store(juce::jlimit(20.0, 300.0, rtBpm));
+    document.rtrgLatched.store(false);
 
     document.setSourceFilePath(sourceFilePath);   // "" on an older state blob -- header shows "Untitled"
 

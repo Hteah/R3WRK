@@ -11,6 +11,7 @@
 #include "ReverbEngine.h"
 #include "PlexiphonEngine.h"
 #include "MimeophonEngine.h"
+#include "RetrigEngine.h"
 
 
 class R3WRKAudioProcessor : public juce::AudioProcessor
@@ -447,6 +448,20 @@ private:
     bool lastPlexEngaged = false;
     float applyPlexiphon (juce::AudioBuffer<float>& buffer, int numCh, int numSamples, bool freshPlayPass,
                          bool tailOnly = false);
+
+    // The RVB / PLX "space" slot: runs whichever model is selected (reverbEnabled / plexEnabled)
+    // and lets the one you just switched away from ring out (tailOnly, fed silence) until it's
+    // quiet, instead of cutting its tail off.
+    bool lastReverbSelected = true;
+    bool reverbRingingOut = false, plexRingingOut = false;
+    int  ringOutSilentSamples = 0, ringOutSamplesLeft = 0;
+    void applySpaceSlot (juce::AudioBuffer<float>& buffer, int numCh, int numSamples, bool freshPlayPass);
+
+    // RTRG (r3wrk::RetrigEngine, RetrigEngine.h): after the filter, before Mimeophon. Tempo is
+    // the host's (VST/AU) or the RTRG popup's BPM (Standalone), see processBlock.
+    r3wrk::RetrigEngine rtrgDsp;
+    double rtrgTempo = 120.0;
+    void applyRetrig (juce::AudioBuffer<float>& buffer, int numCh, int numSamples, bool freshPlayPass);
 
     // Mimeophon (r3wrk::MimeophonEngine, MimeophonEngine.h) -- phase 1: core delay engine, live
     // monitoring, not baked into Save/Export. Exact structural mirror of the Reverb/Plexiphon

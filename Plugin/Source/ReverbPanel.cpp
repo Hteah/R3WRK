@@ -93,13 +93,15 @@ namespace
 
 ReverbPanel::ReverbPanel(AudioDocument& doc) : document(doc)
 {
+    // RVB and PLX share one drawer slot: this pill switches the slot to PLX (FxRow shows
+    // whichever is selected). It's lit while this model is audible (MIX above 0) -- there's no
+    // separate on/off.
     enablePill.onClick = [this]
     {
-        const bool on = ! document.reverbEnabled.load();
-        document.reverbEnabled.store(on);
-        enablePill.on = on;
-        enablePill.repaint();
+        document.plexEnabled.store(true);
+        document.reverbEnabled.store(false);
     };
+    enablePill.setTooltip("RVB -- click to switch this slot to PLX. MIX 0 = silent");
     addAndMakeVisible(enablePill);
 
     auto setUpKnob = [this](Knob& k, const juce::String& caption, std::atomic<double>& target)
@@ -144,7 +146,7 @@ void ReverbPanel::timerCallback()
     // Low-rate re-sync so an external change (a state/project load, undo) is reflected even
     // though this panel stays on screen continuously -- LfoPanel's timerCallback does the same.
     // Skip a slider the user's actively dragging, so this never fights their gesture.
-    const bool on = document.reverbEnabled.load();
+    const bool on = document.reverbMix.load() > 0.001;   // lit = audible (see the pill's onClick)
     if (on != enablePill.on) { enablePill.on = on; enablePill.repaint(); }
 
     auto resync = [](juce::Slider& s, double docVal)

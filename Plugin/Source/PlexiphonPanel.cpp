@@ -100,13 +100,15 @@ namespace
 
 PlexiphonPanel::PlexiphonPanel(AudioDocument& doc) : document(doc)
 {
+    // RVB and PLX share one drawer slot: this pill switches the slot to RVB (FxRow shows
+    // whichever is selected). It's lit while this model is audible (MIX above 0) -- there's no
+    // separate on/off.
     enablePill.onClick = [this]
     {
-        const bool on = ! document.plexEnabled.load();
-        document.plexEnabled.store(on);
-        enablePill.on = on;
-        enablePill.repaint();
+        document.reverbEnabled.store(true);
+        document.plexEnabled.store(false);
     };
+    enablePill.setTooltip("PLX -- click to switch this slot to RVB. MIX 0 = silent");
     addAndMakeVisible(enablePill);
 
     auto setUpKnob = [this](Knob& k, const juce::String& caption, std::atomic<double>& target)
@@ -150,7 +152,7 @@ void PlexiphonPanel::timerCallback()
 {
     // Low-rate re-sync so an external change (a state/project load, undo) is reflected even
     // though this panel stays on screen continuously -- ReverbPanel/LfoPanel do the same.
-    const bool on = document.plexEnabled.load();
+    const bool on = document.plexMix.load() > 0.001;   // lit = audible (see the pill's onClick)
     if (on != enablePill.on) { enablePill.on = on; enablePill.repaint(); }
 
     auto resync = [](juce::Slider& s, double docVal)

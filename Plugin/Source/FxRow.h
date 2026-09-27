@@ -5,6 +5,7 @@
 #include "ReverbPanel.h"
 #include "PlexiphonPanel.h"
 #include "MimeophonPanel.h"
+#include "RetrigPanel.h"
 #include "Theme.h"
 #include "R3WRKLookAndFeel.h"
 
@@ -13,7 +14,8 @@
     edge (see PluginEditor::toggleFxDrawer(), which grows the window by the drawer's height
     rather than displacing anything already on screen).
 
-    One row: Delay | Plexiphon | Reverb, left to right (Delay is Mimeophon -- see below). LFO
+    One row: RTRG | Delay | Reverb-or-Plexiphon (one shared slot) | Gain, left to right (Delay is
+    Mimeophon -- see below). LFO
     is still SHELVED, not deleted -- lfoPanel below is a real, fully wired member
     (PluginProcessor::tickLfos() still runs exactly as before; AudioDocument's lfoSlots fields
     still persist), just not addAndMakeVisible()'d or given a layout slot here, so it's a
@@ -51,14 +53,16 @@ public:
 
 private:
     void changeListenerCallback(juce::ChangeBroadcaster*) override;
-    void timerCallback() override;   // Gain knob follows state loads / undo
+    void timerCallback() override;   // Gain knob follows state loads / undo; RVB/PLX slot follows its switch
     void applyTheme();
 
     juce::SharedResourcePointer<ThemeManager> theme;
     LfoPanel lfoPanel;                // shelved -- see class comment; not shown, still fully wired
-    MimeophonPanel mimeoPanel;        // 1st slot -- real (replaced the old DELAY placeholder)
-    PlexiphonPanel plexPanel;         // 2nd slot -- real
-    ReverbPanel reverbPanel;          // 3rd slot -- real, back after being shelved
+    RetrigPanel retrigPanel;          // 1st slot -- RTRG buffer retrig
+    MimeophonPanel mimeoPanel;        // 2nd slot -- DLY
+    PlexiphonPanel plexPanel;         // 3rd slot, shared with reverbPanel: only the selected
+    ReverbPanel reverbPanel;          //   model's panel shows (its pill switches RVB <-> PLX)
+    void syncSpaceSlot();
 
     // Gain -- the output volume, last in the whole chain (after every effect, tails included;
     // see PluginProcessor::processBlock). Standalone only, same as before; moved here from the

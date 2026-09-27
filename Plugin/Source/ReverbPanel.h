@@ -37,7 +37,7 @@ private:
     // Small enable pill -- same rounded-pill visual language as FxRow::EnablePill / LfoPanel::
     // Row's own pill; each place draws its own rather than sharing one component (established
     // precedent -- see LfoPanel::Row::paint).
-    struct EnablePill : juce::Component
+    struct EnablePill : juce::Component, public juce::SettableTooltipClient
     {
         juce::Colour fill, ink, border;
         bool on = false, hovered = false;

@@ -36,7 +36,7 @@ private:
 
     // Small enable pill -- same visual language as ReverbPanel/LfoPanel's own (each place draws
     // its own rather than sharing one component -- established precedent).
-    struct EnablePill : juce::Component
+    struct EnablePill : juce::Component, public juce::SettableTooltipClient
     {
         juce::Colour fill, ink, border;
         bool on = false, hovered = false;

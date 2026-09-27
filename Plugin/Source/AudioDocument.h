@@ -371,7 +371,10 @@ public:
     // phase doesn't add yet). All 0..1 except reverbPredelay, which maps to 7-500ms the same way
     // FxRow reads out any other ms-ranged knob. Mix defaults to 0 (inert until touched), same
     // non-destructive-default convention as the filter/gain knobs above.
-    std::atomic<bool>   reverbEnabled  { false };
+    // RVB and PLX share one drawer slot ("space"): reverbEnabled / plexEnabled now mean "this
+    // model is the selected one" -- exactly one is true (RVB by default). There's no separate
+    // on/off: MIX 0 is silent. The deselected model's tail rings out when you switch.
+    std::atomic<bool>   reverbEnabled  { true };
     std::atomic<double> reverbSize     { 0.5 };
     std::atomic<double> reverbAbsorb   { 0.5 };
     std::atomic<double> reverbDecay    { 0.5 };
@@ -383,6 +386,20 @@ public:
     // default convention as the others -- adding this knob doesn't retroactively change the
     // sound of an existing saved session until it's actually turned.
     std::atomic<double> reverbWidth { 0.5 };
+
+    //==============================================================================
+    // RTRG (r3wrk::RetrigEngine, RetrigEngine.h) -- Octatrack-style buffer retrig, first in the FX
+    // drawer (after the filter, before DLY). rtrgLatched is the drawer pill (session-only, never
+    // saved -- a project shouldn't open mid-stutter). TIME 0..1 maps to a note value (synced) or
+    // 10 ms..1 s (free); FADE 0.5 = plain repeats, below = fade out, above = build up.
+    // rtrgBpm is the Standalone's tempo (VST/AU follow the host's).
+    std::atomic<bool>   rtrgLatched { false };
+    std::atomic<double> rtrgTime    { 0.55 };   // 1/16 synced
+    std::atomic<double> rtrgFade    { 0.5 };
+    std::atomic<bool>   rtrgSync    { true };
+    std::atomic<double> rtrgBpm     { 120.0 };
+    std::atomic<double> rtrgHostBpm { 0.0 };    // written by the audio thread (0 = no host tempo)
+    std::atomic<bool>   rtrgStuttering { false };   // audio thread -> pill (lit while repeating)
 
     //==============================================================================
     // Plexiphon (r3wrk::PlexiphonEngine, PlexiphonEngine.h) -- phase 1: mono core network

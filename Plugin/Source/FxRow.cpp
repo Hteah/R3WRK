@@ -2,16 +2,18 @@
 
 FxRow::FxRow(AudioDocument& doc, bool standalone)
     : lfoPanel(doc, standalone),
-      mimeoPanel(doc), plexPanel(doc), reverbPanel(doc),
+      retrigPanel(doc, standalone), mimeoPanel(doc), plexPanel(doc), reverbPanel(doc),
       document(doc), showGain(standalone)
 {
     // lfoPanel is SHELVED (see class comment) -- constructed and fully wired (its
     // PluginProcessor/AudioDocument side is untouched), just not shown or laid out here.
     // Deliberately no addAndMakeVisible() -- bringing it back is exactly that one line plus its
     // old slot in resized()/paint() below.
+    addAndMakeVisible(retrigPanel);
     addAndMakeVisible(mimeoPanel);
-    addAndMakeVisible(plexPanel);
-    addAndMakeVisible(reverbPanel);
+    addChildComponent(plexPanel);     // syncSpaceSlot() shows whichever model is selected
+    addChildComponent(reverbPanel);
+    syncSpaceSlot();
 
     if (showGain)
     {
@@ -35,8 +37,8 @@ FxRow::FxRow(AudioDocument& doc, bool standalone)
         gainKnob.updateText();
         gainKnob.onValueChange = [this] { document.playbackGainDb.store(gainKnob.getValue()); };
         addAndMakeVisible(gainKnob);
-        startTimerHz(15);
     }
+    startTimerHz(15);
 
     applyTheme();
     theme->addChangeListener(this);
@@ -48,9 +50,17 @@ FxRow::~FxRow()
     theme->removeChangeListener(this);
 }
 
+void FxRow::syncSpaceSlot()
+{
+    const bool reverb = document.reverbEnabled.load();
+    reverbPanel.setVisible(reverb);
+    plexPanel.setVisible(! reverb);
+}
+
 void FxRow::timerCallback()
 {
-    if (gainKnob.isMouseButtonDown())
+    syncSpaceSlot();
+    if (! showGain || gainKnob.isMouseButtonDown())
         return;
     const double db = document.playbackGainDb.load();
     if (std::abs(db - gainKnob.getValue()) > 1.0e-6)
@@ -77,7 +87,7 @@ void FxRow::applyTheme()
 
 void FxRow::resized()
 {
-    // One row, three slots: Delay (Mimeophon) | Plexiphon | Reverb. (LFO is shelved -- see
+    // One row, three slots: RTRG | Delay (Mimeophon) | Reverb-or-Plexiphon, then Gain. (LFO is shelved -- see
     // class comment -- and takes no space here.) All three are real Components, each packed to
     // its own CONTENT width -- not stretched across an equal third of the row -- same "packed
     // from the left, sized to content" idiom each panel already uses for its own internal
@@ -102,13 +112,15 @@ void FxRow::resized()
         lastGap = juce::jlimit(4, 40, total - 2 * gap);   // takes the rounding remainder -> exact
     }
 
+    retrigPanel.setBounds(full.removeFromLeft(juce::jmin(panelW, full.getWidth())));
+    full.removeFromLeft(gap);
+
     mimeoPanel.setBounds(full.removeFromLeft(juce::jmin(panelW, full.getWidth())));
     full.removeFromLeft(gap);
 
-    plexPanel.setBounds(full.removeFromLeft(juce::jmin(panelW, full.getWidth())));
-    full.removeFromLeft(gap);
-
-    reverbPanel.setBounds(full.removeFromLeft(juce::jmin(panelW, full.getWidth())));
+    const auto spaceSlot = full.removeFromLeft(juce::jmin(panelW, full.getWidth()));   // RVB or PLX
+    plexPanel.setBounds(spaceSlot);
+    reverbPanel.setBounds(spaceSlot);
 
     if (showGain && full.getWidth() > lastGap + 40)
     {

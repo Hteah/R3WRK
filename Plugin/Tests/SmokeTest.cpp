@@ -18,6 +18,7 @@
 #include "../Source/OverdubWriter.h"
 #include "../Source/RegionGather.h"
 #include "../Source/AudioSafety.h"
+#include "../Source/RetrigEngine.h"
 
 namespace
 {
@@ -765,6 +766,104 @@ int main()
         check(r3wrk::liveInputChannels(in, 2, 128) == 2, "any real signal on the right -> stays stereo");
         in.clear();
         check(r3wrk::liveInputChannels(in, 2, 128) == 2, "both silent -> left as stereo");
+    }
+
+    // --- RTRG: Octatrack-style buffer retrig (RetrigEngine.h) -----------------------
+    {
+        std::cout << "-- RTRG buffer retrig --" << std::endl;
+        const int n = (int) sr * 2;
+        auto ramp = [&](int i) { return (float) (0.3 * std::sin(2 * juce::MathConstants<double>::pi * 110.0 * i / sr) + 0.00002 * (i % 5000)); };
+        auto run = [&](std::function<bool(int)> latched, double time01, double fade01, bool synced, double bpm,
+                       std::vector<float>& out, std::function<double(int)> timeAt = nullptr)
+        {
+            r3wrk::RetrigEngine e; e.prepare(sr, 1);
+            out.assign((size_t) n, 0.0f);
+            for (int i = 0; i < n; ++i) out[(size_t) i] = ramp(i);
+            for (int off = 0; off < n; off += 256)
+            {
+                float* ch[1] = { out.data() + off };
+                e.process(ch, 1, std::min(256, n - off), latched(off), timeAt ? timeAt(off) : time01, fade01, synced, bpm);
+            }
+        };
+        std::vector<float> y;
+
+        run([](int) { return false; }, 0.5, 0.5, true, 120, y);
+        bool same = true; for (int i = 0; i < n; ++i) same = same && y[(size_t) i] == ramp(i);
+        check(same, "RTRG off: audio passes through untouched (bit-exact)");
+
+        // 1/16 at 120 BPM = 125 ms. Latched at 0.5 s: from then on the output repeats every 125 ms,
+        // and each repeat is the 125 ms that played just before the click.
+        const double t116 = (5 + 0.5) / r3wrk::RetrigEngine::kNumNotes;
+        check(std::string(r3wrk::RetrigEngine::kNotes[r3wrk::RetrigEngine::noteIndex(t116)].name) == "1/16", "TIME maps to 1/16");
+        const int latchAt = ((int) (sr * 0.5) / 256) * 256, period = (int) std::lround(0.125 * sr);   // on a block edge
+        run([&](int off) { return off >= latchAt; }, t116, 0.5, true, 120, y);
+        float worstRepeat = 0, worstSource = 0;
+        const int edge = (int) std::lround(0.003 * sr) + 2;
+        for (int k = 1; k < 5; ++k)
+            for (int j = edge; j < period - edge; ++j)
+            {
+                const int a1 = latchAt + period + j, b1 = a1 + k * period;   // repeat 1 vs repeats 2..5
+                worstRepeat = std::max(worstRepeat, std::abs(y[(size_t) a1] - y[(size_t) b1]));
+            }
+        // the repeated slice is the audio just before the click
+        const int clickAt = latchAt;   // latched block starts exactly at latchAt (a multiple of 256)
+        for (int j = edge + (int) (0.006 * sr); j < period - edge; ++j)
+            worstSource = std::max(worstSource, std::abs(y[(size_t) (clickAt + j + period)] - ramp(clickAt - period + 1 + j)));
+        check(worstRepeat < 1e-6f && worstSource < 1e-6f,
+              juce::String::formatted("latched: repeats every 125 ms exactly (diff %.1e), and it's the slice before the click (diff %.1e)", worstRepeat, worstSource));
+
+        auto repeatPeak = [&](int k) { float m = 0; for (int j = 0; j < period; ++j) m = std::max(m, std::abs(y[(size_t) (latchAt + k * period + j + period / 4)])); return m; };
+        run([&](int off) { return off >= latchAt; }, t116, 0.0, true, 120, y);
+        const float d1 = repeatPeak(1), d4 = repeatPeak(4);
+        run([&](int off) { return off >= latchAt; }, t116, 1.0, true, 120, y);
+        const float u1 = repeatPeak(1), u4 = repeatPeak(4);
+        check(d4 < d1 * 0.5f && u4 > u1 * 2.0f,
+              juce::String::formatted("FADE down: repeats die away (%.3f -> %.3f); FADE up: they build (%.3f -> %.3f)", d1, d4, u1, u4));
+
+        // No clicks: latch on at 0.5 s, off at 1.2 s, on a plain sine (the test signal above has a
+        // deliberate sawtooth step every 5000 samples) -- steps stay near the sine's own slope.
+        {
+            r3wrk::RetrigEngine e; e.prepare(sr, 1);
+            y.assign((size_t) n, 0.0f);
+            for (int i = 0; i < n; ++i) y[(size_t) i] = (float) (0.3 * std::sin(2 * juce::MathConstants<double>::pi * 110.0 * i / sr));
+            for (int off = 0; off < n; off += 256)
+            {
+                float* ch[1] = { y.data() + off };
+                e.process(ch, 1, std::min(256, n - off), off >= latchAt && off < (int) (sr * 1.2), t116, 0.5, true, 120);
+            }
+        }
+        float worstStep = 0; for (int i = 1; i < n; ++i) worstStep = std::max(worstStep, std::abs(y[(size_t) i] - y[(size_t) i - 1]));
+        const float slope = (float) (0.3 * 2 * juce::MathConstants<double>::pi * 110.0 / sr);
+        check(worstStep < slope * 3.0f, juce::String::formatted("no clicks latching on/off or between repeats (worst step %.4f, sine slope %.4f)", worstStep, slope));
+        bool back = true; for (int i = (int) (sr * 1.3); i < n; ++i) back = back && y[(size_t) i] == (float) (0.3 * std::sin(2 * juce::MathConstants<double>::pi * 110.0 * i / sr));
+        check(back, "latched off: back to the live signal, bit-exact");
+
+        // TIME moved mid-stutter: still finite, still ends at the click (shorter slice of the same moment).
+        run([&](int off) { return off >= latchAt; }, 0.0, 0.5, false, 120, y, [&](int off) { return off < (int) (sr * 1.0) ? 0.8 : 0.2; });
+        bool fin = true; for (float v : y) fin = fin && std::isfinite(v) && std::abs(v) < 1.5f;
+        check(fin, "TIME changed while stuttering (free mode): finite and bounded");
+        checkNear(r3wrk::RetrigEngine::sliceSeconds(0.0, false, 120) * 1000.0, 10.0, 0.01, "free TIME: 10 ms at the bottom");
+        checkNear(r3wrk::RetrigEngine::sliceSeconds(1.0, false, 120) * 1000.0, 1000.0, 0.01, "free TIME: 1 s at the top");
+
+        // Latched from the very start of a pass (history still empty): waits until one full slice
+        // has played before repeating it -- never loops silence.
+        {
+            r3wrk::RetrigEngine e; e.prepare(sr, 1);
+            std::vector<float> z((size_t) (sr * 0.5));
+            for (size_t i = 0; i < z.size(); ++i) z[i] = 0.5f;   // DC: any silent repeat shows as a drop
+            for (int off = 0; off < (int) z.size(); off += 256)
+            {
+                float* p = z.data() + off;
+                e.process(&p, 1, std::min(256, (int) z.size() - off), true, 0.55, 0.5, true, 120);
+            }
+            const int slice = (int) (sr * 0.125);
+            float minBefore = 1, minAfter = 1;
+            for (int i = 0; i < slice; ++i) minBefore = std::min(minBefore, z[(size_t) i]);
+            for (int i = slice + 1000; i < (int) z.size(); ++i)
+                if ((i % slice) > 300 && (i % slice) < slice - 300) minAfter = std::min(minAfter, z[(size_t) i]);
+            check(minBefore == 0.5f && minAfter > 0.45f,
+                  juce::String::formatted("latched before a slice has played: waits, then repeats real audio (min %.3f / %.3f)", minBefore, minAfter));
+        }
     }
 
     // --- replaceRangeWith used end-to-end (this is what the stretch tool calls) --
