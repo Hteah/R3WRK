@@ -2006,7 +2006,7 @@ void EditorToolbar::resized()
     add(loopButton);
     add(recordButton);
     add(overdubButton, 2);
-    addWide(overdubMoreButton, 12, gap);
+    addWide(overdubMoreButton, 20, gap);   // the FX drawer's "more" dot size (20 x 16)
     add(autoRecordButton, (standaloneApp || isPluginBuild) ? gap + dotGap : gap);   // dot before the next section
     if (standaloneApp)
     {
@@ -2030,6 +2030,12 @@ void EditorToolbar::resized()
     {
         if (item.associatedComponent == nullptr || item.associatedComponent == &timeLabel)
             continue;
+        if (item.associatedComponent == &overdubMoreButton)
+        {
+            // Not a round button -- same 20 x 16 box as the FX drawer's "more" dots.
+            overdubMoreButton.setBounds(overdubMoreButton.getBounds().withSizeKeepingCentre(20, 16));
+            continue;
+        }
         auto b = item.associatedComponent->getBounds();
         const int side = juce::jmin(b.getWidth(), b.getHeight());
         item.associatedComponent->setBounds(b.withSizeKeepingCentre(side, side));
