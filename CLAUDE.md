@@ -90,7 +90,28 @@ selection is packed into one `std::atomic<uint64_t>` (`selPacked`) rather than t
 ### Playback chain (`PluginProcessor::processBlock`)
 
 Plays the document region (selection, else loop points, else whole clip) from the buffer under a
-try-lock, then runs a fixed chain: **filter → gain → Mimeophon → Reverb → Plexiphon → capture-output**.
+try-lock (loop reading: `Source/RegionGather.h`), then runs a fixed chain:
+**NaN safety net → Dirt → filter → Mimeophon → Reverb → Plexiphon → Gain (master volume, last) →
+NaN safety net → capture-output**. Notes on the newer pieces:
+- **Dirt** (`DirtStage.h`, popup `DirtPanel.h`): Octatrack-style drive → sample-rate → bits, ahead
+  of the filter. Defaults are a bit-exact bypass.
+- **Gain** is the last stage (effect tails included, also on the idle tail path); its knob lives at
+  the end of the FX drawer (Standalone only).
+- **Safety net** (`AudioSafety.h::zeroNonFinite`): before Dirt and before the output. Dirt, the
+  filter and the FX effects all have feedback state -- one NaN used to silence a channel until
+  restart. Keep both calls when touching the chain.
+- **Drag-scan** (dragging a loop edge/knob while looping): `DragScanRender.h` -- constant 1x read,
+  per-sample edges, relocation crossfades, release tail, window speed capped under the read speed
+  (`maxWindowSpeed`). With Speed/Pitch/Stretch engaged it feeds the stretcher's input instead.
+- **Overdub** (`OverdubWriter.h`, popup `OverdubPanel.h`): writes input into the playing loop,
+  `doc = doc*Feedback + in*Level`, timed via gatherRegion's per-sample position trace and the round-
+  trip latency (Standalone: `r3wrkDeviceRoundTripLatency()` hook in the patched Standalone window;
+  0 in VST/AU). One pass = one undo step (`AudioDocument::begin/endOverdubPass`). Disabled while
+  Speed/Stretch/Pitch are engaged.
+- **Monitor** (toolbar headphones): hear the input over the loop / while stopped without
+  recording; DRY (after Gain) or FX (mixed in before Dirt). Never restored ON from state.
+- **Plexiphon v2** (`PlexiphonEngine.h`): two 8-line FDNs (L/R), PLEXUS = active lines + echo→reverb
+  line lengths + identity→Hadamard; COUPLE/SKEW stereo; cut-only COLOR.
 Speed/Pitch/Stretch atomics on `AudioDocument` decide the playback engine: when all three are
 centred (1/0/1) it's a plain sample copy (zero latency); otherwise it routes through `r3wrk::LofiStretch` (`Source/LofiStretch.h`, built per
 `prepareToPlay`): Speed = tape varispeed (time + pitch together), Stretch = Paulstretch (always
@@ -181,7 +202,7 @@ compatibility with a saved project by reordering or removing an existing read.
 
 ### Theming
 
-`Source/Theme.h/.cpp` — `Palette` (11 editable colours) + `ThemeManager`, a process-wide
+`Source/Theme.h/.cpp` — `Palette` (15 editable colours, shared-theme text format with Sieve) + `ThemeManager`, a process-wide
 `juce::SharedResourcePointer` singleton persisted to its own settings file. Components read it via
 their own `SharedResourcePointer<ThemeManager>` member and re-theme on `ChangeListener` callbacks —
 not injected top-down.

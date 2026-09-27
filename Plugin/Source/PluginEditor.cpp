@@ -22,7 +22,7 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
       processorRef(p),
       header(p.document), waveformDisplay(p.document, true), spectrogramDisplay(p.document),
       timeRuler(waveformDisplay, p.document), toolbar(p, p.document),
-      knobRow(p.document, standaloneWindow), fxRow(p.document, standaloneWindow)
+      knobRow(p.document), fxRow(p.document, standaloneWindow)
 {
     juce::LookAndFeel::setDefaultLookAndFeel(&fontLnf);
 

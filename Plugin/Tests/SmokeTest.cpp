@@ -2,6 +2,7 @@
 // Exercises AudioDocument + EditActions + TimeStretchEngine directly.
 
 #include <JuceHeader.h>
+#include <cstring>
 #include <complex>
 #include "../Source/AudioDocument.h"
 #include "../Source/EditActions.h"
@@ -15,6 +16,8 @@
 #include "../Source/LofiStretch.h"
 #include "../Source/DirtStage.h"
 #include "../Source/OverdubWriter.h"
+#include "../Source/RegionGather.h"
+#include "../Source/AudioSafety.h"
 
 namespace
 {
@@ -703,6 +706,65 @@ int main()
             for (int i = 0; i < 512; ++i) { ok = ok && std::isfinite(doc.getSample(0, i)); peak = std::max(peak, std::abs(doc.getSample(0, i))); }
             check(ok && peak <= 1.5f, juce::String::formatted("20 stacked full-level passes stay bounded (peak %.3f)", peak));
         }
+    }
+
+    // --- Loop reading never leaves the loop (reverse, ping-pong, forward), even at the file's end --
+    {
+        std::cout << "-- loop reading stays inside the loop (RegionGather.h) --" << std::endl;
+        const int docLen = 1000;
+        juce::AudioBuffer<float> doc(2, docLen), out(2, 256);
+        for (int i = 0; i < docLen; ++i) { doc.setSample(0, i, 0.001f * i); doc.setSample(1, i, -0.001f * i); }
+        struct Mode { const char* name; bool pingPong, reverse; int dir; };
+        for (const Mode m : { Mode{ "forward loop", false, false, 1 }, Mode{ "ping-pong", true, false, 1 }, Mode{ "reverse loop", false, true, -1 } })
+            for (int64_t rs : { (int64_t) 0, (int64_t) 400 })
+            {
+                const int64_t re = docLen;   // the loop runs to the very end of the audio (e.g. after a Trim)
+                int64_t pos = m.reverse ? re - 1 : rs; int dir = m.dir;
+                int64_t lo = INT64_MAX, hi = INT64_MIN;
+                std::vector<int64_t> trace(256);
+                for (int b = 0; b < 40; ++b)
+                {
+                    out.clear();
+                    std::fill(trace.begin(), trace.end(), (int64_t) -1);
+                    const int n = r3wrk::gatherRegion(out, 0, 256, 2, doc, pos, dir, rs, re, true, m.pingPong, m.reverse, 20, trace.data());
+                    for (int i = 0; i < n; ++i) { lo = std::min(lo, trace[(size_t) i]); hi = std::max(hi, trace[(size_t) i]); }
+                }
+                check(lo >= rs && hi < re, juce::String(m.name) + juce::String::formatted(" over [%d, %d): reads stay in [%d, %d]",
+                                                                                          (int) rs, (int) re, (int) lo, (int) hi));
+            }
+    }
+
+    // --- Safety net: bad samples can't kill a channel; mono mic detection ---------
+    {
+        std::cout << "-- safety net (AudioSafety.h) and Dirt self-heal --" << std::endl;
+        juce::AudioBuffer<float> b(2, 64); b.clear();
+        b.setSample(0, 3, std::numeric_limits<float>::quiet_NaN());
+        b.setSample(1, 9, std::numeric_limits<float>::infinity());
+        b.setSample(0, 5, 0.5f);
+        const int fixed = r3wrk::zeroNonFinite(b, 2, 64);
+        check(fixed == 2 && b.getSample(0, 3) == 0.0f && b.getSample(1, 9) == 0.0f && b.getSample(0, 5) == 0.5f,
+              "zeroNonFinite: NaN/inf become silence, real audio untouched");
+
+        // Dirt fed one NaN at your settings (Drive 36%, Rate 5.2 kHz, 12 bit) keeps playing.
+        const double rate01 = std::log(5200.0 / 1000.0) / std::log(sr / 1000.0), bits01 = (12 - 2) / 14.0;
+        for (float bad : { std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity() })
+        {
+            r3wrk::DirtStage d; d.prepare(sr); d.snapDrive(0.36);
+            auto sig = makeSineBuffer(1, (int) sr * 2, sr, 220.0, 0.4f);
+            sig.setSample(0, (int) sr / 2, bad);
+            d.process(sig.getWritePointer(0), sig.getNumSamples(), 0.36, rate01, bits01);
+            int nonFinite = 0; for (int i = 0; i < sig.getNumSamples(); ++i) nonFinite += std::isfinite(sig.getSample(0, i)) ? 0 : 1;
+            check(nonFinite == 0 && sig.getRMSLevel(0, (int) sr, (int) sr) > 0.1f,
+                  juce::String("Dirt given one ") + (std::isnan(bad) ? "NaN" : "infinity") + " keeps playing (it used to go silent until restart)");
+        }
+
+        juce::AudioBuffer<float> in(2, 128); in.clear();
+        for (int i = 0; i < 128; ++i) in.setSample(0, i, 0.3f * (float) std::sin(i * 0.1));
+        check(r3wrk::liveInputChannels(in, 2, 128) == 1, "mono mic (left live, right exact silence) -> treated as mono");
+        in.setSample(1, 50, 1.0e-6f);
+        check(r3wrk::liveInputChannels(in, 2, 128) == 2, "any real signal on the right -> stays stereo");
+        in.clear();
+        check(r3wrk::liveInputChannels(in, 2, 128) == 2, "both silent -> left as stereo");
     }
 
     // --- replaceRangeWith used end-to-end (this is what the stretch tool calls) --

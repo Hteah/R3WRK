@@ -23,9 +23,9 @@ class KnobRow : public juce::Component,
                 private juce::ChangeListener
 {
 public:
-    // `standalone` is unused now -- the Standalone-only Gain (volume) knob moved to the end of
-    // the FX drawer (FxRow) to make room for Dirt; kept so the call sites don't change.
-    KnobRow(AudioDocument& document, bool standalone);
+    // (The Standalone-only Gain knob moved to the end of the FX drawer -- FxRow -- to make room
+    // for Dirt, so the row no longer needs to know which build it's in.)
+    explicit KnobRow(AudioDocument& document);
     ~KnobRow() override;
 
     // Fired while the Start / End knobs slide the selection, so the editor can scroll the

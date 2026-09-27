@@ -1,5 +1,7 @@
 #include "PluginProcessor.h"
 #include "DragScanRender.h"
+#include "RegionGather.h"
+#include "AudioSafety.h"
 #include "PluginEditor.h"
 #include "OutputSettings.h"
 #include <algorithm>
@@ -82,7 +84,7 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     lastAppliedTimeRatio = 1.0;
     stretchRatioNeedsSnap = true;
 
-    wasPlaying = false; declickRemaining = 0; releaseInputTailRemaining = 0; dragRegionSeeded = false; dragScanActive = false;
+    resetPassState();
     stretcherPrimed = false;
     rtFinished = false;
     wasScrubbing = false;
@@ -184,7 +186,7 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 void R3WRKAudioProcessor::releaseResources()
 {
     rtStretcher.reset();
-    wasPlaying = false; declickRemaining = 0; releaseInputTailRemaining = 0; dragRegionSeeded = false; dragScanActive = false;
+    resetPassState();
     stretcherPrimed = false;
     rtFinished = false;
     wasScrubbing = false;
@@ -215,128 +217,9 @@ void R3WRKAudioProcessor::ensureRecordingCapacity(int numChannels, int64_t addit
 }
 
 //==============================================================================
-// Loop-crossfade envelope: raised-cosine (equal-power) gain for region-relative frame `rp`
-// -- ramps 0->1 over the first `fadeLen` frames of the region and 1->0 over the last
-// `fadeLen`, else 1. `fadeLen` is pre-clamped to regionLen/2 by the caller.
-static inline double loopFadeGain(int64_t rp, int64_t regionLen, int fadeLen) noexcept
-{
-    if (fadeLen <= 0) return 1.0;
-    double x;
-    if (rp < fadeLen)                        x = (double) rp / (double) fadeLen;
-    else if (rp >= regionLen - fadeLen)      x = (double) (regionLen - 1 - rp) / (double) fadeLen;
-    else                                     return 1.0;
-    x = juce::jlimit(0.0, 1.0, x);
-    const double s = std::sin(0.5 * juce::MathConstants<double>::pi * x);
-    return s * s;
-}
-
-// Walks [regionStart, regionEnd) from `pos` in direction `dir` (+1 forward, -1 backward),
-// copying up to `count` frames into dst[dstOffset..]. `loop` wraps head-to-tail; `pingPong`
-// bounces at both ends instead -- `dir` flips, and neither endpoint is repeated, so the cycle
-// is 0,1,..,L-1,L-2,..,1 with period 2L-2 (the same shape as the Sieve editor's ping-pong).
-// `dir` only ever goes -1 when `pingPong` is true. `fadeLen` > 0 applies the loop-crossfade
-// envelope to the copied audio by its region position. Returns frames written; a short
-// return means a non-looping region ran out.
-static int gatherRegion(juce::AudioBuffer<float>& dst, int dstOffset, int count, int dstChannels,
-                        const juce::AudioBuffer<float>& docBuf,
-                        int64_t& pos, int& dir,
-                        int64_t regionStart, int64_t regionEnd, bool loop, bool pingPong,
-                        bool reverseLoop, int fadeLen, int64_t* posTrace = nullptr)
-{
-    const int srcChans = docBuf.getNumChannels();
-    if (srcChans <= 0 || regionEnd <= regionStart)
-        return 0;
-    const int64_t regionLen = regionEnd - regionStart;
-
-    auto applyFade = [&](int atFrame, int chunk, int64_t rp0, int step)
-    {
-        if (fadeLen <= 0) return;
-        float* wp[8];
-        const int nw = juce::jmin(dstChannels, 8);
-        for (int ch = 0; ch < nw; ++ch) wp[ch] = dst.getWritePointer(ch, dstOffset + atFrame);
-        for (int j = 0; j < chunk; ++j)
-        {
-            const double g = loopFadeGain(rp0 + (int64_t) step * j, regionLen, fadeLen);
-            if (g < 1.0)
-                for (int ch = 0; ch < nw; ++ch)
-                    wp[ch][j] *= (float) g;
-        }
-    };
-
-    int written = 0;
-    while (written < count)
-    {
-        if (dir > 0)
-        {
-            if (pos >= regionEnd)
-            {
-                if (pingPong)    { dir = -1; pos = regionEnd - 2; continue; }   // reflect at the top
-                // Reverse-loop mode switched on WHILE playback is already going forward (e.g.
-                // pressing Play with nothing selected, then cycling the Loop button mid-playback
-                // -- direction otherwise only ever starts backward at a fresh Play press, see
-                // processBlock's startReversed) -- flip to backward here too, mirroring the
-                // backward branch's own reverseLoop wrap below, instead of silently treating
-                // reverseLoop exactly like a plain forward loop until Play is pressed again.
-                if (reverseLoop) { dir = -1; pos = regionEnd;     continue; }
-                if (loop)        { pos = regionStart; continue; }
-                break;
-            }
-            const int chunk = (int) juce::jmin((int64_t) (count - written), regionEnd - pos);
-            for (int ch = 0; ch < dstChannels; ++ch)
-                dst.copyFrom(ch, dstOffset + written, docBuf,
-                             juce::jmin(ch, srcChans - 1), (int) pos, chunk);
-            applyFade(written, chunk, pos - regionStart, +1);
-            if (posTrace != nullptr)   // which buffer position each copied frame came from (Overdub)
-                for (int j = 0; j < chunk; ++j) posTrace[dstOffset + written + j] = pos + j;
-            pos     += chunk;
-            written += chunk;
-        }
-        else   // backward: either the ping-pong return leg (stopping one frame short of
-               // regionStart before reflecting forward) or a reverse loop, which instead
-               // wraps tail-to-head and keeps playing backward -- the mirror image of a
-               // plain forward loop's wrap to regionStart
-        {
-            if (pos <= regionStart)
-            {
-                if (reverseLoop)
-                {
-                    pos = regionEnd;           // wrap back to the tail, still playing backward
-                    continue;
-                }
-                // Ping-pong's return leg bounces back to forward here -- pingPong implies loop
-                // (see its own computation at the call site), so this is unreachable with loop
-                // off. Mirrors the forward branch's own `if (loop) ... else break` shape: with
-                // loop truly off (backward only via a reverse-loop pass that was then switched
-                // off mid-playback), there's no mode left to bounce back into -- stop here
-                // instead of unconditionally flipping to forward and continuing forever, which
-                // is what silently made "loop off" never actually stop once direction had ever
-                // gone backward.
-                if (loop)
-                {
-                    dir = 1;
-                    pos = regionStart;             // the next frame forward plays
-                    continue;
-                }
-                break;
-            }
-            const int chunk = (int) juce::jmin((int64_t) (count - written), pos - regionStart);
-            const int64_t from = pos - chunk;  // copy [from+1 .. pos] forward, then reverse it
-            for (int ch = 0; ch < dstChannels; ++ch)
-            {
-                dst.copyFrom(ch, dstOffset + written, docBuf,
-                             juce::jmin(ch, srcChans - 1), (int) (from + 1), chunk);
-                float* w = dst.getWritePointer(ch, dstOffset + written);
-                std::reverse(w, w + chunk);
-            }
-            applyFade(written, chunk, pos - regionStart, -1);   // dst frame 0 == region pos `pos`
-            if (posTrace != nullptr)
-                for (int j = 0; j < chunk; ++j) posTrace[dstOffset + written + j] = pos - j;
-            pos     -= chunk;
-            written += chunk;
-        }
-    }
-    return written;
-}
+// Loop reading (loopFadeGain, gatherRegion) lives in RegionGather.h -- shared with the smoke test.
+using r3wrk::loopFadeGain;
+using r3wrk::gatherRegion;
 
 void R3WRKAudioProcessor::renderPlaybackDirect(juce::AudioBuffer<float>& out, int numCh, int numSamples,
                                                const juce::AudioBuffer<float>& docBuf,
@@ -371,11 +254,7 @@ void R3WRKAudioProcessor::renderPlaybackStretched(juce::AudioBuffer<float>& out,
     if (rtStretcher == nullptr || docBuf.getNumChannels() <= 0 || regionEnd <= regionStart)
         return;
 
-    speed   = juce::jlimit(AudioDocument::kMinSpeed,   AudioDocument::kMaxSpeed,   speed);
-    pitch   = juce::jlimit(AudioDocument::kMinPitch,   AudioDocument::kMaxPitch,   pitch);
-    stretch = juce::jlimit(AudioDocument::kMinStretch, AudioDocument::kMaxStretch, stretch);
-
-    updateStretchRatios(numSamples, speed, pitch, stretch);
+    updateStretchRatios(numSamples, speed, pitch, stretch);   // clamps the knobs itself
 
     const int rc = rtChannels;
     const int inCap  = rtScratchIn.getNumSamples();
@@ -617,7 +496,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         renderBlackBoxPreview(buffer, numCh, numSamples);
         if (blackBoxCapacity > 0)
             appendToBlackBox(blackBoxInputScratch, numCh, numSamples);
-        wasPlaying = false; declickRemaining = 0; releaseInputTailRemaining = 0; dragRegionSeeded = false; dragScanActive = false;
+        resetPassState();
         return;
     }
 
@@ -628,7 +507,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         buffer.clear();
         if (blackBoxCapacity > 0)
             appendToBlackBox(blackBoxInputScratch, numCh, numSamples);
-        wasPlaying = false; declickRemaining = 0; releaseInputTailRemaining = 0; dragRegionSeeded = false; dragScanActive = false;
+        resetPassState();
         return;
     }
 
@@ -660,7 +539,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
 
         if (blackBoxCapacity > 0)
             appendToBlackBox(blackBoxInputScratch, numCh, numSamples);
-        wasPlaying = false; declickRemaining = 0; releaseInputTailRemaining = 0; dragRegionSeeded = false; dragScanActive = false;
+        resetPassState();
         return; // pass input through unchanged so the user can monitor while recording
     }
 
@@ -715,12 +594,14 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         // applyPlaybackGain's call below): applyPlaybackFilter() is the plain non-modulated path,
         // never applyModulatedFilter(). freshPlayPass = a fresh scrub start (! wasScrubbing),
         // mirroring how the isPlaying branch primes these on ! wasPlaying.
+        r3wrk::zeroNonFinite(buffer, numCh, numSamples);   // safety net -- see the playing branch
         applyDirt(buffer, numCh, numSamples, ! wasScrubbing);
         applyPlaybackFilter(buffer, numCh, 0, numSamples, ! wasScrubbing);
         applyMimeophon(buffer, numCh, numSamples, ! wasScrubbing);
         applyReverb(buffer, numCh, numSamples, ! wasScrubbing);
         applyPlexiphon(buffer, numCh, numSamples, ! wasScrubbing);
         applyPlaybackGain(buffer, numCh, 0, numSamples, {});   // volume, last; LFOs don't run while scrubbing
+        r3wrk::zeroNonFinite(buffer, numCh, numSamples);   // safety net: never hand the host a NaN
         captureOutput(buffer, numCh, numSamples);
         // R3WRK has taken the buffer over to scrub -- Black Box follows that, not the (now
         // irrelevant) input snapshot; see blackBoxInputScratch's header comment.
@@ -728,7 +609,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             appendToBlackBox(buffer, numCh, numSamples);
 
         wasScrubbing = true;
-        wasPlaying = false; declickRemaining = 0; releaseInputTailRemaining = 0; dragRegionSeeded = false; dragScanActive = false;   // so normal playback resets the stretcher cleanly if it resumes
+        resetPassState();   // so normal playback resets the stretcher cleanly if it resumes
         return;
     }
     wasScrubbing = false;
@@ -741,7 +622,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         const bool overdubOn = document.overdubbing.load(std::memory_order_relaxed) && inputFits;
         const bool monitorOn = document.overdubMonitor.load(std::memory_order_relaxed) && inputFits;
         const bool monitorFx = monitorOn && document.overdubMonitorFx.load(std::memory_order_relaxed);
-        const int overdubInCh = juce::jmin(2, getTotalNumInputChannels());
+        const int overdubInCh = monitorInputChannels(buffer, numSamples);
         if (overdubOn || monitorOn)
             for (int ch = 0; ch < overdubInCh; ++ch)
                 overdubInput.copyFrom(ch, 0, buffer, ch, 0, numSamples);
@@ -966,10 +847,10 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                 // declickRequested's comment on AudioDocument for why the check just below
                 // can't notice that jump on its own.
                 const bool manualSeek = document.declickRequested.exchange(false, std::memory_order_relaxed);
-                // A reverse loop's valid backward-start range is the mirror image of the
-                // ordinary forward one: regionEnd itself is a valid position to begin
-                // reading backward from, and regionStart is the one that's now out of range.
-                const bool posOutOfRegion = reverseLoopOn ? (pos <= regionStart || pos > regionEnd)
+                // A reverse loop reads backward from the region's last real sample
+                // (regionEnd - 1) down to regionStart itself -- the same [regionStart, regionEnd)
+                // range as forward, just the other way round (see RegionGather.h).
+                const bool posOutOfRegion = reverseLoopOn ? (pos < regionStart || pos >= regionEnd)
                                                            : (pos <  regionStart || pos >= regionEnd);
                 if (posOutOfRegion)
                 {
@@ -986,7 +867,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
                     // bounce once its cycle length happened to land on a block boundary.
                     if (reverseLoopOn)
                     {
-                        pos = regionEnd;           // still playing backward, re-enter at the tail
+                        pos = regionEnd - 1;       // still playing backward, re-enter at the tail's last sample
                         playbackDir = -1;
                     }
                     else if (pingPong && pos >= regionEnd)
@@ -1175,6 +1056,10 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             for (int i = 0; i < n; ++i)
                 lfoDsp[i].reset();
         }
+        // Safety net: no NaN / infinity gets into Dirt, the filter or the effects (they all remember
+        // their past -- one bad sample used to silence a channel until restart). See AudioSafety.h.
+        r3wrk::zeroNonFinite(buffer, numCh, numSamples);
+
         // Monitor, FX mode: the incoming audio joins the loop here, so it's heard through Dirt, the
         // filter and the FX drawer exactly like the loop is (not recorded -- Overdub stays dry).
         if (monitorFx && overdubInCh > 0)
@@ -1235,6 +1120,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             for (int ch = 0; ch < numCh; ++ch)
                 buffer.addFrom(ch, 0, overdubInput, juce::jmin(ch, overdubInCh - 1), 0, numSamples);
 
+        r3wrk::zeroNonFinite(buffer, numCh, numSamples);   // safety net: never hand the host a NaN
         captureOutput(buffer, numCh, numSamples);
         // R3WRK has taken the buffer over to play/loop -- Black Box follows that, not the (now
         // irrelevant) input snapshot; see blackBoxInputScratch's header comment.
@@ -1246,7 +1132,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     }
 
     const bool justStoppedPlaying = wasPlaying;
-    wasPlaying = false; declickRemaining = 0; releaseInputTailRemaining = 0; dragRegionSeeded = false; dragScanActive = false;
+    resetPassState();
 
     // A reverb tail outlives the signal that made it -- start a countdown the instant playback
     // stops (if the reverb was actually engaged), so applyReverb() keeps ticking with silence as
@@ -1334,11 +1220,13 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     // ...unless Monitor is on: keep a copy of the input and add it back, dry, after the tails and
     // Gain below (so previewing material works while stopped too).
     bool idleMonitor = false;
+    int idleMonitorCh = 0;
     {
         const juce::CriticalSection::ScopedTryLockType stl(document.getLock());
         if (! stl.isLocked() || ! document.isEmpty())
         {
-            const int inCh = juce::jmin(2, getTotalNumInputChannels());
+            const int inCh = monitorInputChannels(buffer, numSamples);
+            idleMonitorCh = inCh;
             idleMonitor = document.overdubMonitor.load(std::memory_order_relaxed)
                           && inCh > 0 && numSamples <= overdubInput.getNumSamples();
             if (idleMonitor)
@@ -1414,15 +1302,13 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     }
 
     if (idleMonitor)
-    {
-        const int inCh = juce::jmin(2, getTotalNumInputChannels());
         for (int ch = 0; ch < numCh; ++ch)
-            buffer.addFrom(ch, 0, overdubInput, juce::jmin(ch, inCh - 1), 0, numSamples);
-    }
+            buffer.addFrom(ch, 0, overdubInput, juce::jmin(ch, idleMonitorCh - 1), 0, numSamples);
 
     // Keep the captured timeline continuous through idle gaps (in the Standalone the input is
     // muted, so this is silence -- but it stops a stop/start of playback mid-capture from
     // splicing the two parts together with no gap).
+    r3wrk::zeroNonFinite(buffer, numCh, numSamples);   // safety net: never hand the host a NaN
     captureOutput(buffer, numCh, numSamples);
 
     // Genuinely idle: `buffer` above is untouched host input, exactly what blackBoxInputScratch
@@ -1588,6 +1474,14 @@ bool R3WRKAudioProcessor::applyModulatedFilter(juce::AudioBuffer<float>& buffer,
     }
 
     return true;
+}
+
+int R3WRKAudioProcessor::monitorInputChannels(const juce::AudioBuffer<float>& input, int numSamples) const
+{
+    const int n = juce::jmin(2, getTotalNumInputChannels());
+    // Only the Standalone can be on a mono device (the built-in mic) with a silent right input;
+    // in a DAW the host decides the input and a silent side is intentional.
+    return wrapperType == wrapperType_Standalone ? r3wrk::liveInputChannels(input, n, numSamples) : n;
 }
 
 void R3WRKAudioProcessor::applyDirt(juce::AudioBuffer<float>& buffer, int numCh, int numSamples, bool freshPlayPass)

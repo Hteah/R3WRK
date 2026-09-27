@@ -19,7 +19,7 @@ namespace
     }
 }
 
-KnobRow::KnobRow(AudioDocument& doc, bool standalone)
+KnobRow::KnobRow(AudioDocument& doc)
     : document(doc)
 {
     //== Pitch =================================================================
@@ -206,8 +206,6 @@ KnobRow::KnobRow(AudioDocument& doc, bool standalone)
                  / (double) juce::jmax((int64_t) 1, document.getNumSamples());
         };
     }
-
-    juce::ignoreUnused(standalone);   // Gain moved to FxRow -- see the header
 
     addAndMakeVisible(modelBadge);
     modelBadge.onClick = [this]

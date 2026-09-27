@@ -81,14 +81,22 @@ struct DirtStage
             if (drive < 1.0e-9) drive = 0.0;
 
             double y = x[i];
+            if (! std::isfinite(y))
+                y = 0.0;   // a NaN/inf would otherwise live in the DC blocker forever (a dead channel)
             if (drive > 0.0 || hpY1 != 0.0 || hpX1 != 0.0)
             {
                 double added = 0.0;
                 if (drive > 0.0)
                 {
-                    const double g = std::pow(30.0, drive);
-                    const double bias = 0.03 * drive, neg = 1.0 - 0.3 * drive;
-                    const double wet = (clip((y + bias) * g, neg) - clip(bias * g, neg)) * std::pow(g, -0.5);
+                    if (drive != cachedDrive)   // the curve only changes while Drive ramps
+                    {
+                        cachedDrive = drive;
+                        gain   = std::pow(30.0, drive);
+                        makeup = std::pow(gain, -0.5);
+                        bias   = 0.03 * drive;
+                        neg    = 1.0 - 0.3 * drive;
+                    }
+                    const double wet = (clip((y + bias) * gain, neg) - clip(bias * gain, neg)) * makeup;
                     added = wet - y;
                 }
                 // DC-block only what the drive added (see the header comment).
@@ -115,6 +123,12 @@ struct DirtStage
 
             x[i] = (float) juce::jlimit(-2.0, 2.0, y);
         }
+        // Self-heal: if the state ever went non-finite anyway, start clean next block.
+        if (! std::isfinite(hpX1) || ! std::isfinite(hpY1) || ! std::isfinite(held))
+        {
+            hpX1 = hpY1 = 0.0;
+            held = 0.0f;
+        }
     }
 
 private:
@@ -130,6 +144,7 @@ private:
     }
 
     double sr = 44100.0, drive = 0.0, hpX1 = 0.0, hpY1 = 0.0, holdPhase = 1.0;
+    double cachedDrive = -1.0, gain = 1.0, makeup = 1.0, bias = 0.0, neg = 1.0;   // drive curve, per Drive value
     float held = 0.0f;
 };
 }

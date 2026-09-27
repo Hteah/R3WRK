@@ -261,20 +261,18 @@ private:
     // per-block teleports dressed up differently.
     //
     // renderDragScan() is the second option instead: a continuously-advancing fractional read
-    // position (`dragScanPos`) that never jumps at all, so there's nothing to declick. When
-    // behind the window it closes the gap at a speed proportional to the remaining distance
-    // (capped, so a huge jump sounds like a bounded fast wind, not a shriek) -- a real, if
-    // sped-up, read of the actual buffer, not a synthesized stand-in. Once inside
-    // [regionStart, regionEnd) it settles to plain 1x forward and genuinely loops within it,
-    // wrapping by subtracting the region length so the fractional position stays continuous
-    // across the wrap too (with a loop-edge crossfade, so *that* doesn't click either -- see
-    // DragScanRender.h for why its region edges move per sample, not per block). With the
-    // Speed/Pitch/Stretch knobs engaged the same renderer feeds the stretcher's input instead
+    // position (`dragScanPos`) at a constant 1x -- so the pitch never rises -- looping inside the
+    // moving window, whose edges move per sample (DragScanRender.h) and which may slide no faster
+    // than the playhead reads (dragscan::maxWindowSpeed). If the window still passes the playhead
+    // (e.g. it jumps when a drag starts) the playhead relocates to the same point in the loop's
+    // cycle with a short crossfade (`dragRelocation`) instead of racing to catch up, and a
+    // release blends out what the drag renderer would have played next (renderReleaseTail).
+    // With the Speed/Pitch/Stretch knobs engaged the same renderer feeds the stretcher's input
     // (renderDragScanStretched) -- a *discrete* per-block version of that once confused the old
     // Rubber Band stretcher into sustained distortion (reverted as eb4ec70/9376798); the
-    // continuous read is what made it work. `dragScanActive` is false until the first dragging block
-    // seeds `dragScanPos` from the live playhead, and again on release so the next drag (or a
-    // handoff to the stretched path) starts fresh and the final position gets committed back to
+    // continuous read is what made it work. `dragScanActive` is false until the first dragging
+    // block seeds `dragScanPos` from the live playhead, and again on release so the next drag (or
+    // a handoff to the stretched path) starts fresh and the final position gets committed back to
     // `document.playhead`.
     double dragScanPos = 0.0;
     dragscan::Relocation dragRelocation;   // crossfade state when the window passes the playhead
@@ -305,6 +303,14 @@ private:
     std::vector<int64_t> overdubTrace;
     std::atomic<int> overdubLatency { 0 };   // round trip, samples (Standalone: from the device)
     void applyDirt(juce::AudioBuffer<float>& buffer, int numCh, int numSamples, bool freshPlayPass);
+    // Input channels Overdub / Monitor should use (the built-in mic's silent right side -> 1).
+    int monitorInputChannels(const juce::AudioBuffer<float>& input, int numSamples) const;
+    // Forget the current play pass (playback stopped, recording, scrubbing...).
+    void resetPassState() noexcept
+    {
+        wasPlaying = false; declickRemaining = 0; releaseInputTailRemaining = 0;
+        dragRegionSeeded = false; dragScanActive = false;
+    }
     juce::SmoothedValue<double> smoothedFilterBase  { 0.0 };
     juce::SmoothedValue<double> smoothedFilterWidth { 1.0 };
     juce::SmoothedValue<double> smoothedFilterHpQ   { 0.0 };

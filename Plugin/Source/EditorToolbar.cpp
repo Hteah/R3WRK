@@ -1073,8 +1073,8 @@ void EditorToolbar::applyTheme()
     autoRecordButton.setColour(juce::TextButton::textColourOnId, pal.windowBg);
 
     // Record Desktop: outlined (it's a Standalone extra, not the primary Record), inked in
-    // the record red so it still reads as a capture control. A stop square appears on it,
-    // same as the main Record button, while system audio is being captured.
+    // the record red so it still reads as a capture control. While system audio is being
+    // captured it shows a flashing red dot instead (iconRecDot), like Capture Output / Overdub.
     desktopRecButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
     desktopRecButton.setColour(juce::TextButton::textColourOffId, pal.recordButton);
 

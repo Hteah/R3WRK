@@ -252,6 +252,7 @@ namespace r3wrk
         double levelGain = 1.0, mixWet = 0.0, mixDry = 1.0;
         double coupleCos = 1.0, coupleSin = 0.0;
         double delaySlew = 0.0;
+        int    allpassDelay[kNumLines][kAllpassesPerLine] {};   // samples, fixed per sample rate
         bool   snapDelays = true;
 
         static double smoothstep(double e0, double e1, double x) noexcept
@@ -272,6 +273,9 @@ namespace r3wrk
                         sd.allpass[l][a].prepare(sampleRate, 20.0);
                 }
             delaySlew = 1.0 - std::exp(-1.0 / (0.08 * sampleRate));   // ~80 ms glide
+            for (int l = 0; l < kNumLines; ++l)
+                for (int a = 0; a < kAllpassesPerLine; ++a)
+                    allpassDelay[l][a] = (int) std::round(kAllpassMs[l][a] * 0.001 * sampleRate);
             side[0].colorRateHz = 0.10; side[0].colorPhase = 0.0;
             side[1].colorRateHz = 0.13; side[1].colorPhase = juce::MathConstants<double>::halfPi;
             reset();
@@ -427,10 +431,7 @@ namespace r3wrk
                     branch = sd.damping[l].process(branch, sd.dampCoeff);
                     float x = (float) branch;
                     for (int a = 0; a < kAllpassesPerLine; ++a)
-                    {
-                        const int d = (int) std::round(kAllpassMs[l][a] * 0.001 * sampleRate);
-                        x = sd.allpass[l][a].process(x, d, sd.diffusionGain);
-                    }
+                        x = sd.allpass[l][a].process(x, allpassDelay[l][a], sd.diffusionGain);
                     sd.lines[l].write(x);
                     sum += sd.w[l] * (double) fdn[s][l];
                 }

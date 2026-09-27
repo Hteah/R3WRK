@@ -95,6 +95,7 @@ public:
         speed = juce::jlimit(0.05, 8.0, newSpeed);
         stretch = juce::jlimit(0.05, 100.0, newStretch);
         pitchSemis = newPitchSemis;
+        pitchRatio = std::pow(2.0, pitchSemis / 12.0);
         // Paulstretch switches on (never off) mid-pass: dropping out of it would jump the time
         // base. At a stretch of exactly 1 it simply keeps smearing without dilating.
         if (! paulActive && std::abs(stretch - 1.0) > 1.0e-3)
@@ -286,7 +287,7 @@ private:
     // Granular pitch + grit, blended in/out over ~20 ms as the Pitch knob leaves/returns to 0.
     void pitchAndPush(const float* s)
     {
-        const double ratio = std::pow(2.0, pitchSemis / 12.0);
+        const double ratio = pitchRatio;
         const double wetTarget = std::abs(pitchSemis) > 1.0e-3 ? 1.0 : 0.0;
         pitchWet += juce::jlimit(-1.0 / (0.02 * sr), 1.0 / (0.02 * sr), wetTarget - pitchWet);
 
@@ -381,7 +382,7 @@ private:
     std::vector<std::complex<float>> twiddles;
     std::vector<int> bitrev;
 
-    double speed = 1.0, stretch = 1.0, pitchSemis = 0.0;
+    double speed = 1.0, stretch = 1.0, pitchSemis = 0.0, pitchRatio = 1.0;
     bool paulActive = false, finalSeen = false;
     int flushTape = 0;
     int64_t inWritten = 0, tapeWritten = 0, outRead = 0, outWritten = 0, delayWrite = 0;
