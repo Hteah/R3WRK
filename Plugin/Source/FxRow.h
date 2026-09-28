@@ -6,6 +6,7 @@
 #include "PlexiphonPanel.h"
 #include "MimeophonPanel.h"
 #include "RetrigPanel.h"
+#include "ChorusPanel.h"
 #include "Theme.h"
 #include "R3WRKLookAndFeel.h"
 
@@ -14,8 +15,10 @@
     edge (see PluginEditor::toggleFxDrawer(), which grows the window by the drawer's height
     rather than displacing anything already on screen).
 
-    One row: RTRG | Delay | Reverb-or-Plexiphon (one shared slot) | Gain, left to right (Delay is
-    Mimeophon -- see below). LFO
+    One row: RTRG-or-CHO | Delay | Reverb-or-Plexiphon | Gain, left to right (Delay is Mimeophon
+    -- see below). Both "-or-" slots show one effect at a time, and only the shown one runs:
+    RVB/PLX switch with their pill, RTRG/CHO with the small tab above theirs (their pills are the
+    latch / the on-off). LFO
     is still SHELVED, not deleted -- lfoPanel below is a real, fully wired member
     (PluginProcessor::tickLfos() still runs exactly as before; AudioDocument's lfoSlots fields
     still persist), just not addAndMakeVisible()'d or given a layout slot here, so it's a
@@ -53,12 +56,14 @@ public:
 
 private:
     void changeListenerCallback(juce::ChangeBroadcaster*) override;
-    void timerCallback() override;   // Gain knob follows state loads / undo; RVB/PLX slot follows its switch
+    void timerCallback() override;   // Gain knob follows state loads / undo; RVB/PLX + RTRG/CHO slots follow their switches
     void applyTheme();
 
     juce::SharedResourcePointer<ThemeManager> theme;
     LfoPanel lfoPanel;                // shelved -- see class comment; not shown, still fully wired
-    RetrigPanel retrigPanel;          // 1st slot -- RTRG buffer retrig
+    RetrigPanel retrigPanel;          // 1st slot, shared with chorusPanel: only the selected
+    ChorusPanel chorusPanel;          //   one shows (the tab above its pill switches RTRG <-> CHO)
+    void syncModSlot();
     MimeophonPanel mimeoPanel;        // 2nd slot -- DLY
     PlexiphonPanel plexPanel;         // 3rd slot, shared with reverbPanel: only the selected
     ReverbPanel reverbPanel;          //   model's panel shows (its pill switches RVB <-> PLX)

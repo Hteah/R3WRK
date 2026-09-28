@@ -9,7 +9,8 @@
 
 namespace
 {
-    constexpr int kStateMagic     = 0x52335754;   // 'R3WT' - adds RTRG; RVB/PLX become one slot
+    constexpr int kStateMagic     = 0x52335755;   // 'R3WU' - adds CHORUS + the RTRG/CHO slot switch
+    constexpr int kStateMagicR3WT = 0x52335754;   // 'R3WT' - adds RTRG; RVB/PLX become one slot
     constexpr int kStateMagicR3WS = 0x52335753;   // 'R3WS' - adds Monitor DRY/FX
     constexpr int kStateMagicR3WR = 0x52335752;   // 'R3WR' - adds Plexiphon v2 Couple / Skew
     constexpr int kStateMagicR3WQ = 0x52335751;   // 'R3WQ' - adds Overdub level / feedback / monitor
@@ -164,6 +165,8 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     lastPlexEngaged = false;
 
     rtrgDsp.prepare(sampleRate, juce::jmax(1, getTotalNumOutputChannels()));
+    chorusDsp.prepare(sampleRate, juce::jmax(1, getTotalNumOutputChannels()));
+    lastChorusEngaged = false;
     reverbRingingOut = plexRingingOut = false;
     lastReverbSelected = document.reverbEnabled.load();
 
@@ -613,6 +616,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         r3wrk::zeroNonFinite(buffer, numCh, numSamples);   // safety net -- see the playing branch
         applyDirt(buffer, numCh, numSamples, ! wasScrubbing);
         applyPlaybackFilter(buffer, numCh, 0, numSamples, ! wasScrubbing);
+        applyChorus(buffer, numCh, numSamples, ! wasScrubbing);
         applyRetrig(buffer, numCh, numSamples, ! wasScrubbing);
         applyMimeophon(buffer, numCh, numSamples, ! wasScrubbing);
         applySpaceSlot(buffer, numCh, numSamples, ! wasScrubbing);   // RVB or PLX
@@ -1108,7 +1112,9 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             lfoModDone += chunk;
         }
 
-        // RTRG, right after the filter -- the first drawer effect, so DLY/RVB/PLX echo the stutter.
+        // CHORUS, right after the filter, then RTRG (they share one drawer slot; only the shown
+        // one runs) -- ahead of DLY/RVB/PLX, so those echo the chorus / the stutter.
+        applyChorus(buffer, numCh, numSamples, ! wasPlaying);
         applyRetrig(buffer, numCh, numSamples, ! wasPlaying);
 
         // Mimeophon, after filter and gain, before Reverb/Plexiphon -- a conventional "delay
@@ -1826,12 +1832,39 @@ void R3WRKAudioProcessor::applyRetrig(juce::AudioBuffer<float>& buffer, int numC
 {
     if (freshPlayPass)
         rtrgDsp.reset();   // a new pass never stutters audio left over from the last one
-    rtrgDsp.process(buffer.getArrayOfWritePointers(), numCh, numSamples,
-                    document.rtrgLatched.load(std::memory_order_relaxed),
+    // The slot showing CHO means RTRG is off (the UI releases the latch too; this backs it up).
+    const bool latched = document.rtrgLatched.load(std::memory_order_relaxed)
+                         && ! document.fxSlotChorus.load(std::memory_order_relaxed);
+    rtrgDsp.process(buffer.getArrayOfWritePointers(), numCh, numSamples, latched,
                     document.rtrgTime.load(std::memory_order_relaxed),
                     document.rtrgFade.load(std::memory_order_relaxed),
                     document.rtrgSync.load(std::memory_order_relaxed), rtrgTempo);
     document.rtrgStuttering.store(rtrgDsp.isStuttering(), std::memory_order_relaxed);
+}
+
+void R3WRKAudioProcessor::applyChorus(juce::AudioBuffer<float>& buffer, int numCh, int numSamples,
+                                      bool /*freshPlayPass*/)
+{
+    // freshPlayPass deliberately doesn't reset (same lesson as Mimeophon/Reverb) -- only the
+    // enable edge does, followed by the engine's own 10 ms fade-in.
+    r3wrk::ChorusEngine::Params p;
+    p.enabled      = document.fxSlotChorus.load(std::memory_order_relaxed)
+                     && document.chorusEnabled.load(std::memory_order_relaxed);
+    p.mode01       = juce::jlimit(0.0, 1.0, document.chorusMode.load(std::memory_order_relaxed));
+    p.metal01      = juce::jlimit(0.0, 1.0, document.chorusMetal.load(std::memory_order_relaxed));
+    p.mix01        = juce::jlimit(0.0, 1.0, document.chorusMix.load(std::memory_order_relaxed));
+    p.rate01       = juce::jlimit(0.0, 1.0, document.chorusRate.load(std::memory_order_relaxed));
+    p.width01      = juce::jlimit(0.0, 1.0, document.chorusWidth.load(std::memory_order_relaxed));
+    p.hiss01       = juce::jlimit(0.0, 1.0, document.chorusHiss.load(std::memory_order_relaxed));
+    p.ringNegative = document.chorusRingNeg.load(std::memory_order_relaxed);
+
+    if (p.enabled && ! lastChorusEngaged && ! chorusDsp.busy())
+    {
+        chorusDsp.reset();
+        chorusDsp.snapToTargets(p);
+    }
+    lastChorusEngaged = p.enabled;
+    chorusDsp.process(buffer.getArrayOfWritePointers(), numCh, numSamples, p);   // no-op once faded out
 }
 
 void R3WRKAudioProcessor::applySpaceSlot(juce::AudioBuffer<float>& buffer, int numCh, int numSamples,
@@ -2443,6 +2476,15 @@ void R3WRKAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     out.writeDouble(document.rtrgFade.load());
     out.writeBool(document.rtrgSync.load());
     out.writeDouble(document.rtrgBpm.load());
+    out.writeBool(document.chorusEnabled.load());       // R3WU+
+    out.writeDouble(document.chorusMode.load());
+    out.writeDouble(document.chorusMetal.load());
+    out.writeDouble(document.chorusMix.load());
+    out.writeDouble(document.chorusRate.load());
+    out.writeDouble(document.chorusWidth.load());
+    out.writeDouble(document.chorusHiss.load());
+    out.writeBool(document.chorusRingNeg.load());
+    out.writeBool(document.fxSlotChorus.load());
 
     auto& buf = document.getBuffer();
     for (int ch = 0; ch < buf.getNumChannels(); ++ch)
@@ -2458,12 +2500,12 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     juce::MemoryInputStream in(data, (size_t) sizeInBytes, false);
     const int magic = in.readInt();
-    if (magic != kStateMagic && magic != kStateMagicR3WS && magic != kStateMagicR3WR && magic != kStateMagicR3WQ && magic != kStateMagicR3WP && magic != kStateMagicR3WO && magic != kStateMagicR3WN && magic != kStateMagicR3WM && magic != kStateMagicR3WL && magic != kStateMagicR3WK && magic != kStateMagicR3WJ && magic != kStateMagicR3WI && magic != kStateMagicR3WH && magic != kStateMagicR3WG && magic != kStateMagicR3WF && magic != kStateMagicR3WE && magic != kStateMagicR3WD
+    if (magic != kStateMagic && magic != kStateMagicR3WT && magic != kStateMagicR3WS && magic != kStateMagicR3WR && magic != kStateMagicR3WQ && magic != kStateMagicR3WP && magic != kStateMagicR3WO && magic != kStateMagicR3WN && magic != kStateMagicR3WM && magic != kStateMagicR3WL && magic != kStateMagicR3WK && magic != kStateMagicR3WJ && magic != kStateMagicR3WI && magic != kStateMagicR3WH && magic != kStateMagicR3WG && magic != kStateMagicR3WF && magic != kStateMagicR3WE && magic != kStateMagicR3WD
         && magic != kStateMagicR3WC && magic != kStateMagicR3WB && magic != kStateMagicR3WA
         && magic != kStateMagicR3W9 && magic != kStateMagicR3W8 && magic != kStateMagicR3W7
         && magic != kStateMagicR3W6 && magic != kStateMagicR3W5)
         return;
-    // R3WS: adds Monitor DRY/FX after Plexiphon Couple/Skew. R3WR: adds Plexiphon Couple/Skew after Overdub. R3WQ: adds Overdub level/feedback/monitor after Dirt. R3WP: adds Dirt drive/rate/bits after Mimeophon Ping-Pong. R3WO: adds Mimeophon Ping-Pong after Skew. R3WN: adds Mimeophon Skew after the other
+    // R3WU: adds CHORUS (enabled/mode/metal/mix/rate/width/hiss/ring) + the RTRG/CHO slot switch after RTRG. R3WT: adds RTRG after Monitor DRY/FX. R3WS: adds Monitor DRY/FX after Plexiphon Couple/Skew. R3WR: adds Plexiphon Couple/Skew after Overdub. R3WQ: adds Overdub level/feedback/monitor after Dirt. R3WP: adds Dirt drive/rate/bits after Mimeophon Ping-Pong. R3WO: adds Mimeophon Ping-Pong after Skew. R3WN: adds Mimeophon Skew after the other
     // Mimeophon params. R3WM: adds the Mimeophon
     // params after the Plexiphon params. R3WL: adds the Plexiphon
     // params after reverb Width. R3WK: adds reverb Width after Pre-
@@ -2478,7 +2520,8 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     // MnM model). R3W8..R3WA: the old OT-style Base/Width filter with a single resonance
     // (+ later Drive, + later 12/24 slope). R3W6/R3W7: the even older mode/cutoff filter.
     // R3W5: none.
-    const bool hasRtrg             = (magic == kStateMagic);                                  // R3WT
+    const bool hasChorus           = (magic == kStateMagic);                                  // R3WU
+    const bool hasRtrg             = (hasChorus || magic == kStateMagicR3WT);                 // R3WT+
     const bool hasMonitorFx        = (hasRtrg || magic == kStateMagicR3WS);                   // R3WS+
     const bool hasPlexStereo       = (hasMonitorFx || magic == kStateMagicR3WR);              // R3WR+
     const bool hasOverdub          = (hasPlexStereo || magic == kStateMagicR3WQ);             // R3WQ+
@@ -2687,6 +2730,20 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
         rvEnabled = rvEnabled || ! pxEnabled;
         pxEnabled = ! rvEnabled;
     }
+    bool choEnabled = false, choRingNeg = false, choSlot = false;   // older projects: chorus off, slot = RTRG
+    double choMode = 0.0, choMetal = 0.0, choMix = 0.5, choRate = 0.5, choWidth = 1.0, choHiss = 0.0;
+    if (hasChorus)
+    {
+        choEnabled = in.readBool();
+        choMode    = in.readDouble();
+        choMetal   = in.readDouble();
+        choMix     = in.readDouble();
+        choRate    = in.readDouble();
+        choWidth   = in.readDouble();
+        choHiss    = in.readDouble();
+        choRingNeg = in.readBool();
+        choSlot    = in.readBool();
+    }
 
     if (numCh <= 0 || numCh > kMaxStateChannels || numSamples < 0 || numSamples > 0x7fffffff)
         return;
@@ -2780,6 +2837,15 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     document.rtrgSync.store(rtSync);
     document.rtrgBpm.store(juce::jlimit(20.0, 300.0, rtBpm));
     document.rtrgLatched.store(false);
+    document.chorusEnabled.store(choEnabled);
+    document.chorusMode.store(juce::jlimit(0.0, 1.0, choMode));
+    document.chorusMetal.store(juce::jlimit(0.0, 1.0, choMetal));
+    document.chorusMix.store(juce::jlimit(0.0, 1.0, choMix));
+    document.chorusRate.store(juce::jlimit(0.0, 1.0, choRate));
+    document.chorusWidth.store(juce::jlimit(0.0, 1.0, choWidth));
+    document.chorusHiss.store(juce::jlimit(0.0, 1.0, choHiss));
+    document.chorusRingNeg.store(choRingNeg);
+    document.fxSlotChorus.store(choSlot);
 
     document.setSourceFilePath(sourceFilePath);   // "" on an older state blob -- header shows "Untitled"
 

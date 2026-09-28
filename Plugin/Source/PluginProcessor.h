@@ -12,6 +12,7 @@
 #include "PlexiphonEngine.h"
 #include "MimeophonEngine.h"
 #include "RetrigEngine.h"
+#include "ChorusEngine.h"
 
 
 class R3WRKAudioProcessor : public juce::AudioProcessor
@@ -462,6 +463,13 @@ private:
     r3wrk::RetrigEngine rtrgDsp;
     double rtrgTempo = 120.0;
     void applyRetrig (juce::AudioBuffer<float>& buffer, int numCh, int numSamples, bool freshPlayPass);
+
+    // CHORUS (r3wrk::ChorusEngine, ChorusEngine.h): after the filter, before RTRG. Resets only on
+    // the enable edge (never on freshPlayPass); after a disable it runs until its fade-out ends,
+    // then leaves the buffer untouched.
+    r3wrk::ChorusEngine chorusDsp;
+    bool lastChorusEngaged = false;
+    void applyChorus (juce::AudioBuffer<float>& buffer, int numCh, int numSamples, bool freshPlayPass);
 
     // Mimeophon (r3wrk::MimeophonEngine, MimeophonEngine.h) -- phase 1: core delay engine, live
     // monitoring, not baked into Save/Export. Exact structural mirror of the Reverb/Plexiphon

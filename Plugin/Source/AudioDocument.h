@@ -401,6 +401,21 @@ public:
     std::atomic<double> rtrgHostBpm { 0.0 };    // written by the audio thread (0 = no host tempo)
     std::atomic<bool>   rtrgStuttering { false };   // audio thread -> pill (lit while repeating)
 
+    // CHORUS (r3wrk::ChorusEngine, ChorusEngine.h) -- BBD-style chorus, right after the filter
+    // (before RTRG). METAL 0 = the classic I / II / I+II chorus; up = shorter delay + feedback.
+    // CHO shares RTRG's drawer slot: fxSlotChorus picks which one the slot shows, and only the
+    // shown one runs (the chorus needs fxSlotChorus && chorusEnabled; RTRG's latch is released
+    // when the slot switches to CHO).
+    std::atomic<bool>   fxSlotChorus  { false };
+    std::atomic<bool>   chorusEnabled { false };
+    std::atomic<double> chorusMode    { 0.0 };    // 0..1 -> I / II / I+II
+    std::atomic<double> chorusMetal   { 0.0 };
+    std::atomic<double> chorusMix     { 0.5 };
+    std::atomic<double> chorusRate    { 0.5 };    // trim, 0.5 = the mode's measured rate
+    std::atomic<double> chorusWidth   { 1.0 };
+    std::atomic<double> chorusHiss    { 0.0 };
+    std::atomic<bool>   chorusRingNeg { false };
+
     //==============================================================================
     // Plexiphon (r3wrk::PlexiphonEngine, PlexiphonEngine.h) -- phase 1: mono core network
     // (Level/Mix/Plexus/Size/Diffuse/Decay/Color), live monitoring only, same not-yet-baked-

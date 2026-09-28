@@ -8,7 +8,7 @@ R3WRK is an Edison-style pop-out audio recorder/editor, built as a JUCE plugin (
 Standalone app): waveform + spectrogram views, record/play/loop, cut/copy/paste/trim/delete/undo,
 normalize/gain/fade/reverse/silence, lofi time/pitch effects (tape Speed, Paulstretch Stretch, granular+grit Pitch), export-selection
 to WAV, a live knob row (tape Speed/Pitch/Stretch, a Monomachine-modelled multimode filter,
-Start/End selection), and an FX drawer (Mimeophon delay, Plexiphon reverb-FDN, Erbe-Verb reverb;
+Start/End selection), and an FX drawer (CHORUS / RTRG buffer retrig sharing one slot, Mimeophon delay, Plexiphon reverb-FDN, Erbe-Verb reverb;
 LFO built but currently shelved/hidden). Builds and runs on macOS only (Apple Silicon, Xcode, JUCE
 8.0.15).
 
@@ -91,10 +91,14 @@ selection is packed into one `std::atomic<uint64_t>` (`selPacked`) rather than t
 
 Plays the document region (selection, else loop points, else whole clip) from the buffer under a
 try-lock (loop reading: `Source/RegionGather.h`), then runs a fixed chain:
-**NaN safety net → Dirt → filter → Mimeophon → Reverb → Plexiphon → Gain (master volume, last) →
-NaN safety net → capture-output**. Notes on the newer pieces:
+**NaN safety net → Dirt → filter → Chorus → RTRG → Mimeophon → Reverb/Plexiphon → Gain (master volume,
+last) → NaN safety net → capture-output**. Notes on the newer pieces:
 - **Dirt** (`DirtStage.h`, popup `DirtPanel.h`): Octatrack-style drive → sample-rate → bits, ahead
   of the filter. Defaults are a bit-exact bypass.
+- **Chorus** (`ChorusEngine.h`, panel `ChorusPanel.h`, research doc `CHORUS_PLAN.md` at the repo
+  root): BBD chorus, MODE I / II / I+II + METAL (shorter delay + feedback → metallic comb ring).
+  Shares the first drawer slot with RTRG (`AudioDocument::fxSlotChorus`, switched by the small
+  `SlotSwitchTab` above each pill); only the shown one runs. Resets only on its enable edge.
 - **Gain** is the last stage (effect tails included, also on the idle tail path); its knob lives at
   the end of the FX drawer (Standalone only).
 - **Safety net** (`AudioSafety.h::zeroNonFinite`): before Dirt and before the output. Dirt, the
@@ -147,6 +151,8 @@ codebase's established style:
   permutation ↔ dense Hadamard), Make Noise Plexiphon.
 - `Source/MimeophonEngine.h` — stereo tape/BBD-style echo, Make Noise/Tom Erbe Mimeophon (Zone,
   Rate, Repeats, Color, Halo, Mix, Skew, Ping-Pong).
+- `Source/ChorusEngine.h` — BBD-style chorus, smooth → metallic (see CHORUS_PLAN.md). Its drawer
+  cell `ChorusPanel.h` shares RTRG's slot (`RetrigEngine.h`/`RetrigPanel.h`).
 - `Source/LfoModule.h` + `Source/LfoPanel.h/.cpp` — free-running LFO (5 shapes, banded rate),
   ticked once per block (not per sample). **Currently shelved**: fully wired
   (`PluginProcessor::tickLfos()`, `AudioDocument`'s `lfoSlots` persist), but not

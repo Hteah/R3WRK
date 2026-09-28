@@ -2,99 +2,103 @@
 #include <JuceHeader.h>
 #include "PinnableCallout.h"
 #include "AudioDocument.h"
-#include "RetrigEngine.h"
+#include "ChorusEngine.h"
 #include "DotMatrixLCD.h"
 #include "SlotSwitchTab.h"
 #include "Theme.h"
 #include "R3WRKLookAndFeel.h"
 
 /**
-    The RTRG cell of the FX drawer (first slot, left of DLY): Octatrack-style buffer retrig
-    (RetrigEngine.h / PluginProcessor::applyRetrig()). It shares the slot with CHO
-    (ChorusPanel.h): the small tab above the pill switches the slot to the chorus and lets go of
-    the stutter. The pill latches the stutter on/off; TIME
-    and FADE sit in the drawer; the "more" dot opens TIME / FADE / SYNC-FREE / BPM (the BPM only
-    matters in the Standalone -- VST/AU follow the host's tempo). Same layout as the other drawer
-    panels: pill, two knobs, dot.
+    The CHO cell of the FX drawer: a BBD-style chorus (ChorusEngine.h /
+    PluginProcessor::applyChorus()). It shares the first slot with RTRG: the small tab above the
+    pill switches the slot back to RTRG (FxRow shows whichever AudioDocument::fxSlotChorus picks,
+    and only that one runs). The pill turns the chorus on/off; MODE and METAL sit in the drawer;
+    the "more" dot opens MODE / METAL / MIX / RATE / WIDTH / HISS / RING. Same layout as the other
+    drawer panels: pill, two knobs, dot.
 */
-namespace rtrgText
+namespace choText
 {
-    inline juce::String time(double v, bool synced)
+    inline juce::String mode(double v) { return r3wrk::ChorusEngine::modeName(r3wrk::ChorusEngine::modeIndex(v)); }
+    inline juce::String metal(double v)
     {
-        if (synced)
-            return r3wrk::RetrigEngine::kNotes[r3wrk::RetrigEngine::noteIndex(v)].name;
-        return juce::String(juce::roundToInt(r3wrk::RetrigEngine::freeMs(v))) + " ms";
+        const int pct = juce::roundToInt(v * 100.0);
+        return pct == 0 ? juce::String("SMOOTH") : "METAL " + juce::String(pct) + "%";
     }
-    inline juce::String fade(double v)
+    inline juce::String percent(double v) { return juce::String(juce::roundToInt(v * 100.0)) + "%"; }
+    inline juce::String rate(double v, double mode01)
     {
-        const int pct = juce::roundToInt(std::abs(v - 0.5) * 200.0);
-        if (pct == 0) return "PLAIN";
-        return (v < 0.5 ? "OUT " : "UP ") + juce::String(pct) + "%";
+        const double hz = r3wrk::ChorusEngine::rateHz(r3wrk::ChorusEngine::modeIndex(mode01), v);
+        return juce::String(hz, hz < 10.0 ? 2 : 1) + " Hz";
     }
+    inline juce::String hiss(double v) { return v <= 0.0005 ? juce::String("OFF") : percent(v); }
 }
 
-class RetrigEditorPanel : public juce::Component,
+class ChorusEditorPanel : public juce::Component,
                           private juce::Timer
 {
 public:
-    RetrigEditorPanel(AudioDocument& doc, bool standaloneIn) : document(doc), standalone(standaloneIn)
+    explicit ChorusEditorPanel(AudioDocument& doc) : document(doc)
     {
         setLookAndFeel(&lnf);
-        title.setText("RETRIG", juce::dontSendNotification);
+        title.setText("CHORUS", juce::dontSendNotification);
         title.setFont(juce::FontOptions(14.0f, juce::Font::bold));
         addAndMakeVisible(title);
 
-        setUpKnob(time, "TIME", document.rtrgTime, 0.0, 1.0, 0.55,
-                  [this](double v) { return rtrgText::time(v, document.rtrgSync.load()); });
-        setUpKnob(fade, "FADE", document.rtrgFade, 0.0, 1.0, 0.5, [](double v) { return rtrgText::fade(v); });
-        setUpKnob(bpm, "BPM", document.rtrgBpm, 20.0, 300.0, 120.0, [this](double v)
-        {
-            const double host = document.rtrgHostBpm.load();
-            return host > 0.0 ? "HOST " + juce::String(host, 0) : juce::String(v, 0);
-        });
-        bpm.slider.setRange(20.0, 300.0, 1.0);
-        bpm.slider.setEnabled(standalone);
+        setUpKnob(mode,  "MODE",  document.chorusMode,  0.0, [](double v) { return choText::mode(v); });
+        setUpKnob(metal, "METAL", document.chorusMetal, 0.0, [](double v) { return choText::metal(v); });
+        setUpKnob(mix,   "MIX",   document.chorusMix,   0.5, [](double v) { return choText::percent(v); });
+        setUpKnob(rate,  "RATE",  document.chorusRate,  0.5,
+                  [this](double v) { return choText::rate(v, document.chorusMode.load()); });
+        setUpKnob(width, "WIDTH", document.chorusWidth, 1.0, [](double v) { return choText::percent(v); });
+        setUpKnob(hiss,  "HISS",  document.chorusHiss,  0.0, [](double v) { return choText::hiss(v); });
+        mode.slider.setTooltip("I / II: slow, wide sweeps. I+II: a fast, shallow shimmer");
+        metal.slider.setTooltip("Shorter delay + feedback: from a smooth chorus to a ringing, metallic comb");
+        mix.slider.setTooltip("50% = equal dry + wet (the classic sound). 100% = wet only (pitch vibrato)");
 
-        syncCaption.setText("TIMING", juce::dontSendNotification);
-        syncCaption.setJustificationType(juce::Justification::centred);
-        syncCaption.setFont(juce::FontOptions(11.0f));
-        addAndMakeVisible(syncCaption);
-        syncButton.setClickingTogglesState(true);
-        syncButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
-        syncButton.setTooltip("SYNC: TIME is a note value against the tempo. FREE: TIME is 10 ms to 1 s");
-        syncButton.setToggleState(document.rtrgSync.load(), juce::dontSendNotification);
-        syncButton.onClick = [this]
+        ringCaption.setText("RING", juce::dontSendNotification);
+        ringCaption.setJustificationType(juce::Justification::centred);
+        ringCaption.setFont(juce::FontOptions(11.0f));
+        addAndMakeVisible(ringCaption);
+        ringButton.setClickingTogglesState(true);
+        ringButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+        ringButton.setTooltip("Feedback polarity with METAL up. +: bright, bell-like ring. -: hollow, robotic ring");
+        ringButton.setToggleState(document.chorusRingNeg.load(), juce::dontSendNotification);
+        ringButton.onClick = [this]
         {
-            document.rtrgSync.store(syncButton.getToggleState());
-            syncButtonText();
-            time.slider.updateText();
+            document.chorusRingNeg.store(ringButton.getToggleState());
+            ringButtonText();
         };
-        addAndMakeVisible(syncButton);
-        syncButtonText();
+        addAndMakeVisible(ringButton);
+        ringButtonText();
 
-        setSize(300, 118);
+        setSize(300, 212);
         startTimerHz(15);
     }
 
-    ~RetrigEditorPanel() override { setLookAndFeel(nullptr); }   // detach before lnf is destroyed
+    ~ChorusEditorPanel() override { setLookAndFeel(nullptr); }   // detach before lnf is destroyed
 
     void resized() override
     {
         auto r = getLocalBounds().reduced(10);
         title.setBounds(r.removeFromTop(20));
         r.removeFromTop(4);
-        const int w = r.getWidth() / 4;
-        for (auto* k : { &time, &fade })
+        const int w = r.getWidth() / 4, rowH = r.getHeight() / 2;
+        auto row1 = r.removeFromTop(rowH), row2 = r;
+        for (auto* k : { &mode, &metal, &mix, &rate })
         {
-            auto col = r.removeFromLeft(w);
+            auto col = row1.removeFromLeft(w);
             k->caption.setBounds(col.removeFromTop(14));
             k->slider.setBounds(col);
         }
-        auto col = r.removeFromLeft(w);
-        syncCaption.setBounds(col.removeFromTop(14));
-        syncButton.setBounds(col.reduced(6, 12));
-        bpm.caption.setBounds(r.removeFromTop(14));
-        bpm.slider.setBounds(r);
+        for (auto* k : { &width, &hiss })
+        {
+            auto col = row2.removeFromLeft(w);
+            k->caption.setBounds(col.removeFromTop(14));
+            k->slider.setBounds(col);
+        }
+        auto col = row2.removeFromLeft(w);
+        ringCaption.setBounds(col.removeFromTop(14));
+        ringButton.setBounds(col.reduced(10, 16));
     }
 
 private:
@@ -105,8 +109,8 @@ private:
         std::atomic<double>* target = nullptr;
     };
 
-    void setUpKnob(Knob& k, const juce::String& caption, std::atomic<double>& target,
-                   double lo, double hi, double resetTo, std::function<juce::String(double)> textFn)
+    void setUpKnob(Knob& k, const juce::String& caption, std::atomic<double>& target, double resetTo,
+                   std::function<juce::String(double)> textFn)
     {
         k.target = &target;
         k.caption.setText(caption, juce::dontSendNotification);
@@ -115,21 +119,21 @@ private:
         addAndMakeVisible(k.caption);
 
         k.slider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-        k.slider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 64, 18);
-        k.slider.setRange(lo, hi, 0.0);
+        k.slider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 70, 18);
+        k.slider.setRange(0.0, 1.0, 0.0);
         k.slider.setDoubleClickReturnValue(true, resetTo);
-        k.slider.setValue(juce::jlimit(lo, hi, target.load()), juce::dontSendNotification);
+        k.slider.setValue(juce::jlimit(0.0, 1.0, target.load()), juce::dontSendNotification);
         k.slider.textFromValueFunction = std::move(textFn);
         k.slider.updateText();
         k.slider.onValueChange = [&k] { k.target->store(k.slider.getValue()); };
         addAndMakeVisible(k.slider);
     }
 
-    void syncButtonText() { syncButton.setButtonText(syncButton.getToggleState() ? "SYNC" : "FREE"); }
+    void ringButtonText() { ringButton.setButtonText(ringButton.getToggleState() ? "-" : "+"); }
 
     void timerCallback() override
     {
-        for (auto* k : { &time, &fade, &bpm })
+        for (auto* k : { &mode, &metal, &mix, &rate, &width, &hiss })
         {
             if (k->slider.isMouseButtonDown())
                 continue;
@@ -137,61 +141,53 @@ private:
             if (std::abs(v - k->slider.getValue()) > 1.0e-6)
                 k->slider.setValue(v, juce::dontSendNotification);
         }
-        const bool sync = document.rtrgSync.load();
-        if (sync != syncButton.getToggleState())
+        const int m = r3wrk::ChorusEngine::modeIndex(document.chorusMode.load());
+        if (m != shownMode) { shownMode = m; rate.slider.updateText(); }   // RATE reads in the mode's Hz
+        const bool neg = document.chorusRingNeg.load();
+        if (neg != ringButton.getToggleState())
         {
-            syncButton.setToggleState(sync, juce::dontSendNotification);
-            syncButtonText();
-            time.slider.updateText();
+            ringButton.setToggleState(neg, juce::dontSendNotification);
+            ringButtonText();
         }
-        const double host = document.rtrgHostBpm.load();
-        if (host != shownHostBpm) { shownHostBpm = host; bpm.slider.updateText(); }
     }
 
     AudioDocument& document;
-    const bool standalone;
-    juce::Label title, syncCaption;
-    Knob time, fade, bpm;
-    juce::TextButton syncButton;
-    double shownHostBpm = -1.0;
+    juce::Label title, ringCaption;
+    Knob mode, metal, mix, rate, width, hiss;
+    juce::TextButton ringButton;
+    int shownMode = -1;
     lcd::HardwareLcdLookAndFeel lnf;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(RetrigEditorPanel)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChorusEditorPanel)
 };
 
-class RetrigPanel : public juce::Component,
+class ChorusPanel : public juce::Component,
                     private juce::Timer,
                     private juce::ChangeListener
 {
 public:
-    RetrigPanel(AudioDocument& doc, bool standaloneIn) : document(doc), standalone(standaloneIn)
+    explicit ChorusPanel(AudioDocument& doc) : document(doc)
     {
         pill.onClick = [this]
         {
-            document.rtrgLatched.store(! document.rtrgLatched.load());
+            document.chorusEnabled.store(! document.chorusEnabled.load());
             syncPill();
         };
-        pill.setTooltip("RTRG: click to latch the stutter on, click again to let go");
+        pill.setTooltip("CHO: click to switch the chorus on/off");
         addAndMakeVisible(pill);
 
-        slotTab.target = "CHO";
-        slotTab.setTooltip("Switch this slot to CHO (chorus). Lets go of the stutter");
-        slotTab.onClick = [this]
-        {
-            document.rtrgLatched.store(false);
-            document.fxSlotChorus.store(true);
-            syncPill();
-        };
+        slotTab.target = "RTRG";
+        slotTab.setTooltip("Switch this slot to RTRG (the chorus stops)");
+        slotTab.onClick = [this] { document.fxSlotChorus.store(false); };
         addAndMakeVisible(slotTab);
 
-        setUpKnob(timeKnob, "TIME", document.rtrgTime, 0.55,
-                  [this](double v) { return rtrgText::time(v, document.rtrgSync.load()); });
-        setUpKnob(fadeKnob, "FADE", document.rtrgFade, 0.5, [](double v) { return rtrgText::fade(v); });
+        setUpKnob(modeKnob, "MODE", document.chorusMode, 0.0, [](double v) { return choText::mode(v); });
+        setUpKnob(metalKnob, "METAL", document.chorusMetal, 0.0, [](double v) { return choText::metal(v); });
 
-        moreButton.setTooltip("Time / Fade / Sync-Free / BPM (double-click to pin)");
+        moreButton.setTooltip("Mode / Metal / Mix / Rate / Width / Hiss / Ring (double-click to pin)");
         moreButton.onClick = [this]
         {
-            moreCallout.buttonClicked(moreButton, [this] { return std::make_unique<RetrigEditorPanel>(document, standalone); });
+            moreCallout.buttonClicked(moreButton, [this] { return std::make_unique<ChorusEditorPanel>(document); });
         };
         moreButton.setLookAndFeel(&moreButtonLnf);
         addAndMakeVisible(moreButton);
@@ -201,26 +197,26 @@ public:
         startTimerHz(15);
     }
 
-    ~RetrigPanel() override
+    ~ChorusPanel() override
     {
         moreCallout.close();
-        timeKnob.slider.setLookAndFeel(nullptr);
-        fadeKnob.slider.setLookAndFeel(nullptr);
+        modeKnob.slider.setLookAndFeel(nullptr);
+        metalKnob.slider.setLookAndFeel(nullptr);
         moreButton.setLookAndFeel(nullptr);
         theme->removeChangeListener(this);
     }
 
     void resized() override
     {
-        // Same packing as ReverbPanel / PlexiphonPanel / MimeophonPanel (FxRow relies on it); the
-        // slot tab sits in the pill column's caption row, level with the knob captions.
+        // Same packing as RetrigPanel (FxRow relies on it); the slot tab sits in the pill
+        // column's caption row, level with the knob captions.
         auto r = getLocalBounds().reduced(4, 2);
         constexpr int gap = 3, pillW = 32, pillH = 16, knobW = 53, moreW = 20, moreH = 16, captionH = 17;
         auto pillCol = r.removeFromLeft(pillW);
         slotTab.setBounds(pillCol.withHeight(captionH).withSizeKeepingCentre(pillW, 13));
         pill.setBounds(pillCol.withSizeKeepingCentre(pillW, pillH));
         r.removeFromLeft(gap);
-        for (auto* k : { &timeKnob, &fadeKnob })
+        for (auto* k : { &modeKnob, &metalKnob })
         {
             auto kcol = r.removeFromLeft(knobW);
             k->caption.setBounds(kcol.removeFromTop(captionH));
@@ -245,8 +241,8 @@ private:
             g.setColour(border.withAlpha(on || hovered ? 0.95f : 0.55f));
             g.drawRoundedRectangle(r, rad, 1.0f);
             g.setColour(on ? ink : border);
-            g.setFont(systemUIFont(10.0f));   // 4 letters in the same 32px pill as "RVB"
-            g.drawText("RTRG", getLocalBounds(), juce::Justification::centred);
+            g.setFont(systemUIFont(10.0f));
+            g.drawText("CHO", getLocalBounds(), juce::Justification::centred);
         }
         void mouseUp(const juce::MouseEvent&) override { if (onClick) onClick(); }
         void mouseEnter(const juce::MouseEvent&) override { hovered = true; repaint(); }
@@ -281,21 +277,19 @@ private:
 
     void syncPill()
     {
-        const bool on = document.rtrgLatched.load();
+        const bool on = document.chorusEnabled.load();
         if (on != pill.on) { pill.on = on; pill.repaint(); }
     }
 
     void timerCallback() override
     {
         syncPill();
-        for (auto* k : { &timeKnob, &fadeKnob })
+        for (auto* k : { &modeKnob, &metalKnob })
         {
             const double v = k->target->load();
             if (! k->slider.isMouseButtonDown() && std::abs(k->slider.getValue() - v) > 1.0e-6)
                 k->slider.setValue(v, juce::dontSendNotification);
         }
-        const bool sync = document.rtrgSync.load();
-        if (sync != shownSync) { shownSync = sync; timeKnob.slider.updateText(); }   // note name <-> ms
     }
 
     void changeListenerCallback(juce::ChangeBroadcaster*) override { applyTheme(); }
@@ -310,7 +304,7 @@ private:
         slotTab.ink = pal.textDim;
         slotTab.border = pal.textDim;
         slotTab.repaint();
-        for (auto* k : { &timeKnob, &fadeKnob })
+        for (auto* k : { &modeKnob, &metalKnob })
         {
             k->caption.setColour(juce::Label::textColourId, pal.textDim);
             k->slider.setColour(juce::Slider::textBoxTextColourId, pal.text);
@@ -323,16 +317,14 @@ private:
     }
 
     AudioDocument& document;
-    const bool standalone;
     juce::SharedResourcePointer<ThemeManager> theme;
     Pill pill;
     SlotSwitchTab slotTab;
-    Knob timeKnob, fadeKnob;
-    bool shownSync = true;
+    Knob modeKnob, metalKnob;
     R3WRKLookAndFeel knobLnF;
     R3WRKIconOnlyLookAndFeel moreButtonLnf;
     juce::TextButton moreButton { R3WRKLookAndFeel::iconMore };
     PinnableCallout moreCallout;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(RetrigPanel)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChorusPanel)
 };

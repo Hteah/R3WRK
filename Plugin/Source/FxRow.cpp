@@ -2,14 +2,16 @@
 
 FxRow::FxRow(AudioDocument& doc, bool standalone)
     : lfoPanel(doc, standalone),
-      retrigPanel(doc, standalone), mimeoPanel(doc), plexPanel(doc), reverbPanel(doc),
+      retrigPanel(doc, standalone), chorusPanel(doc), mimeoPanel(doc), plexPanel(doc), reverbPanel(doc),
       document(doc), showGain(standalone)
 {
     // lfoPanel is SHELVED (see class comment) -- constructed and fully wired (its
     // PluginProcessor/AudioDocument side is untouched), just not shown or laid out here.
     // Deliberately no addAndMakeVisible() -- bringing it back is exactly that one line plus its
     // old slot in resized()/paint() below.
-    addAndMakeVisible(retrigPanel);
+    addChildComponent(retrigPanel);   // syncModSlot() shows RTRG or CHO
+    addChildComponent(chorusPanel);
+    syncModSlot();
     addAndMakeVisible(mimeoPanel);
     addChildComponent(plexPanel);     // syncSpaceSlot() shows whichever model is selected
     addChildComponent(reverbPanel);
@@ -57,9 +59,17 @@ void FxRow::syncSpaceSlot()
     plexPanel.setVisible(! reverb);
 }
 
+void FxRow::syncModSlot()
+{
+    const bool chorus = document.fxSlotChorus.load();
+    chorusPanel.setVisible(chorus);
+    retrigPanel.setVisible(! chorus);
+}
+
 void FxRow::timerCallback()
 {
     syncSpaceSlot();
+    syncModSlot();
     if (! showGain || gainKnob.isMouseButtonDown())
         return;
     const double db = document.playbackGainDb.load();
@@ -87,7 +97,7 @@ void FxRow::applyTheme()
 
 void FxRow::resized()
 {
-    // One row, three slots: RTRG | Delay (Mimeophon) | Reverb-or-Plexiphon, then Gain. (LFO is shelved -- see
+    // One row, three slots: RTRG-or-CHO | Delay (Mimeophon) | Reverb-or-Plexiphon, then Gain. (LFO is shelved -- see
     // class comment -- and takes no space here.) All three are real Components, each packed to
     // its own CONTENT width -- not stretched across an equal third of the row -- same "packed
     // from the left, sized to content" idiom each panel already uses for its own internal
@@ -112,7 +122,9 @@ void FxRow::resized()
         lastGap = juce::jlimit(4, 40, total - 2 * gap);   // takes the rounding remainder -> exact
     }
 
-    retrigPanel.setBounds(full.removeFromLeft(juce::jmin(panelW, full.getWidth())));
+    const auto modSlot = full.removeFromLeft(juce::jmin(panelW, full.getWidth()));   // RTRG or CHO
+    retrigPanel.setBounds(modSlot);
+    chorusPanel.setBounds(modSlot);
     full.removeFromLeft(gap);
 
     mimeoPanel.setBounds(full.removeFromLeft(juce::jmin(panelW, full.getWidth())));
