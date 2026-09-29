@@ -202,7 +202,7 @@ void FxRow::getLayoutItems(juce::Array<LayoutItem>& items)
     // wins the hit test where they overlap).
     juce::Array<LayoutItem> toggles;
     auto slot = [&](const juce::String& id, juce::Component& panel, int slack,
-                    const juce::Array<juce::Component*>& parts)
+                    const juce::Array<juce::Component*>& parts, const juce::String& text)
     {
         LayoutItem it { id, this, panel.getBounds().withTrimmedLeft(slack), {} };
         LayoutItem tg { id + ".toggle", this, {}, {} };
@@ -215,15 +215,15 @@ void FxRow::getLayoutItems(juce::Array<LayoutItem>& items)
             else
                 it.guides.add(layoutGuideRect(*c) + panel.getPosition());
         }
-        tg.guides.add(parts.getFirst()->getBounds() + panel.getPosition());
+        tg.guides.add(toggleInkBounds(parts.getFirst()->getBounds() + panel.getPosition(), text));
         items.add(it);
         toggles.add(tg);
     };
-    if (retrigPanel.isVisible()) slot("fx.mod", retrigPanel, retrigPanel.leftSlack, retrigPanel.getToggleParts());
-    else                         slot("fx.mod", chorusPanel, chorusPanel.leftSlack, chorusPanel.getToggleParts());
-    slot("fx.dly", mimeoPanel, mimeoPanel.leftSlack, mimeoPanel.getToggleParts());
-    if (plexPanel.isVisible()) slot("fx.space", plexPanel, plexPanel.leftSlack, plexPanel.getToggleParts());
-    else                       slot("fx.space", reverbPanel, reverbPanel.leftSlack, reverbPanel.getToggleParts());
+    if (retrigPanel.isVisible()) slot("fx.mod", retrigPanel, retrigPanel.leftSlack, retrigPanel.getToggleParts(), retrigPanel.getToggleText());
+    else                         slot("fx.mod", chorusPanel, chorusPanel.leftSlack, chorusPanel.getToggleParts(), chorusPanel.getToggleText());
+    slot("fx.dly", mimeoPanel, mimeoPanel.leftSlack, mimeoPanel.getToggleParts(), mimeoPanel.getToggleText());
+    if (plexPanel.isVisible()) slot("fx.space", plexPanel, plexPanel.leftSlack, plexPanel.getToggleParts(), plexPanel.getToggleText());
+    else                       slot("fx.space", reverbPanel, reverbPanel.leftSlack, reverbPanel.getToggleParts(), reverbPanel.getToggleText());
     items.addArray(toggles);
     if (showGain && ! gainKnob.getBounds().isEmpty())
         items.add({ "fx.gain", this, gainCaption.getBounds().getUnion(gainKnob.getBounds()),

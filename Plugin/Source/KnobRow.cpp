@@ -475,7 +475,7 @@ void KnobRow::getLayoutItems(juce::Array<LayoutItem>& items)
     }
     if (modelBadge.isVisible() && ! modelBadge.getBounds().isEmpty())
         items.add({ "badge.filter", this, modelBadge.getBounds().getUnion(modelTab.getBounds()),
-                    { modelBadge.getBounds() } });
+                    { toggleInkBounds(modelBadge.getBounds(), modelBadge.text) } });
 }
 
 void KnobRow::paint(juce::Graphics& g)

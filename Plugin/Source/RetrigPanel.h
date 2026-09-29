@@ -235,6 +235,7 @@ public:
     // that move as "the toggle".
     int leftSlack = 0;
     juce::Array<juce::Component*> getToggleParts() { return { &pill, &slotTab }; }
+    juce::String getToggleText() const { return "RTRG"; }
 
 private:
     struct Pill : juce::Component, public juce::SettableTooltipClient

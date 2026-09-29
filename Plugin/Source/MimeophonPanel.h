@@ -29,6 +29,7 @@ public:
     // that move as "the toggle".
     int leftSlack = 0;
     juce::Array<juce::Component*> getToggleParts() { return { &enablePill }; }
+    juce::String getToggleText() const { return "DLY"; }
 
 private:
     void timerCallback() override;   // low-rate re-sync from external changes (state load, undo)

@@ -43,6 +43,15 @@ inline void drawBracketToggle(juce::Graphics& g, juce::Rectangle<float> area, co
     g.drawFittedText(text, box.toNearestInt(), juce::Justification::centred, 1, 0.8f);
 }
 
+// Where drawBracketToggle() actually puts ink for `text` in `area` (the centred text's width,
+// full height) -- the Edit Layout overlay measures spacing from this, not the wider column.
+inline juce::Rectangle<int> toggleInkBounds(juce::Rectangle<int> area, const juce::String& text)
+{
+    const float w = kBoxedToggles ? juce::GlyphArrangement::getStringWidth(spaceMonoFont(19.0f, false), text)
+                                  : juce::GlyphArrangement::getStringWidth(systemUIFont(16.0f, true), "[" + text + "]");
+    return area.withSizeKeepingCentre(juce::jmin(area.getWidth(), juce::roundToInt(w)), area.getHeight());
+}
+
 /**
     The shared custom look: rotary knobs (a flat disc, a thin outline, a single pointer
     line -- no value-arc, Eurorack/VCV-module-inspired), pill-shaped buttons (fully

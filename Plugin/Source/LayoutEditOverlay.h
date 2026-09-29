@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include <optional>
+#include <algorithm>
 #include "LayoutTweaks.h"
 #include "Theme.h"
 #include "R3WRKLookAndFeel.h"
@@ -8,7 +9,7 @@
 /**
     Edit Layout mode: sits over the knob row + FX drawer while LayoutTweaks::isEditing(), and
     swallows every mouse event there so knobs can't turn by accident. Each movable item gets a
-    dashed outline; drag one sideways to nudge it (snaps to the edges / centres of the other
+    dashed outline and small arrows show the px gap to its neighbour; drag one sideways to nudge it (snaps to the edges / centres of the other
     items' knob discs and toggles, with a guide line -- hold Option to drag freely), click one
     then use the arrow keys for 1px nudges (Shift = 10px), double-click or Delete to put one
     back where the automatic layout wants it. [DONE] / [RESET] sit over the drawer icon;
@@ -51,9 +52,11 @@ public:
             {
                 g.setFont(systemUIFont(11.0f));
                 g.drawText(dx == 0 ? juce::String("0") : (dx > 0 ? "+" : "") + juce::String(dx),
-                           r.withHeight(13.0f).translated(0.0f, 2.0f), juce::Justification::centred);
+                           r.withTrimmedTop(r.getHeight() - 13.0f).translated(0.0f, -2.0f), juce::Justification::centredRight);
             }
         }
+
+        drawSpacing(g);
 
         if (guideX)
         {
@@ -220,6 +223,63 @@ private:
             setMouseCursor(it != nullptr ? juce::MouseCursor::LeftRightResizeCursor
                                          : juce::MouseCursor::NormalCursor);
             repaint();
+        }
+    }
+
+    // Little dimension arrows between neighbours, with the gap in px: per row, each item's
+    // drawn content (the union of its guides -- knob discs, toggles; not its outline box, which
+    // mostly sit 2px apart) sorted left to right. Overlaps get the negative number, no arrow.
+    void drawSpacing(juce::Graphics& g) const
+    {
+        const auto& pal = theme->palette();
+        struct Span { juce::Rectangle<int> r; juce::Component* owner; };
+        juce::Array<Span> spans;
+        for (const auto& it : localItems())
+        {
+            if (it.guides.isEmpty()) continue;
+            auto r = it.guides.getFirst();
+            for (auto gr : it.guides) r = r.getUnion(gr);
+            spans.add({ r, it.owner });
+        }
+        std::sort(spans.begin(), spans.end(), [](const Span& a, const Span& b) { return a.r.getX() < b.r.getX(); });
+
+        g.setFont(systemUIFont(10.0f));
+        for (int i = 0; i < spans.size(); ++i)
+        {
+            // The next item to the right in the same row.
+            const Span* next = nullptr;
+            for (int j = i + 1; j < spans.size() && next == nullptr; ++j)
+                if (spans.getReference(j).owner == spans.getReference(i).owner)
+                    next = &spans.getReference(j);
+            if (next == nullptr) continue;
+
+            const auto& a = spans.getReference(i).r;
+            const auto& b = next->r;
+            const int gap = b.getX() - a.getRight();
+            const float y = (float) juce::jmin(a.getCentreY(), b.getCentreY());
+            const float x0 = (float) a.getRight(), x1 = (float) b.getX();
+            const auto label = juce::String(gap);
+
+            if (gap < 0)
+            {
+                g.setColour(pal.playhead);
+                g.drawText(label, juce::Rectangle<float>(28.0f, 12.0f).withCentre({ (x0 + x1) * 0.5f, y - 9.0f }),
+                           juce::Justification::centred);
+                continue;
+            }
+
+            g.setColour(pal.accent.withAlpha(0.85f));
+            if (gap >= 8)
+            {
+                const float l = x0 + 1.0f, r = x1 - 1.0f, h = juce::jmin(3.0f, (r - l) * 0.3f);
+                g.drawLine(l, y, r, y, 1.0f);
+                juce::Path heads;
+                heads.addTriangle(l, y, l + h, y - h * 0.8f, l + h, y + h * 0.8f);
+                heads.addTriangle(r, y, r - h, y - h * 0.8f, r - h, y + h * 0.8f);
+                g.fillPath(heads);
+            }
+            g.drawText(label, juce::Rectangle<float>(28.0f, 12.0f).withCentre({ (x0 + x1) * 0.5f, y - 9.0f }),
+                       juce::Justification::centred);
         }
     }
 

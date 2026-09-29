@@ -31,6 +31,7 @@ public:
     // that move as "the toggle".
     int leftSlack = 0;
     juce::Array<juce::Component*> getToggleParts() { return { &enablePill, &slotTab }; }
+    juce::String getToggleText() const { return "PLX"; }
 
 private:
     void timerCallback() override;   // low-rate re-sync from external changes (state load, undo)
