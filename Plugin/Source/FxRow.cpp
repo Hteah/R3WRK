@@ -128,34 +128,31 @@ void FxRow::resized()
         if (showGain)
         {
             const int total = gainColumn.getStart() - full.getX() - 3 * panelW;
-            // Gaps may go negative, down to -8: each panel pads itself 4px on both sides
-            // (reduced(4, 2)), so this only overlaps that empty padding -- it lets Gain still
-            // reach End at the default width now the toggle columns are 60px.
-            gap = juce::jmax(-8, total / 3);
-            lastGap = juce::jmax(-8, total - 2 * gap);   // takes the rounding remainder -> exact
+            gap = juce::jmax(4, total / 3);
+            lastGap = juce::jmax(4, total - 2 * gap);   // takes the rounding remainder -> exact
         }
         else
         {
             const int total = gainColumn.getEnd() - full.getX() - 3 * panelW;
-            gap = juce::jmax(-8, total / 2);
+            gap = juce::jmax(4, total / 2);
         }
     }
 
     const auto modSlot = full.removeFromLeft(juce::jmin(panelW, full.getWidth()));   // RTRG or CHO
     retrigPanel.setBounds(modSlot);
     chorusPanel.setBounds(modSlot);
-    full.setLeft(full.getX() + gap);   // gap may be negative (see above)
+    full.removeFromLeft(gap);
 
     mimeoPanel.setBounds(full.removeFromLeft(juce::jmin(panelW, full.getWidth())));
-    full.setLeft(full.getX() + gap);   // gap may be negative (see above)
+    full.removeFromLeft(gap);
 
     const auto spaceSlot = full.removeFromLeft(juce::jmin(panelW, full.getWidth()));   // RVB or PLX
     plexPanel.setBounds(spaceSlot);
     reverbPanel.setBounds(spaceSlot);
 
-    if (showGain && full.getWidth() > juce::jmax(0, lastGap) + 40)
+    if (showGain && full.getWidth() > lastGap + 40)
     {
-        full.setLeft(full.getX() + lastGap);
+        full.removeFromLeft(lastGap);
         const int w = gainColumn.isEmpty() ? 53 : gainColumn.getLength();   // End's width when known
         auto col = full.removeFromLeft(juce::jmin(w, full.getWidth()));
         gainCaption.setBounds(col.removeFromTop(17));
