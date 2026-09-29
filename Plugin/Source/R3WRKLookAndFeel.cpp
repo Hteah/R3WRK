@@ -439,7 +439,7 @@ namespace
     {
         const float side = juce::jmin(bounds.getWidth(), bounds.getHeight()) * 0.62f;
         const auto sq = juce::Rectangle<float>(side, side).withCentre(bounds.getCentre());
-        const float t = juce::jmax(1.2f, side * 0.07f);
+        const float t = 1.3f;   // about a Space Mono stroke at the knob readouts' size
         g.setColour(ink);
         g.drawRect(sq.reduced(t * 0.5f), t);
         const auto in = sq.reduced(t);

@@ -105,8 +105,8 @@ void FxRow::applyTheme()
     gainKnob.setColour(juce::Slider::textBoxTextColourId, pal.text);
     gainKnob.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
     resetButton.setColour(juce::TextButton::buttonColourId,  juce::Colours::transparentBlack);
-    resetButton.setColour(juce::TextButton::textColourOffId, pal.text);
-    resetButton.setColour(juce::TextButton::textColourOnId,  pal.text);
+    resetButton.setColour(juce::TextButton::textColourOffId, pal.accent);   // the knobs' ring colour
+    resetButton.setColour(juce::TextButton::textColourOnId,  pal.accent);
     repaint();
 }
 
