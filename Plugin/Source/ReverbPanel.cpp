@@ -93,16 +93,21 @@ namespace
 
 ReverbPanel::ReverbPanel(AudioDocument& doc) : document(doc)
 {
-    // RVB and PLX share one drawer slot: this pill switches the slot to PLX (FxRow shows
-    // whichever is selected). It's lit while this model is audible (MIX above 0) -- there's no
-    // separate on/off.
-    enablePill.onClick = [this]
+    // RVB and PLX share one drawer slot. The pill is the slot's on/off (AudioDocument::spaceOn --
+    // off lets the tail ring out); the small tab above it switches the slot to PLX, like the
+    // RTRG/CHO slot's.
+    enablePill.onClick = [this] { document.spaceOn.store(! document.spaceOn.load()); };
+    enablePill.setTooltip("RVB: click to switch on/off (off lets the tail ring out)");
+    addAndMakeVisible(enablePill);
+
+    slotTab.target = "PLX";
+    slotTab.setTooltip("Switch this slot to PLX");
+    slotTab.onClick = [this]
     {
         document.plexEnabled.store(true);
         document.reverbEnabled.store(false);
     };
-    enablePill.setTooltip("RVB -- click to switch this slot to PLX. MIX 0 = silent");
-    addAndMakeVisible(enablePill);
+    addAndMakeVisible(slotTab);
 
     auto setUpKnob = [this](Knob& k, const juce::String& caption, std::atomic<double>& target)
     {
@@ -146,7 +151,7 @@ void ReverbPanel::timerCallback()
     // Low-rate re-sync so an external change (a state/project load, undo) is reflected even
     // though this panel stays on screen continuously -- LfoPanel's timerCallback does the same.
     // Skip a slider the user's actively dragging, so this never fights their gesture.
-    const bool on = document.reverbMix.load() > 0.001;   // lit = audible (see the pill's onClick)
+    const bool on = document.spaceOn.load();   // lit = the slot is on
     if (on != enablePill.on) { enablePill.on = on; enablePill.repaint(); }
 
     auto resync = [](juce::Slider& s, double docVal)
@@ -165,6 +170,9 @@ void ReverbPanel::applyTheme()
     enablePill.ink    = pal.windowBg;
     enablePill.border = pal.textDim;
     enablePill.repaint();
+    slotTab.ink    = pal.textDim;
+    slotTab.border = pal.textDim;
+    slotTab.repaint();
 
     for (auto* k : { &decayKnob, &mixKnob })
     {
@@ -217,6 +225,7 @@ void ReverbPanel::resized()
     constexpr int gap = 3, pillW = 32, pillH = 16, knobW = 53, moreW = 20, moreH = 16;   // pillW/pillH match KnobRow::ModelBadge's own size (the filter MNM/OT badge); knobW matches KnobRow's own upper bound (46-53 auto-fit)
 
     auto pillArea = r.removeFromLeft(pillW);
+    slotTab.setBounds(pillArea.withHeight(17).withSizeKeepingCentre(pillW, 13));   // caption row, like RetrigPanel's
     enablePill.setBounds(pillArea.withSizeKeepingCentre(pillW, pillH));
     r.removeFromLeft(gap);
 

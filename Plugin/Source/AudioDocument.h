@@ -371,9 +371,11 @@ public:
     // phase doesn't add yet). All 0..1 except reverbPredelay, which maps to 7-500ms the same way
     // FxRow reads out any other ms-ranged knob. Mix defaults to 0 (inert until touched), same
     // non-destructive-default convention as the filter/gain knobs above.
-    // RVB and PLX share one drawer slot ("space"): reverbEnabled / plexEnabled now mean "this
-    // model is the selected one" -- exactly one is true (RVB by default). There's no separate
-    // on/off: MIX 0 is silent. The deselected model's tail rings out when you switch.
+    // RVB and PLX share one drawer slot ("space"): reverbEnabled / plexEnabled mean "this model
+    // is the selected one" -- exactly one is true (RVB by default), switched by the small tab
+    // above the pill. spaceOn is the slot's on/off pill (off by default; projects from before it
+    // existed load with it on). Switching off, or switching models, lets the tail ring out.
+    std::atomic<bool>   spaceOn        { false };
     std::atomic<bool>   reverbEnabled  { true };
     std::atomic<double> reverbSize     { 0.5 };
     std::atomic<double> reverbAbsorb   { 0.5 };

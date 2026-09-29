@@ -9,7 +9,8 @@
 
 namespace
 {
-    constexpr int kStateMagic     = 0x52335756;   // 'R3WV' - CHORUS becomes the MnM FX-CHORUS clone (8 params)
+    constexpr int kStateMagic     = 0x52335757;   // 'R3WW' - adds the RVB/PLX slot's on/off pill
+    constexpr int kStateMagicR3WV = 0x52335756;   // 'R3WV' - CHORUS becomes the MnM FX-CHORUS clone (8 params)
     constexpr int kStateMagicR3WU = 0x52335755;   // 'R3WU' - adds CHORUS (Juno-style, retired) + the RTRG/CHO slot switch
     constexpr int kStateMagicR3WT = 0x52335754;   // 'R3WT' - adds RTRG; RVB/PLX become one slot
     constexpr int kStateMagicR3WS = 0x52335753;   // 'R3WS' - adds Monitor DRY/FX
@@ -172,6 +173,7 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     chorusTailScratch.setSize(2, juce::jmax(8192, juce::jmax(0, samplesPerBlock) * 4));
     reverbRingingOut = plexRingingOut = false;
     lastReverbSelected = document.reverbEnabled.load();
+    lastSpaceOn = document.spaceOn.load();
 
     mimeoDsp.prepare(sampleRate);
     constexpr double mimeoRampSeconds = 0.05;
@@ -1168,12 +1170,13 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     // below (reverbTailSilentSamples), once the tail's genuinely gone quiet.
     if (justStoppedPlaying)
     {
-        const bool reverbEngaged = document.reverbEnabled.load(std::memory_order_relaxed)
+        const bool spaceOn = document.spaceOn.load(std::memory_order_relaxed);
+        const bool reverbEngaged = spaceOn && document.reverbEnabled.load(std::memory_order_relaxed)
                                     && document.reverbMix.load(std::memory_order_relaxed) > 0.001;
         reverbTailSamplesLeft = (reverbEngaged || reverbRingingOut) ? (int) (currentSampleRate * 300.0) : 0;
         reverbTailSilentSamples = 0;
 
-        const bool plexEngaged = document.plexEnabled.load(std::memory_order_relaxed)
+        const bool plexEngaged = spaceOn && document.plexEnabled.load(std::memory_order_relaxed)
                                  && document.plexMix.load(std::memory_order_relaxed) > 0.001;
         plexTailSamplesLeft = (plexEngaged || plexRingingOut) ? (int) (currentSampleRate * 300.0) : 0;
         reverbRingingOut = plexRingingOut = false;   // (a switch ring-out carries on as the idle tail)
@@ -1925,17 +1928,45 @@ void R3WRKAudioProcessor::applySpaceSlot(juce::AudioBuffer<float>& buffer, int n
     {
         // Switched: the model you left keeps ringing out (if it was sounding); the one you
         // switched to stops ringing out and plays normally, its tail carrying straight on.
-        reverbRingingOut = ! reverbSelected && lastReverbEngaged;
-        plexRingingOut   = reverbSelected && lastPlexEngaged;
+        // While the pill is off nothing plays normally, so a tail that's ringing keeps ringing.
+        const bool off = ! document.spaceOn.load(std::memory_order_relaxed);
+        reverbRingingOut = (! reverbSelected && lastReverbEngaged) || (off && reverbRingingOut);
+        plexRingingOut   = (reverbSelected && lastPlexEngaged)     || (off && plexRingingOut);
         ringOutSilentSamples = 0;
         ringOutSamplesLeft = (int) (currentSampleRate * 300.0);   // same generous ceiling as the idle tails
         lastReverbSelected = reverbSelected;
     }
 
-    if (reverbSelected)
-        applyReverb(buffer, numCh, numSamples, freshPlayPass);
-    else
-        applyPlexiphon(buffer, numCh, numSamples, freshPlayPass);
+    // The on/off pill. Off: the selected model rings out (same path as a model switch) instead of
+    // being cut. On again: it stops ringing out and plays normally, its tail carrying straight on.
+    const bool spaceOn = document.spaceOn.load(std::memory_order_relaxed);
+    if (spaceOn != lastSpaceOn)
+    {
+        if (! spaceOn)
+        {
+            if (reverbSelected && lastReverbEngaged) reverbRingingOut = true;
+            if (! reverbSelected && lastPlexEngaged) plexRingingOut = true;
+            ringOutSilentSamples = 0;
+            ringOutSamplesLeft = (int) (currentSampleRate * 300.0);
+        }
+        else
+        {
+            if (reverbSelected) reverbRingingOut = false;
+            else                plexRingingOut = false;
+        }
+        lastSpaceOn = spaceOn;
+    }
+
+    // While off, the selected model isn't run normally at all -- only its ring-out below. (A
+    // normal call would mark it disengaged, and the ring-out call would then see an enable edge
+    // and reset the engine, killing the very tail it's meant to let ring.)
+    if (spaceOn)
+    {
+        if (reverbSelected)
+            applyReverb(buffer, numCh, numSamples, freshPlayPass);
+        else
+            applyPlexiphon(buffer, numCh, numSamples, freshPlayPass);
+    }
 
     if (reverbRingingOut || plexRingingOut)
     {
@@ -2536,6 +2567,7 @@ void R3WRKAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     out.writeDouble(document.chorusLp.load());
     out.writeDouble(document.chorusInp.load());
     out.writeBool(document.fxSlotChorus.load());
+    out.writeBool(document.spaceOn.load());             // R3WW+
 
     auto& buf = document.getBuffer();
     for (int ch = 0; ch < buf.getNumChannels(); ++ch)
@@ -2551,12 +2583,12 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     juce::MemoryInputStream in(data, (size_t) sizeInBytes, false);
     const int magic = in.readInt();
-    if (magic != kStateMagic && magic != kStateMagicR3WU && magic != kStateMagicR3WT &&magic != kStateMagicR3WS && magic != kStateMagicR3WR && magic != kStateMagicR3WQ && magic != kStateMagicR3WP && magic != kStateMagicR3WO && magic != kStateMagicR3WN && magic != kStateMagicR3WM && magic != kStateMagicR3WL && magic != kStateMagicR3WK && magic != kStateMagicR3WJ && magic != kStateMagicR3WI && magic != kStateMagicR3WH && magic != kStateMagicR3WG && magic != kStateMagicR3WF && magic != kStateMagicR3WE && magic != kStateMagicR3WD
+    if (magic != kStateMagic && magic != kStateMagicR3WV && magic != kStateMagicR3WU && magic != kStateMagicR3WT &&magic != kStateMagicR3WS && magic != kStateMagicR3WR && magic != kStateMagicR3WQ && magic != kStateMagicR3WP && magic != kStateMagicR3WO && magic != kStateMagicR3WN && magic != kStateMagicR3WM && magic != kStateMagicR3WL && magic != kStateMagicR3WK && magic != kStateMagicR3WJ && magic != kStateMagicR3WI && magic != kStateMagicR3WH && magic != kStateMagicR3WG && magic != kStateMagicR3WF && magic != kStateMagicR3WE && magic != kStateMagicR3WD
         && magic != kStateMagicR3WC && magic != kStateMagicR3WB && magic != kStateMagicR3WA
         && magic != kStateMagicR3W9 && magic != kStateMagicR3W8 && magic != kStateMagicR3W7
         && magic != kStateMagicR3W6 && magic != kStateMagicR3W5)
         return;
-    // R3WV: the CHORUS block becomes enabled + DEL/DEP/SPD/MIX/FB/WID/LP/INP + slot (MnM FX-CHORUS clone). R3WU: adds CHORUS (enabled/mode/metal/mix/rate/width/hiss/ring, retired Juno-style) + the RTRG/CHO slot switch after RTRG. R3WT: adds RTRG after Monitor DRY/FX. R3WS: adds Monitor DRY/FX after Plexiphon Couple/Skew. R3WR: adds Plexiphon Couple/Skew after Overdub. R3WQ: adds Overdub level/feedback/monitor after Dirt. R3WP: adds Dirt drive/rate/bits after Mimeophon Ping-Pong. R3WO: adds Mimeophon Ping-Pong after Skew. R3WN: adds Mimeophon Skew after the other
+    // R3WW: adds the RVB/PLX on/off pill (spaceOn) after the chorus slot; older projects load it on. R3WV: the CHORUS block becomes enabled + DEL/DEP/SPD/MIX/FB/WID/LP/INP + slot (MnM FX-CHORUS clone). R3WU: adds CHORUS (enabled/mode/metal/mix/rate/width/hiss/ring, retired Juno-style) + the RTRG/CHO slot switch after RTRG. R3WT: adds RTRG after Monitor DRY/FX. R3WS: adds Monitor DRY/FX after Plexiphon Couple/Skew. R3WR: adds Plexiphon Couple/Skew after Overdub. R3WQ: adds Overdub level/feedback/monitor after Dirt. R3WP: adds Dirt drive/rate/bits after Mimeophon Ping-Pong. R3WO: adds Mimeophon Ping-Pong after Skew. R3WN: adds Mimeophon Skew after the other
     // Mimeophon params. R3WM: adds the Mimeophon
     // params after the Plexiphon params. R3WL: adds the Plexiphon
     // params after reverb Width. R3WK: adds reverb Width after Pre-
@@ -2571,7 +2603,8 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     // MnM model). R3W8..R3WA: the old OT-style Base/Width filter with a single resonance
     // (+ later Drive, + later 12/24 slope). R3W6/R3W7: the even older mode/cutoff filter.
     // R3W5: none.
-    const bool hasMnmChorus        = (magic == kStateMagic);                                  // R3WV
+    const bool hasSpaceOn          = (magic == kStateMagic);                                  // R3WW
+    const bool hasMnmChorus        = (hasSpaceOn || magic == kStateMagicR3WV);                // R3WV+
     const bool hasJunoChorus       = (magic == kStateMagicR3WU);                              // R3WU only
     const bool hasRtrg             = (hasMnmChorus || hasJunoChorus || magic == kStateMagicR3WT); // R3WT+
     const bool hasMonitorFx        = (hasRtrg || magic == kStateMagicR3WS);                   // R3WS+
@@ -2802,6 +2835,9 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
         in.readBool();                                  // ring polarity
         choSlot = in.readBool();
     }
+    // Before R3WW the RVB/PLX slot had no on/off (MIX 0 was silent) -- load it on, so an older
+    // project sounds exactly as it did.
+    const bool spaceOnLoaded = hasSpaceOn ? in.readBool() : true;
 
     if (numCh <= 0 || numCh > kMaxStateChannels || numSamples < 0 || numSamples > 0x7fffffff)
         return;
@@ -2905,6 +2941,7 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     document.chorusLp.store(juce::jlimit(0.0, 1.0, choLp));
     document.chorusInp.store(juce::jlimit(0.0, 1.0, choInp));
     document.fxSlotChorus.store(choSlot);
+    document.spaceOn.store(spaceOnLoaded);
 
     document.setSourceFilePath(sourceFilePath);   // "" on an older state blob -- header shows "Untitled"
 

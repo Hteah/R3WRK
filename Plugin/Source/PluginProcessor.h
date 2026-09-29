@@ -454,6 +454,7 @@ private:
     // and lets the one you just switched away from ring out (tailOnly, fed silence) until it's
     // quiet, instead of cutting its tail off.
     bool lastReverbSelected = true;
+    bool lastSpaceOn = false;
     bool reverbRingingOut = false, plexRingingOut = false;
     int  ringOutSilentSamples = 0, ringOutSamplesLeft = 0;
     void applySpaceSlot (juce::AudioBuffer<float>& buffer, int numCh, int numSamples, bool freshPlayPass);

@@ -122,6 +122,10 @@ last) → NaN safety net → capture-output**. Notes on the newer pieces:
   recording; DRY (after Gain) or FX (mixed in before Dirt). Never restored ON from state.
 - **Plexiphon v2** (`PlexiphonEngine.h`): two 8-line FDNs (L/R), PLEXUS = active lines + echo→reverb
   line lengths + identity→Hadamard; COUPLE/SKEW stereo; cut-only COLOR.
+- **RVB / PLX slot** (`applySpaceSlot()`): Erbe-Verb and Plexiphon share the last drawer slot.
+  The `SlotSwitchTab` above the pill picks the model (`reverbEnabled` / `plexEnabled`); the pill is
+  the slot's on/off (`AudioDocument::spaceOn`, state R3WW; older projects load it on). Switching
+  off or switching models lets the tail ring out instead of cutting it. MIX 0 is just silent.
 Speed/Pitch/Stretch atomics on `AudioDocument` decide the playback engine: when all three are
 centred (1/0/1) it's a plain sample copy (zero latency); otherwise it routes through `r3wrk::LofiStretch` (`Source/LofiStretch.h`, built per
 `prepareToPlay`): Speed = tape varispeed (time + pitch together), Stretch = Paulstretch (always

@@ -4,6 +4,7 @@
 #include "AudioDocument.h"
 #include "Theme.h"
 #include "R3WRKLookAndFeel.h"
+#include "SlotSwitchTab.h"
 
 /**
     The PLEXIPHON cell of the FX drawer (4th slot, replacing GRANULAR's old placeholder -- see
@@ -46,7 +47,8 @@ private:
         void mouseEnter(const juce::MouseEvent&) override { hovered = true; repaint(); }
         void mouseExit(const juce::MouseEvent&) override { hovered = false; repaint(); }
     };
-    EnablePill enablePill;
+    EnablePill enablePill;       // the RVB/PLX slot's on/off (AudioDocument::spaceOn)
+    SlotSwitchTab slotTab;       // above the pill: switches the slot to the other model
 
     struct Knob
     {
