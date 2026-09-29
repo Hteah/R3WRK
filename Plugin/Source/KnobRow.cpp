@@ -400,7 +400,8 @@ void KnobRow::resized()
     // "more"-dot size -- reserved here so the knobs auto-fit around it.
     constexpr int moreW = 20, moreH = 16;
     const int dirtIndex = dirtKnob != nullptr ? knobs.indexOf(dirtKnob) : -1;
-    const int avail = juce::jmax(0, r.getWidth() - gap * (n - 1) - (dirtIndex >= 0 ? moreW + gap : 0));
+    const int sectionExtra = (n > 3 ? badgeGap - gap : 0) + (n > 8 ? dotGap - gap : 0);   // the wide gaps take their share too
+    const int avail = juce::jmax(0, r.getWidth() - gap * (n - 1) - sectionExtra - (dirtIndex >= 0 ? moreW + gap : 0));
     const int knobW = juce::jlimit(46, 53, avail / n);
 
     for (int i = 0; i < knobs.size(); ++i)
