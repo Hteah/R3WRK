@@ -1129,16 +1129,16 @@ void EditorToolbar::paint(juce::Graphics& g)
 
     if (standaloneApp)
     {
-        dotsBetween(overdubMoreButton, desktopRecButton);
+        dotsBetween(monitorButton, desktopRecButton);
         dotsBetween(captureOutButton, scrubButton);
     }
     if (isPluginBuild)
     {
-        dotsBetween(overdubMoreButton, blackBoxButton);
+        dotsBetween(monitorButton, blackBoxButton);
         dotsBetween(blackBoxButton, scrubButton);
     }
     dotsBetween(sliceButton, toolsButton);
-    dotsBetween(autoRecordButton, monitorButton);    // Record/Auto-Record | Monitor/Overdub
+    dotsBetween(autoRecordButton, overdubButton);    // Record/Auto-Record | Overdub/Monitor
 }
 
 //==============================================================================
@@ -2035,7 +2035,7 @@ void EditorToolbar::resized()
     };
     auto add = [&](juce::Component& c, int rightMargin = 16) { addWide(c, 28, rightMargin); };
     // Order set by the user: transport (Play-from-start, Play, Loop) -> primary record
-    // (Record, Auto-Record) -> input (Monitor, Overdub + its menu) -> secondary record (Record Desktop, Capture Output; standalone
+    // (Record, Auto-Record) -> input (Overdub + its menu, Monitor) -> secondary record (Record Desktop, Capture Output; standalone
     // only -- or Black Box; plugin only) -> waveform tools (Scrub, Slice) -> Tools menu ->
     // Clear, with the time readout pinned right. All round icon buttons. paint() drops a
     // divider dot in each widened (gap + dotGap) gap. (Follow-playhead moved to the header
@@ -2043,12 +2043,12 @@ void EditorToolbar::resized()
     add(playFromStartButton);
     add(playButton);
     add(loopButton);
-    // Record + Auto-Record together; then the input group: Monitor, Overdub + its menu dot.
+    // Record + Auto-Record together; then the input group: Overdub + its menu dot, Monitor last.
     add(recordButton);
-    add(autoRecordButton, gap + dotGap);            // divider before Monitor
-    add(monitorButton);
+    add(autoRecordButton, gap + dotGap);            // divider before Overdub
     add(overdubButton, 2);
-    addWide(overdubMoreButton, 20, (standaloneApp || isPluginBuild) ? gap + dotGap : gap);   // the FX drawer's "more" dot size (20 x 16); dot before the next section
+    addWide(overdubMoreButton, 20, gap);            // the FX drawer's "more" dot size (20 x 16)
+    add(monitorButton, (standaloneApp || isPluginBuild) ? gap + dotGap : gap);   // dot before the next section
     if (standaloneApp)
     {
         add(desktopRecButton);
