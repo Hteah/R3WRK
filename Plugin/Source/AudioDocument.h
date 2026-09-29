@@ -401,20 +401,22 @@ public:
     std::atomic<double> rtrgHostBpm { 0.0 };    // written by the audio thread (0 = no host tempo)
     std::atomic<bool>   rtrgStuttering { false };   // audio thread -> pill (lit while repeating)
 
-    // CHORUS (r3wrk::ChorusEngine, ChorusEngine.h) -- BBD-style chorus, right after the filter
-    // (before RTRG). METAL 0 = the classic I / II / I+II chorus; up = shorter delay + feedback.
+    // CHORUS (r3wrk::MnmChorusEngine, MnmChorusEngine.h) -- a measured clone of the Monomachine
+    // FX-CHORUS machine, right after the filter (before RTRG). Its eight params are the machine's
+    // own, 0..1 = raw 0..127 / 127, defaults = the machine's (MIX 127 = fully wet, like the MnM).
     // CHO shares RTRG's drawer slot: fxSlotChorus picks which one the slot shows, and only the
     // shown one runs (the chorus needs fxSlotChorus && chorusEnabled; RTRG's latch is released
     // when the slot switches to CHO).
     std::atomic<bool>   fxSlotChorus  { false };
     std::atomic<bool>   chorusEnabled { false };
-    std::atomic<double> chorusMode    { 0.0 };    // 0..1 -> I / II / I+II
-    std::atomic<double> chorusMetal   { 0.0 };
-    std::atomic<double> chorusMix     { 0.5 };
-    std::atomic<double> chorusRate    { 0.5 };    // trim, 0.5 = the mode's measured rate
-    std::atomic<double> chorusWidth   { 1.0 };
-    std::atomic<double> chorusHiss    { 0.0 };
-    std::atomic<bool>   chorusRingNeg { false };
+    std::atomic<double> chorusDel { 64 / 127.0 };   // delay time (0.34 .. 22.7 ms)
+    std::atomic<double> chorusDep { 64 / 127.0 };   // sweep depth (scales with DEL)
+    std::atomic<double> chorusSpd { 64 / 127.0 };   // LFO speed (0 = stopped, 127 ~ 2 Hz)
+    std::atomic<double> chorusMix { 1.0 };          // dry <-> wet; 127 = wet only (-6 dB)
+    std::atomic<double> chorusFb  { 0.0 };          // feedback (negative); 127 ~ endless ring
+    std::atomic<double> chorusWid { 0.0 };          // R LFO phase offset (0 = mono, 127 = 90 deg)
+    std::atomic<double> chorusLp  { 1.0 };          // low-pass on the feedback only
+    std::atomic<double> chorusInp { 64 / 127.0 };   // input gain (INP/64)^2 into a hard clip
 
     //==============================================================================
     // Plexiphon (r3wrk::PlexiphonEngine, PlexiphonEngine.h) -- phase 1: mono core network

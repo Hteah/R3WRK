@@ -12,7 +12,7 @@
 #include "PlexiphonEngine.h"
 #include "MimeophonEngine.h"
 #include "RetrigEngine.h"
-#include "ChorusEngine.h"
+#include "MnmChorusEngine.h"
 
 
 class R3WRKAudioProcessor : public juce::AudioProcessor
@@ -464,12 +464,18 @@ private:
     double rtrgTempo = 120.0;
     void applyRetrig (juce::AudioBuffer<float>& buffer, int numCh, int numSamples, bool freshPlayPass);
 
-    // CHORUS (r3wrk::ChorusEngine, ChorusEngine.h): after the filter, before RTRG. Resets only on
-    // the enable edge (never on freshPlayPass); after a disable it runs until its fade-out ends,
-    // then leaves the buffer untouched.
-    r3wrk::ChorusEngine chorusDsp;
+    // CHORUS (r3wrk::MnmChorusEngine, MnmChorusEngine.h): after the filter, before RTRG. Resets
+    // only on the enable edge (never on freshPlayPass); after a disable it runs until its fade-out
+    // ends, then leaves the buffer untouched. With FB up it keeps ringing after Stop: the idle tail
+    // feeds it silence (into chorusTailScratch) until its wet output has been quiet for 2 s.
+    r3wrk::MnmChorusEngine chorusDsp;
     bool lastChorusEngaged = false;
+    int  chorusTailSamplesLeft   = 0;
+    int  chorusTailSilentSamples = 0;
+    juce::AudioBuffer<float> chorusTailScratch;
+    r3wrk::MnmChorusEngine::Params chorusParams() const noexcept;
     void applyChorus (juce::AudioBuffer<float>& buffer, int numCh, int numSamples, bool freshPlayPass);
+    float applyChorusTail (juce::AudioBuffer<float>& buffer, int numCh, int numSamples);
 
     // Mimeophon (r3wrk::MimeophonEngine, MimeophonEngine.h) -- phase 1: core delay engine, live
     // monitoring, not baked into Save/Export. Exact structural mirror of the Reverb/Plexiphon
