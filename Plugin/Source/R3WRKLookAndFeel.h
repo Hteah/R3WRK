@@ -19,7 +19,7 @@ inline void drawBracketToggle(juce::Graphics& g, juce::Rectangle<float> area, co
     const juce::Colour onInk = lit.interpolatedWith(dim, 0.3f);
     g.setColour(on ? onInk : (hovered ? dim.interpolatedWith(onInk, 0.5f) : dim));
     // systemUIFont: Space Mono's strokes blur together at this size (see KnobRow::ModelBadge).
-    g.setFont(systemUIFont(14.0f, on));   // one size for every label -- toggle columns are 52px so "[RTRG]" fits
+    g.setFont(systemUIFont(16.0f, on));   // one size for every label -- toggle columns are 60px so "[RTRG]" fits
     g.drawFittedText("[" + text + "]", area.toNearestInt(), juce::Justification::centred, 1, 0.75f);
 }
 

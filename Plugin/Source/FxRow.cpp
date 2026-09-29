@@ -110,7 +110,7 @@ void FxRow::resized()
     // constant) so it can't silently drift from any one panel's own layout. knobW (53) matches
     // KnobRow's own auto-fit upper bound, and pillW (32) matches KnobRow::ModelBadge's own size,
     // so these read the same size as the top row's.
-    constexpr int panelW = 52 + 3 + (53 + 3) * 2 + 20;   // 187 (toggle column 52: fits "[RTRG]" at 14pt bold)
+    constexpr int panelW = 60 + 3 + (53 + 3) * 2 + 20;   // 195 (toggle column 60: fits "[RTRG]" at 16pt bold)
 
     // The first slot starts so its toggle's left edge sits under the Pitch knob's disc (each
     // panel insets its toggle column by 4px -- see their resized()).

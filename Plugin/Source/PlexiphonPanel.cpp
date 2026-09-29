@@ -211,7 +211,7 @@ void PlexiphonPanel::resized()
 {
     // Packed from the left, sized to content -- same fix as ReverbPanel/LfoPanel's own layout.
     auto r = getLocalBounds().reduced(4, 2);
-    constexpr int gap = 3, pillW = 52, pillH = 20, knobW = 53, moreW = 20, moreH = 16;   // pillW/pillH match KnobRow::ModelBadge's own size (the filter MNM/OT badge); knobW matches KnobRow's own upper bound (46-53 auto-fit)
+    constexpr int gap = 3, pillW = 60, pillH = 22, knobW = 53, moreW = 20, moreH = 16;   // pillW/pillH match KnobRow::ModelBadge's own size (the filter MNM/OT badge); knobW matches KnobRow's own upper bound (46-53 auto-fit)
 
     auto pillArea = r.removeFromLeft(pillW);
     slotTab.setBounds(pillArea.withHeight(17).withSizeKeepingCentre(pillW, 13));   // caption row, like RetrigPanel's
