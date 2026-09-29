@@ -110,7 +110,7 @@ void FxRow::resized()
     // constant) so it can't silently drift from any one panel's own layout. knobW (53) matches
     // KnobRow's own auto-fit upper bound, and pillW (32) matches KnobRow::ModelBadge's own size,
     // so these read the same size as the top row's.
-    constexpr int panelW = 32 + 3 + (53 + 3) * 2 + 20;   // 167
+    constexpr int panelW = 42 + 3 + (53 + 3) * 2 + 20;   // 177 (toggle column 42)
 
     // With Gain showing and End's position known, spread the three gaps evenly so Gain's column
     // starts exactly where End's does (clamped so the effects never touch or drift apart).
