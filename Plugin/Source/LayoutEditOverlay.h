@@ -180,8 +180,8 @@ private:
     static bool dependsOn(const juce::String& other, const juce::String& dragged)
     {
         if (other.startsWith(dragged + ".")) return true;   // a slot's own toggle moves with it
-        if (dragged == "knob.Pitch") return other.startsWith("fx.");
-        if (dragged == "knob.End")   return other == "fx.gain";
+        if (dragged == "knob.PITCH") return other.startsWith("fx.");   // ids use the captions, upper case
+        if (dragged == "knob.END")   return other == "fx.gain";
         return false;
     }
 

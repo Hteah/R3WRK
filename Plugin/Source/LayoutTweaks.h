@@ -13,8 +13,8 @@
     plugin instance. Broadcasts a change whenever an offset or the editing flag changes; the
     editor listens and re-runs its layout.
 
-    Ids: "knob.<caption>" (e.g. "knob.End"), "badge.filter", and "fx.mod" / "fx.dly" /
-    "fx.space" / "fx.gain" for the drawer's slots.
+    Ids: "knob.<caption>" (e.g. "knob.END"), "badge.filter", and "fx.mod" / "fx.dly" /
+    "fx.space" / "fx.gain" for the drawer's slots, "fx.<slot>.toggle" for their toggles.
 */
 class LayoutTweaks : public juce::ChangeBroadcaster
 {
