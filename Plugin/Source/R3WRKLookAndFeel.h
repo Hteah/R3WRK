@@ -19,7 +19,7 @@ inline void drawBracketToggle(juce::Graphics& g, juce::Rectangle<float> area, co
     const juce::Colour onInk = lit.interpolatedWith(dim, 0.3f);
     g.setColour(on ? onInk : (hovered ? dim.interpolatedWith(onInk, 0.5f) : dim));
     // systemUIFont: Space Mono's strokes blur together at this size (see KnobRow::ModelBadge).
-    g.setFont(systemUIFont(text.length() > 3 ? 10.0f : 11.0f, on));
+    g.setFont(systemUIFont(text.length() > 3 ? 11.5f : 12.5f, on));
     g.drawFittedText("[" + text + "]", area.toNearestInt(), juce::Justification::centred, 1, 0.75f);
 }
 
