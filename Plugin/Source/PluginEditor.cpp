@@ -35,7 +35,7 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
     addChildComponent(fxRow);   // hidden until the drawer is opened -- see toggleFxDrawer()
 
     knobRow.onDrawerToggle = [this] { toggleFxDrawer(); };
-    knobRow.onReset = [this]
+    fxRow.onReset = [this]
     {
         // Emergency reset: stop (committing an overdub pass as usual), then every knob and effect
         // back to default. A recording in progress is left running -- stopping it is Record's job.
@@ -392,6 +392,8 @@ void R3WRKAudioProcessorEditor::resized()
     fxRow.setGainColumn(knobRow.getLastColumnXRange() + (knobRow.getX() - fxRow.getX()));
     // ...and starts its first toggle right under the Pitch knob's disc.
     fxRow.setFirstEdge(knobRow.getFirstKnobDiscLeft() + (knobRow.getX() - fxRow.getX()));
+    // ...and centres its reset button under the drawer toggle.
+    fxRow.setResetCentreX(knobRow.getDrawerToggleCentreX() + (knobRow.getX() - fxRow.getX()));
     layoutOverlay.setBounds(fxDrawerOpen ? knobRow.getBounds().getUnion(fxRow.getBounds()) : knobRow.getBounds());
     layoutOverlay.repaint();
         // 74 + 9 for the bigger caption/readout fonts (experiment/space-mono-font), so the

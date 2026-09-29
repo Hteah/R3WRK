@@ -59,6 +59,12 @@ public:
     // the knob row's Pitch disc, so the drawer lines up under it. -1 = not known yet.
     void setFirstEdge(int x) { firstEdge = x; resized(); }
 
+    // The reset button (boxed X) sits at the drawer's right end, centred under the knob row's
+    // drawer toggle: x = that toggle's centre, this component's coordinates. onReset fires on click
+    // (the editor stops the transport + AudioDocument::resetSoundToDefaults).
+    void setResetCentreX(int x) { resetCentreX = x; resized(); }
+    std::function<void()> onReset;
+
     // Edit Layout: the three slots + Gain, for LayoutEditOverlay.
     void getLayoutItems(juce::Array<LayoutItem>& items);
 
@@ -89,6 +95,9 @@ private:
     const bool showGain;
     juce::Range<int> gainColumn;   // empty until PluginEditor passes it
     int firstEdge = -1;            // Pitch disc's left edge, -1 until PluginEditor passes it
+    int resetCentreX = -1;         // drawer toggle's centre x, -1 until PluginEditor passes it
+    R3WRKIconOnlyLookAndFeel resetLnF;
+    juce::TextButton resetButton { R3WRKLookAndFeel::iconReset };
     R3WRKLookAndFeel gainLnF;
     juce::Label gainCaption;
     juce::Slider gainKnob;

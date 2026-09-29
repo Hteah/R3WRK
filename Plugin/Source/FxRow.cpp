@@ -45,6 +45,12 @@ FxRow::FxRow(AudioDocument& doc, bool standalone)
         gainKnob.onValueChange = [this] { document.playbackGainDb.store(gainKnob.getValue()); };
         addAndMakeVisible(gainKnob);
     }
+    resetButton.setWantsKeyboardFocus(false);
+    resetButton.setTooltip("Reset: stop, and put every knob and effect back to default");
+    resetButton.setLookAndFeel(&resetLnF);
+    resetButton.onClick = [this] { if (onReset) onReset(); };
+    addAndMakeVisible(resetButton);
+
     startTimerHz(15);
 
     applyTheme();
@@ -54,6 +60,7 @@ FxRow::FxRow(AudioDocument& doc, bool standalone)
 FxRow::~FxRow()
 {
     gainKnob.setLookAndFeel(nullptr);   // detach before gainLnF is destroyed
+    resetButton.setLookAndFeel(nullptr);
     theme->removeChangeListener(this);
 }
 
@@ -97,6 +104,9 @@ void FxRow::applyTheme()
     gainKnob.setColour(juce::Slider::rotarySliderFillColourId, pal.accent);
     gainKnob.setColour(juce::Slider::textBoxTextColourId, pal.text);
     gainKnob.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+    resetButton.setColour(juce::TextButton::buttonColourId,  juce::Colours::transparentBlack);
+    resetButton.setColour(juce::TextButton::textColourOffId, pal.text);
+    resetButton.setColour(juce::TextButton::textColourOnId,  pal.text);
     repaint();
 }
 
@@ -107,6 +117,13 @@ void FxRow::resized()
     // its own CONTENT width -- not stretched across an equal third of the row -- same "packed
     // from the left, sized to content" idiom each panel already uses for its own internal
     // pill+knobs.
+    // Reset button: centred under the drawer toggle, vertically centred in the row. 42px box ->
+    // the X's square is ~26px, the size of the open drawer toggle's glyph.
+    constexpr int resetSide = 42;
+    if (resetCentreX >= 0)
+        resetButton.setBounds(juce::Rectangle<int>(resetSide, resetSide)
+                                  .withCentre({ resetCentreX, getHeight() / 2 }));
+
     auto full = getLocalBounds().reduced(4, 2);
     constexpr int sectionGap = 16;   // matches KnobRow's dotGap between its own sections
 
