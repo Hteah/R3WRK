@@ -34,7 +34,7 @@ inline void drawBracketToggle(juce::Graphics& g, juce::Rectangle<float> area, co
 
     // Plain: just the name, dim when off, bright when on (boxes were tried, on and off, and
     // dropped). `box` is only the text's area now.
-    const auto font = spaceMonoFont(16.0f, false);   // the knobs' value readouts' font (createSliderTextBox); on/off is ink only
+    const auto font = spaceMonoFont(19.0f, false);   // the knobs' value readouts' font (createSliderTextBox); on/off is ink only
     const float textW = juce::GlyphArrangement::getStringWidth(font, text);
     // Whole pixels, so the 1px frame (drawn just inside the rect) stays crisp.
     const auto box = area.withSizeKeepingCentre(juce::jmin(area.getWidth(), textW + 14.0f), area.getHeight())
