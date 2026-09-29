@@ -15,7 +15,9 @@ juce::Font systemUIFont(float height, bool bold = true);
 inline void drawBracketToggle(juce::Graphics& g, juce::Rectangle<float> area, const juce::String& text,
                               bool on, bool hovered, juce::Colour lit, juce::Colour dim)
 {
-    g.setColour(on ? lit : (hovered ? dim.interpolatedWith(lit, 0.5f) : dim));
+    // On is the theme's text colour pulled 30% toward dim -- full text colour read stark white.
+    const juce::Colour onInk = lit.interpolatedWith(dim, 0.3f);
+    g.setColour(on ? onInk : (hovered ? dim.interpolatedWith(onInk, 0.5f) : dim));
     // systemUIFont: Space Mono's strokes blur together at this size (see KnobRow::ModelBadge).
     g.setFont(systemUIFont(text.length() > 3 ? 10.0f : 11.0f, on));
     g.drawFittedText("[" + text + "]", area.toNearestInt(), juce::Justification::centred, 1, 0.75f);
