@@ -32,20 +32,15 @@ inline void drawBracketToggle(juce::Graphics& g, juce::Rectangle<float> area, co
         return;
     }
 
-    // Boxed: a plain square-cornered 1px frame hugging the name (not the whole column, so short
-    // names get short boxes), a faint wash of the ink inside when on.
+    // Boxed: off = a plain square-cornered 1px frame hugging the name (not the whole column, so
+    // short names get short boxes); on = the name alone in the brighter ink, no frame.
     const auto font = systemUIFont(14.0f, on);
     const float textW = juce::GlyphArrangement::getStringWidth(font, text);
     // Whole pixels, so the 1px frame (drawn just inside the rect) stays crisp.
     const auto box = area.withSizeKeepingCentre(juce::jmin(area.getWidth(), textW + 14.0f), area.getHeight())
                          .toNearestInt().toFloat();
-    if (on)
-    {
-        g.setColour(onInk.withAlpha(0.12f));
-        g.fillRect(box);
-        g.setColour(ink);
-    }
-    g.drawRect(box, 1.0f);
+    if (! on)
+        g.drawRect(box, 1.0f);   // on = just the name, bright -- the frame only shows while off
     g.setFont(font);
     g.drawFittedText(text, box.toNearestInt(), juce::Justification::centred, 1, 0.8f);
 }
