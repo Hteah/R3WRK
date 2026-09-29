@@ -214,6 +214,15 @@ int FxRow::packSlot(Panel& panel, int x, const juce::String& id)
         right = juce::roundToInt(moreIconInkBounds(more->getBounds()).getRight());
     }
 
+    // The switch tab above the toggle (if any): left-aligned with the toggle's text, so every
+    // slot's tab sits the same way however wide the two names are.
+    if (parts.size() > 1)
+        if (auto* tab = dynamic_cast<SlotSwitchTab*>(parts[1]))
+        {
+            tab->justification = juce::Justification::centredLeft;
+            tab->setTopLeftPosition(ink.getX(), tab->getY());
+        }
+
     // Toggle text starts at x; then the user's Edit Layout nudges on top.
     panel.setTopLeftPosition(x - ink.getX() + layout->get(id), 2);
     const int dxUser = juce::jmax(layout->get(id + ".toggle"), -parts.getFirst()->getX());
