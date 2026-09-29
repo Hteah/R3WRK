@@ -12,7 +12,7 @@ juce::Font systemUIFont(float height, bool bold = true);
 // the name in plain typed brackets, "[RVB]" -- dim when off, bold full ink when on, in between
 // while hovered. Replaces the old filled rounded "pill" (too corporate next to R3WRK's
 // hand-drawn line icons); tried as dot-matrix and as drawn corner ticks before settling here.
-// Toggle style switch: true = the plain name (current, 14pt), false = the typed-bracket
+// Toggle style switch: true = the plain name (current, Space Mono like the knob readouts), false = the typed-bracket
 // "[RVB]" look it replaced.
 constexpr bool kBoxedToggles = true;
 
@@ -34,7 +34,7 @@ inline void drawBracketToggle(juce::Graphics& g, juce::Rectangle<float> area, co
 
     // Plain: just the name, dim when off, bright when on (boxes were tried, on and off, and
     // dropped). `box` is only the text's area now.
-    const auto font = systemUIFont(14.0f, on);
+    const auto font = spaceMonoFont(16.0f, false);   // the knobs' value readouts' font (createSliderTextBox); on/off is ink only
     const float textW = juce::GlyphArrangement::getStringWidth(font, text);
     // Whole pixels, so the 1px frame (drawn just inside the rect) stays crisp.
     const auto box = area.withSizeKeepingCentre(juce::jmin(area.getWidth(), textW + 14.0f), area.getHeight())
