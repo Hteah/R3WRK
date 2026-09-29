@@ -12,15 +12,42 @@ juce::Font systemUIFont(float height, bool bold = true);
 // the name in plain typed brackets, "[RVB]" -- dim when off, bold full ink when on, in between
 // while hovered. Replaces the old filled rounded "pill" (too corporate next to R3WRK's
 // hand-drawn line icons); tried as dot-matrix and as drawn corner ticks before settling here.
+// Toggle style switch: true = square-cornered box around the name (current), false = the
+// typed-bracket "[RVB]" look it replaced.
+constexpr bool kBoxedToggles = true;
+
 inline void drawBracketToggle(juce::Graphics& g, juce::Rectangle<float> area, const juce::String& text,
                               bool on, bool hovered, juce::Colour lit, juce::Colour dim)
 {
     // On is the theme's text colour pulled 30% toward dim -- full text colour read stark white.
     const juce::Colour onInk = lit.interpolatedWith(dim, 0.3f);
-    g.setColour(on ? onInk : (hovered ? dim.interpolatedWith(onInk, 0.5f) : dim));
-    // systemUIFont: Space Mono's strokes blur together at this size (see KnobRow::ModelBadge).
-    g.setFont(systemUIFont(16.0f, on));   // one size for every label -- toggle columns are 60px so "[RTRG]" fits
-    g.drawFittedText("[" + text + "]", area.toNearestInt(), juce::Justification::centred, 1, 0.75f);
+    const juce::Colour ink = on ? onInk : (hovered ? dim.interpolatedWith(onInk, 0.5f) : dim);
+    g.setColour(ink);
+
+    if (! kBoxedToggles)
+    {
+        // systemUIFont: Space Mono's strokes blur together at this size (see KnobRow::ModelBadge).
+        g.setFont(systemUIFont(16.0f, on));   // one size for every label -- toggle columns are 60px so "[RTRG]" fits
+        g.drawFittedText("[" + text + "]", area.toNearestInt(), juce::Justification::centred, 1, 0.75f);
+        return;
+    }
+
+    // Boxed: a plain square-cornered 1px frame hugging the name (not the whole column, so short
+    // names get short boxes), a faint wash of the ink inside when on.
+    const auto font = systemUIFont(14.0f, on);
+    const float textW = juce::GlyphArrangement::getStringWidth(font, text);
+    // Whole pixels, so the 1px frame (drawn just inside the rect) stays crisp.
+    const auto box = area.withSizeKeepingCentre(juce::jmin(area.getWidth(), textW + 14.0f), area.getHeight())
+                         .toNearestInt().toFloat();
+    if (on)
+    {
+        g.setColour(onInk.withAlpha(0.12f));
+        g.fillRect(box);
+        g.setColour(ink);
+    }
+    g.drawRect(box, 1.0f);
+    g.setFont(font);
+    g.drawFittedText(text, box.toNearestInt(), juce::Justification::centred, 1, 0.8f);
 }
 
 /**
