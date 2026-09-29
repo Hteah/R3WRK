@@ -126,6 +126,16 @@ last) → NaN safety net → capture-output**. Notes on the newer pieces:
   The `SlotSwitchTab` above the pill picks the model (`reverbEnabled` / `plexEnabled`); the pill is
   the slot's on/off (`AudioDocument::spaceOn`, state R3WW; older projects load it on). Switching
   off or switching models lets the tail ring out instead of cutting it. MIX 0 is just silent.
+- **Filter on/off**: the MNM/OT badge in the knob row is the filter's on/off (`AudioDocument::filterOn`,
+  state R3WX; older projects load it on); off glides the filter open and bypasses, knobs untouched.
+  The `SlotSwitchTab` above it switches the model (`filterModel`).
+- **Reset button** (boxed X under the drawer toggle, in the FX drawer): `FxRow::onReset` -> the editor
+  ends an overdub pass, stops playback, then `AudioDocument::resetSoundToDefaults()` -- every
+  sound-shaping knob/effect back to its member-initialiser default (effects off, MIX 0 so tails go
+  silent). Keeps slot/model choices, loop mode, selection; a running recording is left alone. **When
+  you add or change a default in `AudioDocument.h`, update `resetSoundToDefaults()` too** -- the smoke
+  test's "reset to defaults" block compares it field by field against a fresh `AudioDocument`, so add
+  new fields there as well.
 Speed/Pitch/Stretch atomics on `AudioDocument` decide the playback engine: when all three are
 centred (1/0/1) it's a plain sample copy (zero latency); otherwise it routes through `r3wrk::LofiStretch` (`Source/LofiStretch.h`, built per
 `prepareToPlay`): Speed = tape varispeed (time + pitch together), Stretch = Paulstretch (always
@@ -171,9 +181,19 @@ codebase's established style:
   `PluginProcessor::numActiveLfoSlots()`'s `kLfoFeatureShelved` switch — re-enabling is a two-line
   change (see `FxRow.h`'s own comment), not a rewrite.
 
-Each engine has a matching compact `*Panel` (`MimeophonPanel`, `PlexiphonPanel`, `ReverbPanel`) that
-lives directly in the drawer (2 primary knobs + enable pill), plus a `juce::CallOutBox` popup
-(launched from a "…" button) exposing the full parameter set. `PluginProcessor::applyMimeophon()` /
+Each engine has a matching compact `*Panel` (`RetrigPanel`, `ChorusPanel`, `MimeophonPanel`,
+`PlexiphonPanel`, `ReverbPanel`) that lives directly in the drawer (toggle + 2 primary knobs + a
+"more" dot), plus a `juce::CallOutBox` popup (the "more" dot; double-click pins it) exposing the full
+parameter set.
+
+**Drawer layout** (`FxRow::resized()` / `packSlot()`): packed left to right from the Pitch knob's disc
+edge with exactly **12px between drawn items** -- toggle text, knob discs, the "more" ring, the
+3-dot dividers (`FxRow::paint`) and Gain -- measured from ink (`toggleInkBounds()`,
+`moreIconInkBounds()`, `layoutGuideRect()`), not component boxes; the knob pairs keep the panels' own
+spacing. Each panel reaches `kToggleSlack` px further left than it draws (`leftSlack`, clicks pass
+through via `setInterceptsMouseClicks(false, true)`) so toggles can move without clipping; panels
+expose `getToggleParts()` / `getToggleText()` for this. The slot switch tab is left-aligned with its
+toggle's text. `PluginProcessor::applyMimeophon()` /
 `applyPlexiphon()` / `applyReverb()` apply them in the fixed chain order above.
 
 **Research docs**: each engine's own header comment cites the external research doc it was built
@@ -208,6 +228,40 @@ in `R3WRKLookAndFeel.h`) attach an already-resolved typeface directly to a `Font
 `getTypefaceForFont()` override — used where a specific typeface (not just "whatever's app-default")
 must be guaranteed, or where Space Mono's monospace strokes read poorly at very small sizes (e.g.
 `systemUIFont` for tiny badges/pills).
+
+**Toggles** (`drawBracketToggle()` -- name kept from the bracket era): the drawer toggles and the
+filter badge are the plain name in Space Mono 19 (the knob readouts' font), dim when off, on = text
+colour pulled 45% toward dim. No boxes, brackets, pills or bold -- the user tried and rejected each
+(`kBoxedToggles = false` restores the old "[RVB]" brackets). `SlotSwitchTab` has no hover box.
+
+**Edit Layout mode** (Standalone: R3WRK app menu; plugin: Tools): `LayoutTweaks` (`LayoutTweaks.h`,
+process-wide, saved to `~/Library/Application Support/R3WRK/Layout.settings`) holds one x offset per
+item -- ids `knob.<CAPTION>` (upper case, e.g. `knob.END`), `badge.filter`, `fx.mod|dly|space|gain`,
+`fx.<slot>.toggle`. `KnobRow`/`FxRow` apply the offsets after their automatic layout and report items
+via `getLayoutItems()`; `LayoutEditOverlay` (drag with snapping, arrow-key nudges, px dimension arrows
+between neighbours, [DONE]/[RESET]) covers both rows while editing. Offsets sit on top of the
+automatic layout, so drawer offsets break the exact 12px packing.
+
+**Toolbar order** (`EditorToolbar::resized()`): Play-from-start, Play, Loop, Record, Auto-Record ⋮
+Overdub, Overdub menu dot, Monitor ⋮ Record Desktop, Capture Output (Standalone) / Black Box (plugin)
+⋮ Scrub, Slice ⋮ Tools, Clear. Divider dots are placed by `paint()`'s `dotsBetween()` pairs -- update
+them with the order.
+
+**Standalone window drag**: everything above the waveform acts as the title bar
+(`PluginEditor::isInTitleArea`): drag to move, double-click to zoom. `HeaderBar` passes clicks
+through except on the file name (click = open a file).
+
+### Checking UI changes
+
+The harness can't click in the app, so verify layout by screenshot: find the window id with a small
+Swift `CGWindowListCopyWindowInfo` script (owner "R3WRK"), then `screencapture -x -o -l <id>`. To see
+the drawer or Edit Layout, add a temporary line after `layoutTweaks->addChangeListener(this);` in the
+`PluginEditor` ctor that runs only when an env var is set (e.g. `R3WRK_TEST_LAYOUT` -> `callAsync`
+`toggleFxDrawer()`, or `layoutTweaks->setEditing(true)`), launch the binary directly with that env
+var, and remove the line before committing. The same trick with `getComponentAt()` probes answers
+"is this control actually clickable". Quit with `osascript -e 'tell application "R3WRK" to quit'`
+rather than `pkill` -- a JUCE CoreAudio device-combiner crash was seen once when a Bluetooth device
+changed during a kill/relaunch.
 
 ### State persistence
 
