@@ -247,7 +247,41 @@ void FxRow::getLayoutItems(juce::Array<LayoutItem>& items)
                     { layoutGuideRect(gainKnob) } });
 }
 
-void FxRow::paint(juce::Graphics&)
+void FxRow::paint(juce::Graphics& g)
 {
-    // Nothing to draw: the effect slots are separated by spacing alone (no divider dots).
+    // Divider dots between the sections, like KnobRow's: three small dots centred in the gap
+    // between one slot's "more" dot and the next slot's toggle text, and before Gain. Measured
+    // from the same content rects the Edit Layout overlay uses, so they follow any nudges.
+    juce::Array<LayoutItem> items;
+    getLayoutItems(items);
+    auto find = [&](const juce::String& id) -> const LayoutItem*
+    {
+        for (auto& it : items) if (it.id == id && ! it.guides.isEmpty()) return &it;
+        return nullptr;
+    };
+    auto extent = [](const LayoutItem& it)
+    {
+        auto r = it.guides.getFirst();
+        for (auto gr : it.guides) r = r.getUnion(gr);
+        return r;
+    };
+
+    constexpr int   count = 3;
+    constexpr float radius = 1.5f, spacing = 5.0f;   // KnobRow::paint's dots
+    g.setColour(theme->palette().text.withAlpha(0.4f));
+    auto dotsBetween = [&](const char* leftId, const char* rightId)
+    {
+        const auto* l = find(leftId);
+        const auto* r = find(rightId);
+        if (l == nullptr || r == nullptr) return;
+        const auto a = extent(*l), b = extent(*r);
+        if (b.getX() <= a.getRight()) return;
+        const float x = (float) (a.getRight() + b.getX()) * 0.5f;
+        float y = (float) a.getCentreY() - (count - 1) * spacing * 0.5f;   // level with the slot's content
+        for (int i = 0; i < count; ++i, y += spacing)
+            g.fillEllipse(x - radius, y - radius, radius * 2.0f, radius * 2.0f);
+    };
+    dotsBetween("fx.mod", "fx.dly.toggle");
+    dotsBetween("fx.dly", "fx.space.toggle");
+    dotsBetween("fx.space", "fx.gain");
 }
