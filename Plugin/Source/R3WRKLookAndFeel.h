@@ -12,13 +12,12 @@ juce::Font systemUIFont(float height, bool bold = true);
 // the name in plain typed brackets, "[RVB]" -- dim when off, bold full ink when on, in between
 // while hovered. Replaces the old filled rounded "pill" (too corporate next to R3WRK's
 // hand-drawn line icons); tried as dot-matrix and as drawn corner ticks before settling here.
-// Toggle style switch: true = square-cornered box around the name (current), false = the
-// typed-bracket "[RVB]" look it replaced.
+// Toggle style switch: true = the plain name (current, 14pt), false = the typed-bracket
+// "[RVB]" look it replaced.
 constexpr bool kBoxedToggles = true;
 
 inline void drawBracketToggle(juce::Graphics& g, juce::Rectangle<float> area, const juce::String& text,
-                              bool on, bool hovered, juce::Colour lit, juce::Colour dim,
-                              bool boxWhenOff = true)
+                              bool on, bool hovered, juce::Colour lit, juce::Colour dim)
 {
     // On is the theme's text colour pulled 30% toward dim -- full text colour read stark white.
     const juce::Colour onInk = lit.interpolatedWith(dim, 0.3f);
@@ -33,15 +32,13 @@ inline void drawBracketToggle(juce::Graphics& g, juce::Rectangle<float> area, co
         return;
     }
 
-    // Boxed: off = a plain square-cornered 1px frame hugging the name (not the whole column, so
-    // short names get short boxes); on = the name alone in the brighter ink, no frame.
+    // Plain: just the name, dim when off, bright when on (boxes were tried, on and off, and
+    // dropped). `box` is only the text's area now.
     const auto font = systemUIFont(14.0f, on);
     const float textW = juce::GlyphArrangement::getStringWidth(font, text);
     // Whole pixels, so the 1px frame (drawn just inside the rect) stays crisp.
     const auto box = area.withSizeKeepingCentre(juce::jmin(area.getWidth(), textW + 14.0f), area.getHeight())
                          .toNearestInt().toFloat();
-    if (! on && boxWhenOff)
-        g.drawRect(box, 1.0f);   // on = just the name, bright -- the frame only shows while off
     g.setFont(font);
     g.drawFittedText(text, box.toNearestInt(), juce::Justification::centred, 1, 0.8f);
 }
