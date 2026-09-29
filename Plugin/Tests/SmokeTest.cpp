@@ -19,7 +19,8 @@
 #include "../Source/RegionGather.h"
 #include "../Source/AudioSafety.h"
 #include "../Source/RetrigEngine.h"
-#include "../Source/ChorusEngine.h"
+#include "../Source/MnmChorusEngine.h"
+#include "MnmChorusGolden.h"
 
 namespace
 {
@@ -867,28 +868,20 @@ int main()
         }
     }
 
-    // --- CHORUS: BBD chorus, smooth -> metallic (ChorusEngine.h, CHORUS_PLAN.md §6) -----
+    // --- MNM CHORUS: Monomachine FX-CHORUS clone (MnmChorusEngine.h, MNM_CHORUS_PLAN.md §7.1) ---
     {
-        std::cout << "-- CHORUS --" << std::endl;
-        using CE = r3wrk::ChorusEngine;
-        const auto db = [](double x) { return 20.0 * std::log10(juce::jmax(1.0e-12, x)); };
-        const auto rms = [](const std::vector<float>& v, size_t from)
+        std::cout << "-- MNM CHORUS --" << std::endl;
+        using CE = r3wrk::MnmChorusEngine;
+        namespace mc = r3wrk::mnmchorus;
+        const auto db = [](double x) { return 20.0 * std::log10(std::max(1.0e-12, x)); };
+        const auto params = [](const int raw[8])
         {
-            double s = 0.0;
-            for (size_t i = from; i < v.size(); ++i) s += (double) v[i] * v[i];
-            return std::sqrt(s / (double) juce::jmax((size_t) 1, v.size() - from));
+            CE::Params p; p.enabled = true;
+            double* dst[8] = { &p.del01, &p.dep01, &p.spd01, &p.mix01, &p.fb01, &p.wid01, &p.lp01, &p.inp01 };
+            for (int k = 0; k < 8; ++k) *dst[k] = raw[k] / 127.0;
+            return p;
         };
-        const auto noise = [](size_t n, float amp, uint32_t seed)
-        {
-            std::vector<float> v(n);
-            for (auto& s : v)
-            {
-                seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
-                s = amp * (float) ((double) seed / 4294967295.0 * 2.0 - 1.0);
-            }
-            return v;
-        };
-        // Runs L (and R, if given) through the engine in 256-sample blocks.
+        // In 256-sample blocks, like a host.
         const auto run = [](CE& e, std::vector<float>& L, std::vector<float>* R, const CE::Params& p)
         {
             for (size_t off = 0; off < L.size(); off += 256)
@@ -898,222 +891,131 @@ int main()
                 e.process(io, R != nullptr ? 2 : 1, n, p);
             }
         };
-        const double csr = 48000.0;
-        CE::Params on; on.enabled = true;
 
-        // 1. Mode table.
-        check(CE::modeIndex(0.0) == 0 && CE::modeIndex(0.5) == 1 && CE::modeIndex(1.0) == 2, "MODE maps 0 / 0.5 / 1 to I / II / I+II");
-        check(std::string(CE::modeName(0)) == "I" && std::string(CE::modeName(1)) == "II" && std::string(CE::modeName(2)) == "I+II", "mode names I / II / I+II");
-        checkNear(CE::rateHz(0, 0.5), 0.513, 0.001, "mode I rate");
-        checkNear(CE::rateHz(1, 0.5), 0.863, 0.001, "mode II rate");
-        checkNear(CE::rateHz(2, 0.5), 9.75, 0.001, "mode I+II rate");
-
-        // 2. Delay range at METAL 0 (traced sample by sample over 3 s).
-        const auto delayRange = [&](double mode01, double& lo, double& hi)
+        // 1. Model sanity.
         {
-            CE e; e.prepare(csr, 1);
-            CE::Params p = on; p.mode01 = mode01;
-            e.snapToTargets(p);
-            lo = 1.0e9; hi = -1.0e9;
-            float s = 0.0f; float* io[1] = { &s };
-            for (int i = 0; i < (int) (csr * 3.0); ++i)
+            bool ok = true;
+            for (int v = 0; v < 128; ++v)
             {
-                s = 0.0f;
-                e.process(io, 1, 1, p);
-                lo = std::min(lo, e.currentDelayMs(0));
-                hi = std::max(hi, e.currentDelayMs(0));
+                ok = ok && std::isfinite(mc::centreSamples44(v)) && std::isfinite(mc::lfoRateHz(v))
+                        && std::isfinite(mc::loopGain(v)) && std::isfinite(mc::loopPole44(v));
+                if (v > 0)
+                    ok = ok && mc::centreSamples44(v) > mc::centreSamples44(v - 1) && mc::lfoRateHz(v) > mc::lfoRateHz(v - 1)
+                            && mc::loopGain(v) > mc::loopGain(v - 1) && mc::loopPole44(v) < mc::loopPole44(v - 1);
+                ok = ok && mc::loopGain(v) >= 0.0 && mc::loopGain(v) < 1.01 && mc::loopPole44(v) > 0.0 && mc::loopPole44(v) < 1.0;
             }
-        };
-        double lo, hi;
-        delayRange(0.0, lo, hi);
-        checkNear(lo, 1.66, 0.05, "mode I: shortest delay");
-        checkNear(hi, 5.35, 0.05, "mode I: longest delay");
-        delayRange(1.0, lo, hi);
-        checkNear(lo, 3.3, 0.05, "mode I+II: shortest delay");
-        checkNear(hi, 3.7, 0.05, "mode I+II: longest delay");
-
-        // 3. LFO rate: mode II sweep period from the delay trace's upward centre crossings.
-        {
-            CE e; e.prepare(csr, 1);
-            CE::Params p = on; p.mode01 = 0.5;
-            e.snapToTargets(p);
-            float s = 0.0f; float* io[1] = { &s };
-            double prev = 0.0; int first = -1, last = -1, count = 0;
-            for (int i = 0; i < (int) (csr * 10.0); ++i)
-            {
-                s = 0.0f;
-                e.process(io, 1, 1, p);
-                const double d = e.currentDelayMs(0) - e.currentCentreMs();
-                if (i > 0 && prev < 0.0 && d >= 0.0) { if (first < 0) first = i; last = i; ++count; }
-                prev = d;
-            }
-            const double period = count > 1 ? (double) (last - first) / (count - 1) / csr : 0.0;
-            check(std::abs(period - 1.0 / 0.863) <= 0.02 / 0.863,
-                  juce::String::formatted("mode II LFO period %.4f s (expected %.4f +-2%%)", period, 1.0 / 0.863));
+            check(ok, "model tables finite and monotonic (delay, LFO rate, loop gain up; loop pole down)");
+            checkNear(mc::centreSamples44(64) / 44.1, 11.588, 0.001, "DEL 64 = 11.588 ms");
+            checkNear(mc::lfoRateHz(64), 0.4997, 0.001, "SPD 64 = 0.50 Hz");
         }
 
-        // 4. Stereo: WIDTH 1 = inverted sweeps; WIDTH 0 = identical sides.
+        // 2. Golden: the engine vs the emulator's raw output (engine output passed through the
+        //    emulator track's own colouring first). Static taps / feedback / LFO / clipping.
+        for (const auto& gc : mnmgolden::kCases)
         {
-            CE e; e.prepare(csr, 2);
-            e.snapToTargets(on);
-            std::vector<float> a(1), b(1);
-            double sl = 0, sr2 = 0, sll = 0, srr = 0, slr = 0; const int n = (int) (csr * 3.0);
-            for (int i = 0; i < n; ++i)
+            CE e; e.prepare(44100.0, 2);
+            const CE::Params p = params(gc.param);
+            e.snapToTargets(p);
+            e.lfoFrozen = true;                               // fade in without moving the LFO,
+            std::vector<float> lead(1024, 0.0f), leadR = lead;
+            run(e, lead, &leadR, p);
+            e.lfoFrozen = false;
+            e.setLfoPhase(gc.lfoPhase);                       // then start at the aligned phase
+            const int n = gc.length;
+            std::vector<float> L((size_t) n, 0.0f), R((size_t) n, 0.0f);
+            if (gc.noise)
             {
-                a[0] = b[0] = 0.0f;
-                float* io[2] = { a.data(), b.data() };
-                e.process(io, 2, 1, on);
-                const double l = e.currentDelayMs(0), r = e.currentDelayMs(1);
-                sl += l; sr2 += r; sll += l * l; srr += r * r; slr += l * r;
+                uint32_t sl = mnmgolden::kNoiseSeedL, sr2 = mnmgolden::kNoiseSeedR;
+                for (int i = 0; i < n; ++i) { L[(size_t) i] = mnmgolden::xorshiftNoise(sl, gc.amp); R[(size_t) i] = mnmgolden::xorshiftNoise(sr2, gc.amp); }
             }
-            const double cov = slr / n - (sl / n) * (sr2 / n);
-            const double corr = cov / std::sqrt((sll / n - (sl / n) * (sl / n)) * (srr / n - (sr2 / n) * (sr2 / n)));
-            check(corr < -0.95, juce::String::formatted("WIDTH 1: L/R delay sweeps inverted (corr %.3f)", corr));
-
-            CE w; w.prepare(csr, 2);
-            CE::Params p = on; p.width01 = 0.0;
-            w.snapToTargets(p);
-            auto L = noise((size_t) csr, 0.5f, 123), R = L;
-            run(w, L, &R, p);
-            check(L == R, "WIDTH 0: L and R outputs identical");
+            else
+            {
+                L[64] = R[64] = (float) gc.amp;
+            }
+            run(e, L, &R, p);
+            double worst = -300.0;
+            for (int c = 0; c < 2; ++c)
+            {
+                const auto& y = c == 0 ? L : R;
+                const float* raw = c == 0 ? gc.rawL : gc.rawR;
+                double num = 0.0, den = 0.0;
+                for (int i = gc.noise ? 1500 : 0; i < n; ++i)
+                {
+                    double acc = 0.0;   // track colouring: sum_j h[j] y[i - j + pre]
+                    for (int j = 0; j < mnmgolden::kTrackLen; ++j)
+                    {
+                        const int k = i - j + mnmgolden::kTrackPre;
+                        if (k >= 0 && k < n) acc += mnmgolden::kTrackIr[c][j] * y[(size_t) k];
+                    }
+                    num += (raw[i] - acc) * (raw[i] - acc);
+                    den += (double) raw[i] * raw[i];
+                }
+                worst = std::max(worst, 10.0 * std::log10(num / std::max(den, 1.0e-30) + 1.0e-30));
+            }
+            check(worst <= gc.nullLimitDb, juce::String::formatted("golden %s: null %.1f dB (<= %.0f)", gc.name, worst, gc.nullLimitDb));
         }
 
-        // 5. Bypass is bit-exact (never enabled, and again after a disable once busy() clears).
+        // 3. Bypass is bit-exact; silence in = exactly silence out; bit-exact again after a disable.
         {
-            CE e; e.prepare(csr, 2);
-            const auto src = noise(4096, 0.5f, 7);
+            CE e; e.prepare(48000.0, 2);
+            std::vector<float> src(4096);
+            uint32_t s = 99; for (auto& v : src) v = mnmgolden::xorshiftNoise(s, 0.5);
             auto L = src, R = src;
             run(e, L, &R, CE::Params {});
             check(L == src && R == src, "CHO off: audio passes through untouched (bit-exact)");
 
-            auto warm = noise((size_t) (csr * 0.5), 0.5f, 9), warmR = warm;
-            run(e, warm, &warmR, on);
+            CE::Params on; on.enabled = true; on.fb01 = 1.0; on.dep01 = 1.0;
+            CE z; z.prepare(48000.0, 2); z.snapToTargets(on);
+            std::vector<float> zl(48000, 0.0f), zr = zl;
+            run(z, zl, &zr, on);
+            bool allZero = true;
+            for (size_t i = 0; i < zl.size(); ++i) allZero = allZero && zl[i] == 0.0f && zr[i] == 0.0f;
+            check(allZero, "silence in -> exactly silence out (FB 127, DEP 127)");
+
+            CE f; f.prepare(48000.0, 2); f.snapToTargets(on);
+            auto w = src, wr = src; run(f, w, &wr, on);
             CE::Params off = on; off.enabled = false;
             int guard = 0;
-            while (e.busy() && guard++ < 1000)
-            {
-                auto t = noise(256, 0.5f, 11), tr = t;
-                run(e, t, &tr, off);
-            }
-            auto after = src, afterR = src;
-            run(e, after, &afterR, off);
-            check(! e.busy() && after == src && afterR == src, "CHO switched off: bit-exact again once the fade-out finishes");
+            while (f.busy() && guard++ < 1000) { auto t = src, tr = src; run(f, t, &tr, off); }
+            auto a = src, ar = src; run(f, a, &ar, off);
+            check(! f.busy() && a == src && ar == src, "CHO switched off: bit-exact again once the fade-out finishes");
         }
 
-        // 6. HISS 0 stays clean; HISS 1 is a quiet hiss.
+        // 4. Host-rate independence: DEP 0 tap lands at the same time at 44.1 / 48 / 96 kHz.
+        for (double hsr : { 44100.0, 48000.0, 96000.0 })
         {
-            CE e; e.prepare(csr, 2);
-            CE::Params p = on; p.metal01 = 0.7;
+            CE e; e.prepare(hsr, 1);
+            CE::Params p; p.enabled = true; p.dep01 = 0.0; p.mix01 = 1.0; p.del01 = 64 / 127.0;
             e.snapToTargets(p);
-            std::vector<float> L((size_t) csr, 0.0f), R = L;
-            run(e, L, &R, p);
-            bool allZero = true;
-            for (size_t i = 0; i < L.size(); ++i) allZero = allZero && L[i] == 0.0f && R[i] == 0.0f;
-            check(allZero, "HISS 0: silence in -> exactly silence out (METAL 0.7)");
-
-            CE h; h.prepare(csr, 2);
-            CE::Params ph = on; ph.hiss01 = 1.0;
-            h.snapToTargets(ph);
-            std::vector<float> hl((size_t) csr, 0.0f), hr = hl;
-            run(h, hl, &hr, ph);
-            const double level = db(rms(hl, (size_t) (csr * 0.1)));
-            check(level > -75.0 && level < -55.0, juce::String::formatted("HISS 1: noise at %.1f dBFS RMS (-75..-55)", level));
+            std::vector<float> lead((size_t) (hsr * 0.05), 0.0f); run(e, lead, nullptr, p);
+            std::vector<float> x((size_t) (hsr * 0.05), 0.0f); x[0] = 0.1f;
+            run(e, x, nullptr, p);
+            size_t pk = 1; for (size_t i = 1; i < x.size(); ++i) if (std::abs(x[i]) > std::abs(x[pk])) pk = i;
+            const double ms = (pk + x[pk + 1] / (x[pk] + x[pk + 1])) / hsr * 1000.0;
+            checkNear(ms, 511.02 / 44.1, 0.03, juce::String::formatted("DEL 64 tap at %.0f Hz", hsr));
         }
 
-        // 7. METAL mapping.
+        // 5. Stress: FB 127, INP 127, full-scale noise + impulses, everything swept, three rates.
+        for (double hsr : { 44100.0, 48000.0, 96000.0 })
         {
-            CE e; e.prepare(csr, 1);
-            CE::Params p = on; p.metal01 = 1.0;
-            e.snapToTargets(p);
-            checkNear(e.currentCentreMs(), 0.5, 0.02, "METAL 1: delay centre 0.5 ms");
-            checkNear(std::abs(e.currentFeedback()), 0.92, 0.01, "METAL 1: |feedback| 0.92");
-            p.ringNegative = true;
-            e.snapToTargets(p);
-            check(e.currentFeedback() < -0.9, "RING -: feedback goes negative");
-        }
-
-        // 8. The metallic resonance: METAL 1, RING +, frozen LFO -> a comb peak at 1/centre.
-        //    Wet only (MIX 1): the comb itself, >= 18 dB peak-to-trough. At MIX 0.5 the dry path
-        //    fills the troughs -- the §4.2 formulas predict ~14.5 dB there (dry 1 + 0.283 x 12.5 at
-        //    the peak vs 1 - 0.283 x 0.52 at the trough), so that one is checked against 12 dB.
-        //    The impulse is small (0.1) so the saturator stays linear.
-        double peakHz = 0.0;
-        for (double mix : { 1.0, 0.5 })
-        {
-            CE e; e.prepare(csr, 1);
-            CE::Params p = on; p.metal01 = 1.0; p.mix01 = mix;
-            e.snapToTargets(p);
-            e.setLfoPhase(0.25);   // triangle = 0 -> delay = centre
-            e.lfoFrozen = true;
-            std::vector<float> fadeIn((size_t) (csr * 0.1), 0.0f);
-            run(e, fadeIn, nullptr, p);
-            std::vector<float> ir(8192, 0.0f); ir[0] = 0.1f;
-            run(e, ir, nullptr, p);
-            const auto mag = [&](double f)
-            {
-                std::complex<double> acc = 0.0;
-                const double w = -2.0 * juce::MathConstants<double>::pi * f / csr;
-                for (size_t i = 0; i < ir.size(); ++i) acc += (double) ir[i] * std::polar(1.0, w * (double) i);
-                return std::abs(acc);
-            };
-            double peak = 0.0, trough = 1.0e9, fPeak = 0.0;
-            for (double f = 800.0; f <= 3200.0; f += 10.0)
-            {
-                const double m = mag(f);
-                if (f >= 1500.0 && f <= 2500.0 && m > peak) { peak = m; fPeak = f; }
-                trough = std::min(trough, m);
-            }
-            const double expected = 1000.0 / e.currentCentreMs();
-            const double need = mix >= 1.0 ? 18.0 : 12.0;
-            check(std::abs(fPeak - expected) <= expected * 0.05,
-                  juce::String::formatted("METAL 1, MIX %.1f: comb peak at %.0f Hz (expected ~%.0f)", mix, fPeak, expected));
-            check(db(peak / trough) >= need,
-                  juce::String::formatted("METAL 1, MIX %.1f: peak-to-trough %.1f dB (>= %.0f)", mix, db(peak / trough), need));
-            if (mix < 1.0) peakHz = fPeak;
-        }
-
-        // 9. Level sanity.
-        {
-            const float amp = 0.1995f * 1.7320508f;   // uniform noise at -14 dBFS RMS
-            for (double metal : { 0.0, 1.0 })
-            {
-                CE e; e.prepare(csr, 2);
-                CE::Params p = on; p.metal01 = metal;
-                e.snapToTargets(p);
-                const auto src = noise((size_t) (csr * 2.0), amp, 99);
-                auto L = src, R = noise(src.size(), amp, 77);
-                run(e, L, &R, p);
-                const double delta = db(rms(L, (size_t) (csr * 0.2))) - db(rms(src, (size_t) (csr * 0.2)));
-                check(std::abs(delta) <= 3.0, juce::String::formatted("METAL %.0f: noise level %+.1f dB vs dry (within +-3)", metal, delta));
-            }
-            CE e; e.prepare(csr, 1);
-            CE::Params p = on; p.metal01 = 1.0;
-            e.snapToTargets(p);
-            e.setLfoPhase(0.25);
-            e.lfoFrozen = true;
-            std::vector<float> s((size_t) csr);
-            for (size_t i = 0; i < s.size(); ++i) s[i] = 0.1f * (float) std::sin(2.0 * juce::MathConstants<double>::pi * peakHz * (double) i / csr);
-            const double in = rms(s, (size_t) (csr * 0.5));
-            run(e, s, nullptr, p);
-            const double gain = db(rms(s, (size_t) (csr * 0.5)) / in);
-            check(gain <= 12.0, juce::String::formatted("METAL 1: sine at the comb peak gains %+.1f dB (<= +12)", gain));
-        }
-
-        // 10. Stability stress at three sample rates.
-        for (double ssr : { 44100.0, 48000.0, 96000.0 })
-        {
-            CE e; e.prepare(ssr, 2);
-            const int total = (int) (ssr * 10.0), blk = 256;
-            auto L = noise((size_t) total, 1.0f, 5), R = noise((size_t) total, 1.0f, 6);
-            for (int k = 0; k < total; k += (int) ssr) { L[(size_t) k] = 4.0f; R[(size_t) k] = -4.0f; }
+            CE e; e.prepare(hsr, 2);
+            const int total = (int) (hsr * 10.0), blk = 256;
+            std::vector<float> L((size_t) total), R((size_t) total);
+            uint32_t s1 = 5, s2 = 6;
+            for (int i = 0; i < total; ++i) { L[(size_t) i] = mnmgolden::xorshiftNoise(s1, 1.0); R[(size_t) i] = mnmgolden::xorshiftNoise(s2, 1.0); }
+            for (int k = 0; k < total; k += (int) hsr) { L[(size_t) k] = 4.0f; R[(size_t) k] = -4.0f; }
             bool finite = true; float peak = 0.0f;
             for (int off = 0; off < total; off += blk)
             {
-                const double t = (double) off / ssr;
-                CE::Params p = on;
-                p.metal01 = 1.0 - std::abs(t / 5.0 - 1.0);           // 0 -> 1 -> 0
-                p.mode01 = (double) ((int) (t / 0.05) % 3) * 0.5;     // MODE cycles every 50 ms
-                p.ringNegative = ((int) (t / 0.7) % 2) == 1;
+                const double t = (double) off / hsr;
+                CE::Params p; p.enabled = true;
+                p.fb01 = 1.0; p.inp01 = 1.0;
+                p.del01 = 1.0 - std::abs(t / 5.0 - 1.0);
+                p.dep01 = std::fmod(t * 0.37, 1.0);
+                p.spd01 = std::fmod(t * 0.53, 1.0);
+                p.lp01 = std::fmod(t * 0.29, 1.0);
+                p.wid01 = std::fmod(t * 0.71, 1.0);
+                p.mix01 = std::fmod(t * 0.43, 1.0);
                 const int n = std::min(blk, total - off);
                 float* io[2] = { L.data() + off, R.data() + off };
                 e.process(io, 2, n, p);
@@ -1123,38 +1025,27 @@ int main()
                     peak = std::max(peak, std::max(std::abs(io[0][i]), std::abs(io[1][i])));
                 }
             }
-            std::vector<float> sl((size_t) ssr, 0.0f), sr3 = sl;
-            CE::Params p = on;
-            run(e, sl, &sr3, p);
+            // Decay: FB 100 (FB 127 is a near-infinite hold, as on the hardware), 5 s of silence.
+            CE::Params d; d.enabled = true; d.fb01 = 100 / 127.0; d.mix01 = 1.0;
+            std::vector<float> sl((size_t) (hsr * 5.0), 0.0f), sr3 = sl;
+            run(e, sl, &sr3, d);
             float tail = 0.0f;
-            for (size_t i = (size_t) (ssr * 0.9); i < sl.size(); ++i) tail = std::max(tail, std::max(std::abs(sl[i]), std::abs(sr3[i])));
-            check(finite && peak < 4.0f, juce::String::formatted("stress @ %.0f Hz: finite, peak %.2f (< 4)", ssr, peak));
-            check(db(tail) < -90.0, juce::String::formatted("stress @ %.0f Hz: 1 s of silence decays to %.1f dBFS (< -90)", ssr, db(tail)));
+            for (size_t i = (size_t) (hsr * 4.9); i < sl.size(); ++i) tail = std::max(tail, std::max(std::abs(sl[i]), std::abs(sr3[i])));
+            check(finite && peak < 4.0f, juce::String::formatted("stress @ %.0f Hz: finite, peak %.2f (< 4)", hsr, peak));
+            check(db(tail) < -90.0, juce::String::formatted("stress @ %.0f Hz: FB 100 tail after 5 s %.1f dBFS (< -90)", hsr, db(tail)));
         }
 
-        // 11. Minimum delay guard: the sweep never gets closer than 2 samples at 44.1 kHz.
+        // 6. Mono runs the L path only and matches a stereo run's L channel.
         {
-            double worst = 1.0e9;
-            for (int idx = 0; idx < 3; ++idx)
-                for (int k = 0; k <= 100; ++k)
-                {
-                    const double m = k / 100.0;
-                    worst = std::min(worst, (CE::centreMs(idx, m) - CE::depthMs(idx, m)) * 0.001 * 44100.0);
-                }
-            check(worst >= 2.0, juce::String::formatted("shortest delay anywhere: %.1f samples at 44.1 kHz (>= 2)", worst));
-        }
-
-        // 12. Mono runs the L path only and matches a stereo run's L channel.
-        {
-            const auto src = noise((size_t) csr, 0.5f, 31);
-            CE::Params p = on; p.metal01 = 0.6; p.hiss01 = 0.3;
-            CE m; m.prepare(csr, 1); m.snapToTargets(p);
-            CE s; s.prepare(csr, 2); s.snapToTargets(p);
+            std::vector<float> src(48000); uint32_t s = 31;
+            for (auto& v : src) v = mnmgolden::xorshiftNoise(s, 0.3);
+            CE::Params p; p.enabled = true; p.fb01 = 0.8; p.dep01 = 0.7; p.wid01 = 0.6; p.mix01 = 0.5;
+            CE m; m.prepare(48000.0, 1); m.snapToTargets(p);
+            CE st; st.prepare(48000.0, 2); st.snapToTargets(p);
             auto mono = src, L = src, R = src;
             run(m, mono, nullptr, p);
-            run(s, L, &R, p);
-            bool finite = true;
-            for (float v : mono) finite = finite && std::isfinite(v);
+            run(st, L, &R, p);
+            bool finite = true; for (float v : mono) finite = finite && std::isfinite(v);
             check(finite && mono == L, "mono: finite and identical to the stereo run's L channel");
         }
     }
