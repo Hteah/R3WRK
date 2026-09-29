@@ -311,6 +311,15 @@ void R3WRKAudioProcessorEditor::paint(juce::Graphics& g)
     }
 }
 
+// The window's "title bar" (Standalone): everything above the waveform -- the traffic-light band
+// and the header row. Only clicks nothing else took reach the editor (the file name, Follow and
+// Float-on-top keep theirs; HeaderBar lets the rest through), so this is the empty space + the
+// readout text.
+bool R3WRKAudioProcessorEditor::isInTitleArea(juce::Point<float> p) const
+{
+    return p.y < (float) waveformDisplay.getY();
+}
+
 void R3WRKAudioProcessorEditor::mouseDown(const juce::MouseEvent& e)
 {
    #if JUCE_MAC
@@ -319,7 +328,7 @@ void R3WRKAudioProcessorEditor::mouseDown(const juce::MouseEvent& e)
     // move the window, double-click it to zoom. Only arm here; the move starts on mouseDrag so
     // a double-click isn't swallowed by AppKit's nested drag loop. Child components handle
     // their own clicks and never reach here.
-    windowDragArmed = standaloneWindow && e.position.y < (float) kMacTrafficLightInset;
+    windowDragArmed = standaloneWindow && isInTitleArea(e.position);
     windowDragActive = false;
    #else
     juce::ignoreUnused(e);
@@ -342,7 +351,7 @@ void R3WRKAudioProcessorEditor::mouseDrag(const juce::MouseEvent& e)
 void R3WRKAudioProcessorEditor::mouseDoubleClick(const juce::MouseEvent& e)
 {
    #if JUCE_MAC
-    if (standaloneWindow && e.position.y < (float) kMacTrafficLightInset)
+    if (standaloneWindow && isInTitleArea(e.position))
         r3wrkTitleBarDoubleClick(this);   // fill the screen (or the user's title-bar pref)
    #else
     juce::ignoreUnused(e);

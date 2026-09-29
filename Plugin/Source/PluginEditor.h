@@ -25,12 +25,14 @@ public:
     void paint(juce::Graphics&) override;
     void resized() override;
     bool keyPressed(const juce::KeyPress&) override;
-    // Standalone/macOS: the reserved top inset stands in for a hidden title bar -- drag it to
-    // move the window, double-click it to zoom (fill the screen). The move only begins on
+    // Standalone/macOS: everything above the waveform (the reserved top inset + the header row's
+    // empty space and readout) stands in for a hidden title bar -- drag it to move the window,
+    // double-click it to zoom (fill the screen). The move only begins on
     // mouseDrag so a plain double-click still reaches mouseDoubleClick.
     void mouseDown(const juce::MouseEvent&) override;
     void mouseDrag(const juce::MouseEvent&) override;
     void mouseDoubleClick(const juce::MouseEvent&) override;
+    bool isInTitleArea(juce::Point<float> p) const;   // above the waveform -- see mouseDown()
     void parentHierarchyChanged() override;   // apply the persisted float-on-top once the peer exists
 
     // Drag a sample in from Finder (or a DAW's browser) and drop it anywhere on the window to

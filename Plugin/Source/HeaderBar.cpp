@@ -24,6 +24,12 @@ HeaderBar::HeaderBar(AudioDocument& doc) : document(doc)
 
     readoutLabel.setFont(juce::FontOptions(11.0f));
 
+    // Only the file name is clickable: the empty header and the readout line let clicks through to
+    // the editor, which treats the whole strip above the waveform as the window's title bar
+    // (drag to move, double-click to zoom -- Standalone).
+    setInterceptsMouseClicks(false, true);
+    readoutLabel.setInterceptsMouseClicks(false, false);
+
     addAndMakeVisible(nameLabel);
     addAndMakeVisible(readoutLabel);
 
