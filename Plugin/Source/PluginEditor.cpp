@@ -346,6 +346,8 @@ void R3WRKAudioProcessorEditor::resized()
     knobRow.setBounds(area.removeFromBottom(83));   // knob strip, under the transport bar --
     // The FX drawer spaces its effects so its Gain knob sits right under the End knob.
     fxRow.setGainColumn(knobRow.getLastColumnXRange() + (knobRow.getX() - fxRow.getX()));
+    // ...and starts its first toggle right under the Pitch knob's disc.
+    fxRow.setFirstEdge(knobRow.getFirstKnobDiscLeft() + (knobRow.getX() - fxRow.getX()));
         // 74 + 9 for the bigger caption/readout fonts (experiment/space-mono-font), so the
         // rotary disc gets that space back instead of losing it to the taller text
     area.removeFromBottom(4);

@@ -54,6 +54,10 @@ public:
     // between DLY / PLX / RVB are spread evenly so Gain lands right under End at any width.
     void setGainColumn(juce::Range<int> col) { gainColumn = col; resized(); }
 
+    // Where the first toggle's left edge goes (this component's coordinates): the left edge of
+    // the knob row's Pitch disc, so the drawer lines up under it. -1 = not known yet.
+    void setFirstEdge(int x) { firstEdge = x; resized(); }
+
 private:
     void changeListenerCallback(juce::ChangeBroadcaster*) override;
     void timerCallback() override;   // Gain knob follows state loads / undo; RVB/PLX + RTRG/CHO slots follow their switches
@@ -75,6 +79,7 @@ private:
     AudioDocument& document;
     const bool showGain;
     juce::Range<int> gainColumn;   // empty until PluginEditor passes it
+    int firstEdge = -1;            // Pitch disc's left edge, -1 until PluginEditor passes it
     R3WRKLookAndFeel gainLnF;
     juce::Label gainCaption;
     juce::Slider gainKnob;

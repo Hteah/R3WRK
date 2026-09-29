@@ -51,6 +51,18 @@ public:
         return { b.getX(), b.getRight() };
     }
 
+    // The left edge of the first knob's (Pitch's) drawn disc, in this component's coordinates --
+    // the FX drawer lines its first toggle up under it (FxRow::setFirstEdge). Mirrors
+    // R3WRKLookAndFeel::drawRotarySlider: a circle inset 3px, centred in the slider's rotary area.
+    int getFirstKnobDiscLeft() const
+    {
+        if (knobs.isEmpty()) return 0;
+        auto& s = knobs.getFirst()->slider;
+        const auto rotary = s.getLookAndFeel().getSliderLayout(const_cast<PinnedDragSlider&>(s)).sliderBounds.toFloat().reduced(3.0f);
+        const float diameter = juce::jmin(rotary.getWidth(), rotary.getHeight());
+        return s.getX() + juce::roundToInt(rotary.getCentreX() - diameter * 0.5f);
+    }
+
 private:
     void timerCallback() override;
     void changeListenerCallback(juce::ChangeBroadcaster*) override;   // theme changed

@@ -112,14 +112,30 @@ void FxRow::resized()
     // so these read the same size as the top row's.
     constexpr int panelW = 42 + 3 + (53 + 3) * 2 + 20;   // 177 (toggle column 42)
 
-    // With Gain showing and End's position known, spread the three gaps evenly so Gain's column
-    // starts exactly where End's does (clamped so the effects never touch or drift apart).
-    int gap = sectionGap, lastGap = sectionGap;
-    if (showGain && ! gainColumn.isEmpty())
+    // The first slot starts so its toggle's left edge sits under the Pitch knob's disc (each
+    // panel insets its toggle column by 4px -- see their resized()).
+    if (firstEdge >= 0)
     {
-        const int total = gainColumn.getStart() - full.getX() - 3 * panelW;
-        gap = juce::jlimit(4, 40, total / 3);
-        lastGap = juce::jlimit(4, 40, total - 2 * gap);   // takes the rounding remainder -> exact
+        const int start = juce::jlimit(full.getX(), full.getRight(), firstEdge - 4);
+        full.setLeft(start);
+    }
+
+    // Then the three slots are spread with equal gaps: up to Gain (which starts exactly under
+    // End) in the Standalone, or out to End's right edge in the plugin (no Gain knob there).
+    int gap = sectionGap, lastGap = sectionGap;
+    if (! gainColumn.isEmpty())
+    {
+        if (showGain)
+        {
+            const int total = gainColumn.getStart() - full.getX() - 3 * panelW;
+            gap = juce::jmax(4, total / 3);
+            lastGap = juce::jmax(4, total - 2 * gap);   // takes the rounding remainder -> exact
+        }
+        else
+        {
+            const int total = gainColumn.getEnd() - full.getX() - 3 * panelW;
+            gap = juce::jmax(4, total / 2);
+        }
     }
 
     const auto modSlot = full.removeFromLeft(juce::jmin(panelW, full.getWidth()));   // RTRG or CHO
