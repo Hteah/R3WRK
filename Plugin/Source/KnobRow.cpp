@@ -266,9 +266,9 @@ void KnobRow::applyTheme()
         k->caption.repaint();
         k->slider.repaint();
     }
-    modelBadge.fill   = pal.text;                                             // lit letters
-    modelBadge.ink    = pal.windowBg.interpolatedWith(pal.textDim, 0.16f);   // unlit dot grid
-    modelBadge.border = pal.textDim;                                          // dim letters
+    modelBadge.fill   = pal.text;                                             // on ink
+    modelBadge.ink    = pal.windowBg;   // (unused by the bracket toggle)
+    modelBadge.border = pal.textDim;                                          // off ink
     modelBadge.repaint();
     modelTab.ink    = pal.textDim;
     modelTab.border = pal.textDim;
@@ -315,9 +315,8 @@ void KnobRow::syncModelBadge()
 
 void KnobRow::ModelBadge::paint(juce::Graphics& g)
 {
-    // Dot-matrix name, like the FX drawer toggles: fill = lit letters (on), border = dim letters,
-    // ink = the unlit dot grid (see applyTheme()).
-    drawDotMatrixToggle(g, getLocalBounds().toFloat(), text, active, hovered, fill, border, ink);
+    // Corner brackets, like the FX drawer toggles: fill = on ink, border = off ink (see applyTheme()).
+    drawBracketToggle(g, getLocalBounds().toFloat(), text, active, hovered, fill, border);
 }
 
 void KnobRow::changeListenerCallback(juce::ChangeBroadcaster*)

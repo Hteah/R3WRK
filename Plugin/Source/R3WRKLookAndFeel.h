@@ -8,50 +8,36 @@
 juce::Font spaceMonoFont(float height, bool bold = true);
 juce::Font systemUIFont(float height, bool bold = true);
 
-// The FX drawer's on/off toggles (CHO / RTRG / DLY / RVB / PLX): the name spelled in a 3x5
-// dot-matrix, the same idea as the LCD popups (DotMatrixLCD.h) -- a faint grid of unlit dots
-// with the letters lit in `lit` when on, `dim` when off, halfway between while hovered. Replaces
-// the old filled rounded "pill" (too corporate next to R3WRK's hand-drawn icons). Letters it
-// doesn't know draw as a blank cell.
-inline void drawDotMatrixToggle(juce::Graphics& g, juce::Rectangle<float> area, const juce::String& text,
-                                bool on, bool hovered, juce::Colour lit, juce::Colour dim, juce::Colour grid)
+// The on/off toggles (FX drawer CHO / RTRG / DLY / RVB / PLX, and the filter's MNM / OT badge):
+// the name inside four corner brackets, like a camera viewfinder -- thin dim ticks and a dim
+// name when off, heavier ticks and a full-ink bold name when on, in between while hovered.
+// Replaces the old filled rounded "pill" (too corporate next to R3WRK's hand-drawn line icons).
+inline void drawBracketToggle(juce::Graphics& g, juce::Rectangle<float> area, const juce::String& text,
+                              bool on, bool hovered, juce::Colour lit, juce::Colour dim)
 {
-    auto glyph = [](juce::juce_wchar ch) -> const char*
-    {
-        switch (ch)
-        {
-            case 'A': return "010101111101101";  case 'B': return "110101110101110";
-            case 'C': return "111100100100111";  case 'D': return "110101101101110";
-            case 'E': return "111100110100111";  case 'F': return "111100110100100";
-            case 'G': return "111100101101111";  case 'H': return "101101111101101";
-            case 'I': return "111010010010111";  case 'L': return "100100100100111";
-            case 'M': return "101111111101101";  case 'N': return "110101101101101";
-            case 'O': return "111101101101111";  case 'P': return "110101110100100";
-            case 'R': return "110101110101101";  case 'S': return "111100111001111";
-            case 'T': return "111010010010010";  case 'U': return "101101101101111";
-            case 'V': return "101101101010010";  case 'X': return "101101010101101";
-            case 'Y': return "101101010010010";
-            default:  return "000000000000000";
-        }
-    };
-    const int n = juce::jmax(1, text.length());
-    const float pitch = juce::jmin(area.getHeight() / 7.0f, area.getWidth() / (float) (4 * n));
-    const float r = pitch * 0.39f;
-    const float w = (float) (4 * n - 1) * pitch, h = 5.0f * pitch;
-    const float x0 = area.getCentreX() - w * 0.5f + pitch * 0.5f;
-    const float y0 = area.getCentreY() - h * 0.5f + pitch * 0.5f;
     const juce::Colour ink = on ? lit : (hovered ? dim.interpolatedWith(lit, 0.5f) : dim);
-    for (int i = 0; i < n; ++i)
+    const float stroke = on ? 1.5f : 1.0f;
+    const float inset = stroke * 0.5f;
+    const auto r = area.reduced(inset);
+    const float len = juce::jmin(4.2f, r.getHeight() * 0.3f);
+
+    juce::Path ticks;
+    auto corner = [&](juce::Point<float> p, float dx, float dy)
     {
-        const char* bits = glyph(juce::CharacterFunctions::toUpperCase(text[i]));
-        for (int row = 0; row < 5; ++row)
-            for (int col = 0; col < 3; ++col)
-            {
-                g.setColour(bits[row * 3 + col] == '1' ? ink : grid);
-                const float cx = x0 + (float) (i * 4 + col) * pitch, cy = y0 + (float) row * pitch;
-                g.fillEllipse(cx - r, cy - r, r * 2.0f, r * 2.0f);
-            }
-    }
+        ticks.startNewSubPath(p.x, p.y + dy * len);
+        ticks.lineTo(p);
+        ticks.lineTo(p.x + dx * len, p.y);
+    };
+    corner(r.getTopLeft(),      1.0f,  1.0f);
+    corner(r.getTopRight(),    -1.0f,  1.0f);
+    corner(r.getBottomLeft(),   1.0f, -1.0f);
+    corner(r.getBottomRight(), -1.0f, -1.0f);
+    g.setColour(ink);
+    g.strokePath(ticks, juce::PathStrokeType(stroke, juce::PathStrokeType::mitered, juce::PathStrokeType::rounded));
+
+    // systemUIFont: Space Mono's strokes blur together at this size (see KnobRow::ModelBadge).
+    g.setFont(systemUIFont(text.length() > 3 ? 9.0f : 9.6f, on));
+    g.drawFittedText(text, area.toNearestInt(), juce::Justification::centred, 1, 0.8f);
 }
 
 /**

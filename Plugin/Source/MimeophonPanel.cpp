@@ -193,8 +193,8 @@ void MimeophonPanel::timerCallback()
 void MimeophonPanel::applyTheme()
 {
     const auto& pal = theme->palette();
-    enablePill.fill   = pal.text;                                             // lit letters
-    enablePill.ink    = pal.windowBg.interpolatedWith(pal.textDim, 0.16f);   // unlit dot grid
+    enablePill.fill   = pal.text;                                             // on ink
+    enablePill.ink    = pal.windowBg;   // (unused by the bracket toggle)
     enablePill.border = pal.textDim;
     enablePill.repaint();
 
@@ -221,8 +221,8 @@ void MimeophonPanel::openFullEditor()
 
 void MimeophonPanel::EnablePill::paint(juce::Graphics& g)
 {
-    // fill = lit letters, border = dim letters, ink = the unlit dot grid (see applyTheme()).
-    drawDotMatrixToggle(g, getLocalBounds().toFloat(), "DLY", on, hovered, fill, border, ink);
+    // fill = on ink, border = off ink (see applyTheme()).
+    drawBracketToggle(g, getLocalBounds().toFloat(), "DLY", on, hovered, fill, border);
 }
 
 void MimeophonPanel::resized()

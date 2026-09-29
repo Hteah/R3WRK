@@ -190,8 +190,8 @@ private:
         std::function<void()> onClick;
         void paint(juce::Graphics& g) override
         {
-            // fill = lit letters, border = dim letters, ink = the unlit dot grid (see applyTheme()).
-            drawDotMatrixToggle(g, getLocalBounds().toFloat(), "CHO", on, hovered, fill, border, ink);
+            // fill = on ink, border = off ink (see applyTheme()).
+            drawBracketToggle(g, getLocalBounds().toFloat(), "CHO", on, hovered, fill, border);
         }
         void mouseUp(const juce::MouseEvent&) override { if (onClick) onClick(); }
         void mouseEnter(const juce::MouseEvent&) override { hovered = true; repaint(); }
@@ -246,8 +246,8 @@ private:
     void applyTheme()
     {
         const auto& pal = theme->palette();
-        pill.fill = pal.text;                                            // lit letters
-        pill.ink = pal.windowBg.interpolatedWith(pal.textDim, 0.16f);  // unlit dot grid
+        pill.fill = pal.text;                                            // on ink
+        pill.ink = pal.windowBg;   // (unused by the bracket toggle)
         pill.border = pal.textDim;
         pill.repaint();
         slotTab.ink = pal.textDim;
