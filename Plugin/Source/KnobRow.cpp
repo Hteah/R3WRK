@@ -389,7 +389,7 @@ void KnobRow::resized()
 
     const int gap      = 2;
     const int dotGap   = 16;   // the wider gap at the section-divider dot (before knob 8, Start)
-    const int badgeGap = 40;   // wider still before knob 3 -- the filter-model badge sits here
+    const int badgeGap = 54;   // wider still before knob 3 -- the filter-model badge sits here
     const int n = juce::jmax(1, knobs.size());
 
     // Auto-fit: prefer a fairly tight column, but shrink further so every knob still shows at
@@ -432,7 +432,7 @@ void KnobRow::resized()
         const auto rr = knobs[3]->slider.getBounds();
         if (rr.getX() > l.getRight())
         {
-            const int bw = juce::jlimit(20, 42, rr.getX() - l.getRight() - 4);
+            const int bw = juce::jlimit(20, 52, rr.getX() - l.getRight() - 2);
             const int bh = 20;
             modelBadge.setBounds((l.getRight() + rr.getX()) / 2 - bw / 2,
                                  getHeight() / 2 - bh / 2, bw, bh);

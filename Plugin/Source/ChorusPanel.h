@@ -167,7 +167,7 @@ public:
         // Same packing as RetrigPanel (FxRow relies on it); the slot tab sits in the pill
         // column's caption row, level with the knob captions.
         auto r = getLocalBounds().reduced(4, 2);
-        constexpr int gap = 3, pillW = 42, pillH = 20, knobW = 53, moreW = 20, moreH = 16, captionH = 17;
+        constexpr int gap = 3, pillW = 52, pillH = 20, knobW = 53, moreW = 20, moreH = 16, captionH = 17;
         auto pillCol = r.removeFromLeft(pillW);
         slotTab.setBounds(pillCol.withHeight(captionH).withSizeKeepingCentre(pillW, 13));
         pill.setBounds(pillCol.withSizeKeepingCentre(pillW, pillH));
