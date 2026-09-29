@@ -169,11 +169,12 @@ bool AudioDocument::timePitchKnobsEngaged() const
 bool AudioDocument::playbackKnobsEngaged() const
 {
     return timePitchKnobsEngaged()
-        || r3wrk::filterEngaged((r3wrk::FilterModel) filterModel.load(std::memory_order_relaxed),
+        || (filterOn.load(std::memory_order_relaxed)
+            && r3wrk::filterEngaged((r3wrk::FilterModel) filterModel.load(std::memory_order_relaxed),
                                 filterBase.load(std::memory_order_relaxed),
                                 filterWidth.load(std::memory_order_relaxed),
                                 filterHpQ.load(std::memory_order_relaxed),
-                                filterLpQ.load(std::memory_order_relaxed))
+                                filterLpQ.load(std::memory_order_relaxed)))
         || r3wrk::DirtStage::engaged(dirtDrive.load(std::memory_order_relaxed),
                                      dirtRate.load(std::memory_order_relaxed),
                                      dirtBits.load(std::memory_order_relaxed))
@@ -228,7 +229,8 @@ juce::AudioBuffer<float> AudioDocument::renderWithPlaybackKnobs(const juce::Audi
     const double fHpQ   = filterHpQ.load(std::memory_order_relaxed);
     const double fLpQ   = filterLpQ.load(std::memory_order_relaxed);
     const auto   fm     = (r3wrk::FilterModel) filterModel.load(std::memory_order_relaxed);
-    if (r3wrk::filterEngaged(fm, fBase, fWidth, fHpQ, fLpQ) && out.getNumSamples() > 0)
+    if (filterOn.load(std::memory_order_relaxed) && r3wrk::filterEngaged(fm, fBase, fWidth, fHpQ, fLpQ)
+        && out.getNumSamples() > 0)
     {
         for (int ch = 0; ch < out.getNumChannels(); ++ch)
         {

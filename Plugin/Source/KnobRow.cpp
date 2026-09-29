@@ -207,12 +207,19 @@ KnobRow::KnobRow(AudioDocument& doc)
         };
     }
 
+    // The badge is the filter's on/off (off glides it open and bypasses; the knobs keep their
+    // settings); the small tab above it switches the model, like the FX drawer slots' tab.
     addAndMakeVisible(modelBadge);
     modelBadge.onClick = [this]
     {
+        document.filterOn.store(! document.filterOn.load());
+        syncModelBadge();
+    };
+    addAndMakeVisible(modelTab);
+    modelTab.onClick = [this]
+    {
         document.filterModel.store((document.filterModel.load() + 1) % 2);
         syncModelBadge();
-        for (auto* k : knobs) k->slider.updateText();   // Base/Width Hz readouts follow the model
     };
 
     dirtMoreButton.setTooltip("Dirt: Drive / Rate / Bits (double-click to pin)");
@@ -259,10 +266,13 @@ void KnobRow::applyTheme()
         k->caption.repaint();
         k->slider.repaint();
     }
-    modelBadge.fill   = pal.accent;
-    modelBadge.ink    = pal.windowBg;
-    modelBadge.border = pal.textDim;
+    modelBadge.fill   = pal.text;                                             // lit letters
+    modelBadge.ink    = pal.windowBg.interpolatedWith(pal.textDim, 0.16f);   // unlit dot grid
+    modelBadge.border = pal.textDim;                                          // dim letters
     modelBadge.repaint();
+    modelTab.ink    = pal.textDim;
+    modelTab.border = pal.textDim;
+    modelTab.repaint();
 
     // Same outline idiom as the header's follow / float-on-top buttons: transparent fill,
     // plain text ink.
@@ -285,34 +295,29 @@ void KnobRow::setDrawerOpen(bool open)
 void KnobRow::syncModelBadge()
 {
     const bool ot = document.filterModel.load() == 1;
-    if (modelBadge.active == ot)
-        return;
-    modelBadge.active = ot;
-    modelBadge.text   = ot ? "OT" : "MNM";
-    modelBadge.repaint();
-    for (auto* k : knobs) k->slider.updateText();   // Base/Width readouts follow a model change from elsewhere
+    const bool on = document.filterOn.load();
+    const juce::String name = ot ? "OT" : "MNM";
+    if (modelBadge.text != name)
+    {
+        modelBadge.text = name;
+        modelTab.target = ot ? "MNM" : "OT";
+        modelTab.setTooltip("Switch the filter to the " + juce::String(ot ? "Monomachine (MNM)" : "Octatrack (OT)") + " model");
+        modelTab.repaint();
+        for (auto* k : knobs) k->slider.updateText();   // Base/Width Hz readouts follow the model
+    }
+    if (modelBadge.active != on || modelBadge.text != name)
+    {
+        modelBadge.active = on;
+        modelBadge.repaint();
+    }
+    modelBadge.setTooltip("Filter " + name + ": click to switch on/off (off keeps the knob settings)");
 }
 
 void KnobRow::ModelBadge::paint(juce::Graphics& g)
 {
-    auto r = getLocalBounds().toFloat().reduced(0.5f);
-    constexpr float rad = 3.0f;
-    if (active)
-        g.setColour(fill);
-    else
-        g.setColour(fill.withAlpha(hovered ? 0.22f : 0.0f));
-    g.fillRoundedRectangle(r, rad);
-    g.setColour(border.withAlpha(active || hovered ? 0.95f : 0.55f));
-    g.drawRoundedRectangle(r, rad, 1.0f);
-    g.setColour(active ? ink : border);
-    // R3WRKLookAndFeel::getTypefaceForFont() swaps EVERY font app-wide for Space Mono -- a
-    // monospace display face that reads fine at the sizes it's used at elsewhere (knob
-    // captions/readouts), but at this badge's tiny size its "M"/"N" strokes sit close enough to
-    // blur together (confirmed by the user; extra kerning alone didn't fix it). systemUIFont()
-    // attaches the OS's own system typeface directly, bypassing that override -- a proportional
-    // UI font stays legible at sizes a monospace one doesn't.
-    g.setFont(systemUIFont(11.0f));
-    g.drawText(text, getLocalBounds(), juce::Justification::centred);
+    // Dot-matrix name, like the FX drawer toggles: fill = lit letters (on), border = dim letters,
+    // ink = the unlit dot grid (see applyTheme()).
+    drawDotMatrixToggle(g, getLocalBounds().toFloat(), text, active, hovered, fill, border, ink);
 }
 
 void KnobRow::changeListenerCallback(juce::ChangeBroadcaster*)
@@ -432,6 +437,9 @@ void KnobRow::resized()
             const int bh = 16;
             modelBadge.setBounds((l.getRight() + rr.getX()) / 2 - bw / 2,
                                  getHeight() / 2 - bh / 2, bw, bh);
+            // The model tab sits in the caption row above the badge, like the FX slots' tab.
+            const auto cap = knobs[3]->caption.getBounds();
+            modelTab.setBounds((l.getRight() + rr.getX()) / 2 - bw / 2, cap.getCentreY() - 13 / 2, bw, 13);
         }
     }
     repaint();   // reposition the section dividers for the new knob width

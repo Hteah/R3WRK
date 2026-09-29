@@ -5,6 +5,7 @@
 #include "Theme.h"
 #include "R3WRKLookAndFeel.h"
 #include "PinnableCallout.h"
+#include "SlotSwitchTab.h"
 
 /**
     A horizontal strip of small rotary knobs beneath the transport bar.
@@ -98,10 +99,10 @@ private:
 
     // The filter-model switch: a small clickable pill sitting where the knob row's
     // filter-section divider dots would be (before the "Base" knob). Shows "MNM" / "OT".
-    struct ModelBadge : juce::Component
+    struct ModelBadge : juce::Component, public juce::SettableTooltipClient
     {
         juce::String text { "MNM" };
-        bool active = false;                       // non-default model -> accent fill
+        bool active = false;                       // the filter is on (AudioDocument::filterOn)
         juce::Colour fill, ink, border;
         std::function<void()> onClick;
 
@@ -117,7 +118,7 @@ private:
 
     Knob& addKnob(const juce::String& name);
     juce::String timeString(double seconds) const;
-    void syncModelBadge();   // text/colour/tooltip from document.filterModel
+    void syncModelBadge();   // badge text + on/off and the tab's target, from filterModel / filterOn
 
     // Readout sizing/font now live on the base class itself (R3WRKLookAndFeel::
     // createSliderTextBox), so every rotary knob using that look matches KnobRow's without this
@@ -132,7 +133,8 @@ private:
     juce::OwnedArray<Knob> knobs;
     Knob* startKnob = nullptr;
     Knob* endKnob   = nullptr;
-    ModelBadge modelBadge;
+    ModelBadge modelBadge;       // the filter's on/off, named for the model (dot-matrix MNM / OT)
+    SlotSwitchTab modelTab;      // above it: switches the filter model, like the FX slots' tab
 
     // Dirt's popup (Drive / Rate / Bits -- DirtPanel.h): the same small "more" dot the FX
     // panels use, in its own slot right of the Dirt knob. One click opens, double-click pins (PinnableCallout);

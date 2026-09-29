@@ -9,7 +9,8 @@
 
 namespace
 {
-    constexpr int kStateMagic     = 0x52335757;   // 'R3WW' - adds the RVB/PLX slot's on/off pill
+    constexpr int kStateMagic     = 0x52335758;   // 'R3WX' - adds the filter's on/off
+    constexpr int kStateMagicR3WW = 0x52335757;   // 'R3WW' - adds the RVB/PLX slot's on/off pill
     constexpr int kStateMagicR3WV = 0x52335756;   // 'R3WV' - CHORUS becomes the MnM FX-CHORUS clone (8 params)
     constexpr int kStateMagicR3WU = 0x52335755;   // 'R3WU' - adds CHORUS (Juno-style, retired) + the RTRG/CHO slot switch
     constexpr int kStateMagicR3WT = 0x52335754;   // 'R3WT' - adds RTRG; RVB/PLX become one slot
@@ -1430,6 +1431,10 @@ bool R3WRKAudioProcessor::applyModulatedFilter(juce::AudioBuffer<float>& buffer,
         }
     }
 
+    // Filter switched off: leave it to applyPlaybackFilter(), which glides it open and bypasses.
+    if (! document.filterOn.load(std::memory_order_relaxed))
+        anyActive = false;
+
     if (! anyActive)
     {
         // Wasn't active last block either -- nothing to clean up, common case.
@@ -1558,10 +1563,13 @@ void R3WRKAudioProcessor::applyDirt(juce::AudioBuffer<float>& buffer, int numCh,
 void R3WRKAudioProcessor::applyPlaybackFilter(juce::AudioBuffer<float>& buffer, int numCh, int startSample, int numSamples,
                                               bool freshPlayPass)
 {
-    const double baseKnob  = juce::jlimit(0.0, 1.0, document.filterBase.load(std::memory_order_relaxed));
-    const double widthKnob = juce::jlimit(0.0, 1.0, document.filterWidth.load(std::memory_order_relaxed));
-    const double hpQKnob   = juce::jlimit(0.0, 1.0, document.filterHpQ.load(std::memory_order_relaxed));
-    const double lpQKnob   = juce::jlimit(0.0, 1.0, document.filterLpQ.load(std::memory_order_relaxed));
+    // Off (the MNM/OT badge): aim at wide open instead of the knobs, so the existing smoothing
+    // glides the filter open and filterEngaged() then bypasses it -- no click, knobs untouched.
+    const bool on = document.filterOn.load(std::memory_order_relaxed);
+    const double baseKnob  = on ? juce::jlimit(0.0, 1.0, document.filterBase.load(std::memory_order_relaxed))  : 0.0;
+    const double widthKnob = on ? juce::jlimit(0.0, 1.0, document.filterWidth.load(std::memory_order_relaxed)) : 1.0;
+    const double hpQKnob   = on ? juce::jlimit(0.0, 1.0, document.filterHpQ.load(std::memory_order_relaxed))  : 0.0;
+    const double lpQKnob   = on ? juce::jlimit(0.0, 1.0, document.filterLpQ.load(std::memory_order_relaxed))  : 0.0;
     const auto   fm        = (r3wrk::FilterModel) juce::jlimit(0, 1, document.filterModel.load(std::memory_order_relaxed));
 
     if (freshPlayPass)
@@ -2568,6 +2576,7 @@ void R3WRKAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     out.writeDouble(document.chorusInp.load());
     out.writeBool(document.fxSlotChorus.load());
     out.writeBool(document.spaceOn.load());             // R3WW+
+    out.writeBool(document.filterOn.load());            // R3WX+
 
     auto& buf = document.getBuffer();
     for (int ch = 0; ch < buf.getNumChannels(); ++ch)
@@ -2583,12 +2592,12 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     juce::MemoryInputStream in(data, (size_t) sizeInBytes, false);
     const int magic = in.readInt();
-    if (magic != kStateMagic && magic != kStateMagicR3WV && magic != kStateMagicR3WU && magic != kStateMagicR3WT &&magic != kStateMagicR3WS && magic != kStateMagicR3WR && magic != kStateMagicR3WQ && magic != kStateMagicR3WP && magic != kStateMagicR3WO && magic != kStateMagicR3WN && magic != kStateMagicR3WM && magic != kStateMagicR3WL && magic != kStateMagicR3WK && magic != kStateMagicR3WJ && magic != kStateMagicR3WI && magic != kStateMagicR3WH && magic != kStateMagicR3WG && magic != kStateMagicR3WF && magic != kStateMagicR3WE && magic != kStateMagicR3WD
+    if (magic != kStateMagic && magic != kStateMagicR3WW && magic != kStateMagicR3WV && magic != kStateMagicR3WU && magic != kStateMagicR3WT &&magic != kStateMagicR3WS && magic != kStateMagicR3WR && magic != kStateMagicR3WQ && magic != kStateMagicR3WP && magic != kStateMagicR3WO && magic != kStateMagicR3WN && magic != kStateMagicR3WM && magic != kStateMagicR3WL && magic != kStateMagicR3WK && magic != kStateMagicR3WJ && magic != kStateMagicR3WI && magic != kStateMagicR3WH && magic != kStateMagicR3WG && magic != kStateMagicR3WF && magic != kStateMagicR3WE && magic != kStateMagicR3WD
         && magic != kStateMagicR3WC && magic != kStateMagicR3WB && magic != kStateMagicR3WA
         && magic != kStateMagicR3W9 && magic != kStateMagicR3W8 && magic != kStateMagicR3W7
         && magic != kStateMagicR3W6 && magic != kStateMagicR3W5)
         return;
-    // R3WW: adds the RVB/PLX on/off pill (spaceOn) after the chorus slot; older projects load it on. R3WV: the CHORUS block becomes enabled + DEL/DEP/SPD/MIX/FB/WID/LP/INP + slot (MnM FX-CHORUS clone). R3WU: adds CHORUS (enabled/mode/metal/mix/rate/width/hiss/ring, retired Juno-style) + the RTRG/CHO slot switch after RTRG. R3WT: adds RTRG after Monitor DRY/FX. R3WS: adds Monitor DRY/FX after Plexiphon Couple/Skew. R3WR: adds Plexiphon Couple/Skew after Overdub. R3WQ: adds Overdub level/feedback/monitor after Dirt. R3WP: adds Dirt drive/rate/bits after Mimeophon Ping-Pong. R3WO: adds Mimeophon Ping-Pong after Skew. R3WN: adds Mimeophon Skew after the other
+    // R3WX: adds the filter on/off (filterOn) after spaceOn; older projects load it on. R3WW: adds the RVB/PLX on/off pill (spaceOn) after the chorus slot; older projects load it on. R3WV: the CHORUS block becomes enabled + DEL/DEP/SPD/MIX/FB/WID/LP/INP + slot (MnM FX-CHORUS clone). R3WU: adds CHORUS (enabled/mode/metal/mix/rate/width/hiss/ring, retired Juno-style) + the RTRG/CHO slot switch after RTRG. R3WT: adds RTRG after Monitor DRY/FX. R3WS: adds Monitor DRY/FX after Plexiphon Couple/Skew. R3WR: adds Plexiphon Couple/Skew after Overdub. R3WQ: adds Overdub level/feedback/monitor after Dirt. R3WP: adds Dirt drive/rate/bits after Mimeophon Ping-Pong. R3WO: adds Mimeophon Ping-Pong after Skew. R3WN: adds Mimeophon Skew after the other
     // Mimeophon params. R3WM: adds the Mimeophon
     // params after the Plexiphon params. R3WL: adds the Plexiphon
     // params after reverb Width. R3WK: adds reverb Width after Pre-
@@ -2603,7 +2612,8 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     // MnM model). R3W8..R3WA: the old OT-style Base/Width filter with a single resonance
     // (+ later Drive, + later 12/24 slope). R3W6/R3W7: the even older mode/cutoff filter.
     // R3W5: none.
-    const bool hasSpaceOn          = (magic == kStateMagic);                                  // R3WW
+    const bool hasFilterOn         = (magic == kStateMagic);                                  // R3WX
+    const bool hasSpaceOn          = (hasFilterOn || magic == kStateMagicR3WW);               // R3WW+
     const bool hasMnmChorus        = (hasSpaceOn || magic == kStateMagicR3WV);                // R3WV+
     const bool hasJunoChorus       = (magic == kStateMagicR3WU);                              // R3WU only
     const bool hasRtrg             = (hasMnmChorus || hasJunoChorus || magic == kStateMagicR3WT); // R3WT+
@@ -2838,6 +2848,8 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     // Before R3WW the RVB/PLX slot had no on/off (MIX 0 was silent) -- load it on, so an older
     // project sounds exactly as it did.
     const bool spaceOnLoaded = hasSpaceOn ? in.readBool() : true;
+    // Before R3WX the filter had no on/off -- load it on, so an older project sounds the same.
+    const bool filterOnLoaded = hasFilterOn ? in.readBool() : true;
 
     if (numCh <= 0 || numCh > kMaxStateChannels || numSamples < 0 || numSamples > 0x7fffffff)
         return;
@@ -2942,6 +2954,7 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     document.chorusInp.store(juce::jlimit(0.0, 1.0, choInp));
     document.fxSlotChorus.store(choSlot);
     document.spaceOn.store(spaceOnLoaded);
+    document.filterOn.store(filterOnLoaded);
 
     document.setSourceFilePath(sourceFilePath);   // "" on an older state blob -- header shows "Untitled"
 

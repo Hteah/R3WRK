@@ -321,6 +321,10 @@ public:
     // Which empirical model the Base/Width/HP Q/LP Q knobs drive: r3wrk::FilterModel as an
     // int (0 = Monomachine, 1 = Octatrack). Switched by the KnobRow badge; persisted.
     std::atomic<int> filterModel { 0 };
+    // The filter's on/off (the dot-matrix MNM/OT badge; the small tab above it switches the model).
+    // Off = the knobs keep their settings but the filter glides open and bypasses. On by default,
+    // and projects saved before it existed load on.
+    std::atomic<bool> filterOn { true };
 
     // "Dirt": the pre-filter harmonics stage (r3wrk::DirtStage, DirtStage.h) -- Octatrack-style
     // drive, then sample-rate, then bit reduction, ahead of the filter so the filter shapes what
