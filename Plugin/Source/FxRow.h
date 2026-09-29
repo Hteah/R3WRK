@@ -63,6 +63,10 @@ public:
     void getLayoutItems(juce::Array<LayoutItem>& items);
 
 private:
+    static constexpr int kToggleSlack = 60;   // how far left of its slot a toggle can be nudged
+    template <typename Panel> void placeSlot(Panel& panel, juce::Rectangle<int> slot, const juce::String& id);
+
+private:
     void changeListenerCallback(juce::ChangeBroadcaster*) override;
     void timerCallback() override;   // Gain knob follows state loads / undo; RVB/PLX + RTRG/CHO slots follow their switches
     void applyTheme();

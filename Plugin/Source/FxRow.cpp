@@ -9,6 +9,11 @@ FxRow::FxRow(AudioDocument& doc, bool standalone)
     // PluginProcessor/AudioDocument side is untouched), just not shown or laid out here.
     // Deliberately no addAndMakeVisible() -- bringing it back is exactly that one line plus its
     // old slot in resized()/paint() below.
+    // Panels reach further left than they draw (room for a nudged toggle -- see placeSlot), so
+    // their empty area mustn't eat clicks meant for the slot underneath.
+    for (juce::Component* p : { (juce::Component*) &retrigPanel, (juce::Component*) &chorusPanel, (juce::Component*) &mimeoPanel,
+                                (juce::Component*) &plexPanel, (juce::Component*) &reverbPanel })
+        p->setInterceptsMouseClicks(false, true);
     addChildComponent(retrigPanel);   // syncModSlot() shows RTRG or CHO
     addChildComponent(chorusPanel);
     syncModSlot();
@@ -139,16 +144,16 @@ void FxRow::resized()
     }
 
     const auto modSlot = full.removeFromLeft(juce::jmin(panelW, full.getWidth()));   // RTRG or CHO
-    retrigPanel.setBounds(modSlot);
-    chorusPanel.setBounds(modSlot);
+    placeSlot(retrigPanel, modSlot, "fx.mod");
+    placeSlot(chorusPanel, modSlot, "fx.mod");
     full.removeFromLeft(gap);
 
-    mimeoPanel.setBounds(full.removeFromLeft(juce::jmin(panelW, full.getWidth())));
+    placeSlot(mimeoPanel, full.removeFromLeft(juce::jmin(panelW, full.getWidth())), "fx.dly");
     full.removeFromLeft(gap);
 
     const auto spaceSlot = full.removeFromLeft(juce::jmin(panelW, full.getWidth()));   // RVB or PLX
-    plexPanel.setBounds(spaceSlot);
-    reverbPanel.setBounds(spaceSlot);
+    placeSlot(plexPanel, spaceSlot, "fx.space");
+    placeSlot(reverbPanel, spaceSlot, "fx.space");
 
     if (showGain && full.getWidth() > lastGap + 40)
     {
@@ -168,29 +173,58 @@ void FxRow::resized()
             for (auto* c : comps)
                 c->setTopLeftPosition(c->getPosition().translated(dx, 0));
     };
-    nudge("fx.mod",   { &retrigPanel, &chorusPanel });
-    nudge("fx.dly",   { &mimeoPanel });
-    nudge("fx.space", { &plexPanel, &reverbPanel });
+    // (The three slots and their toggles were nudged in placeSlot.)
     if (showGain)
         nudge("fx.gain", { &gainCaption, &gainKnob });
 
     repaint();
 }
 
+template <typename Panel>
+void FxRow::placeSlot(Panel& panel, juce::Rectangle<int> slot, const juce::String& id)
+{
+    // The panel's bounds reach kToggleSlack px further left than the slot (empty, and it lets
+    // clicks through -- see the ctor), so its toggle can be nudged left without being clipped.
+    panel.leftSlack = kToggleSlack;
+    panel.setBounds(slot.withLeft(slot.getX() - kToggleSlack).translated(layout->get(id), 0));
+    panel.resized();   // back to the automatic spot (a pure move doesn't re-run it) ...
+    const auto parts = panel.getToggleParts();
+    const int dx = juce::jmax(layout->get(id + ".toggle"), -parts.getFirst()->getX());
+    if (dx != 0)       // ... then the toggle's own nudge
+        for (auto* c : parts)
+            c->setTopLeftPosition(c->getPosition().translated(dx, 0));
+}
+
 void FxRow::getLayoutItems(juce::Array<LayoutItem>& items)
 {
     // A slot's guides are its visible children: the toggle, the knob discs (see layoutGuideRect).
-    auto slot = [&](const juce::String& id, juce::Component& panel)
+    // Each slot is two items: the whole slot, and its toggle on its own (listed after, so it
+    // wins the hit test where they overlap).
+    juce::Array<LayoutItem> toggles;
+    auto slot = [&](const juce::String& id, juce::Component& panel, int slack,
+                    const juce::Array<juce::Component*>& parts)
     {
-        LayoutItem it { id, this, panel.getBounds(), {} };
+        LayoutItem it { id, this, panel.getBounds().withTrimmedLeft(slack), {} };
+        LayoutItem tg { id + ".toggle", this, {}, {} };
         for (auto* c : panel.getChildren())
-            if (c->isVisible() && dynamic_cast<juce::Label*>(c) == nullptr)
+        {
+            if (! c->isVisible() || dynamic_cast<juce::Label*>(c) != nullptr) continue;
+            if (parts.contains(c))
+                tg.bounds = tg.bounds.isEmpty() ? c->getBounds() + panel.getPosition()
+                                                : tg.bounds.getUnion(c->getBounds() + panel.getPosition());
+            else
                 it.guides.add(layoutGuideRect(*c) + panel.getPosition());
+        }
+        tg.guides.add(parts.getFirst()->getBounds() + panel.getPosition());
         items.add(it);
+        toggles.add(tg);
     };
-    slot("fx.mod", retrigPanel.isVisible() ? static_cast<juce::Component&>(retrigPanel) : chorusPanel);
-    slot("fx.dly", mimeoPanel);
-    slot("fx.space", plexPanel.isVisible() ? static_cast<juce::Component&>(plexPanel) : reverbPanel);
+    if (retrigPanel.isVisible()) slot("fx.mod", retrigPanel, retrigPanel.leftSlack, retrigPanel.getToggleParts());
+    else                         slot("fx.mod", chorusPanel, chorusPanel.leftSlack, chorusPanel.getToggleParts());
+    slot("fx.dly", mimeoPanel, mimeoPanel.leftSlack, mimeoPanel.getToggleParts());
+    if (plexPanel.isVisible()) slot("fx.space", plexPanel, plexPanel.leftSlack, plexPanel.getToggleParts());
+    else                       slot("fx.space", reverbPanel, reverbPanel.leftSlack, reverbPanel.getToggleParts());
+    items.addArray(toggles);
     if (showGain && ! gainKnob.getBounds().isEmpty())
         items.add({ "fx.gain", this, gainCaption.getBounds().getUnion(gainKnob.getBounds()),
                     { layoutGuideRect(gainKnob) } });

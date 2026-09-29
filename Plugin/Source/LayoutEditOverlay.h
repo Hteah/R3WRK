@@ -179,6 +179,7 @@ private:
     // Gain follows End), so they'd move along with the drag -- don't snap to them.
     static bool dependsOn(const juce::String& other, const juce::String& dragged)
     {
+        if (other.startsWith(dragged + ".")) return true;   // a slot's own toggle moves with it
         if (dragged == "knob.Pitch") return other.startsWith("fx.");
         if (dragged == "knob.End")   return other == "fx.gain";
         return false;

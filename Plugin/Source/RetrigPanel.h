@@ -214,7 +214,7 @@ public:
     {
         // Same packing as ReverbPanel / PlexiphonPanel / MimeophonPanel (FxRow relies on it); the
         // slot tab sits in the pill column's caption row, level with the knob captions.
-        auto r = getLocalBounds().reduced(4, 2);
+        auto r = getLocalBounds().withTrimmedLeft(leftSlack).reduced(4, 2);
         constexpr int gap = 3, pillW = 60, pillH = 22, knobW = 53, moreW = 20, moreH = 16, captionH = 17;
         auto pillCol = r.removeFromLeft(pillW);
         slotTab.setBounds(pillCol.withHeight(captionH).withSizeKeepingCentre(pillW, 13));
@@ -229,6 +229,12 @@ public:
         }
         moreButton.setBounds(r.removeFromLeft(moreW).withSizeKeepingCentre(moreW, moreH));
     }
+
+
+    // Edit Layout (FxRow): room left of the toggle column it can be nudged into, and the parts
+    // that move as "the toggle".
+    int leftSlack = 0;
+    juce::Array<juce::Component*> getToggleParts() { return { &pill, &slotTab }; }
 
 private:
     struct Pill : juce::Component, public juce::SettableTooltipClient

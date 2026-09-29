@@ -26,6 +26,12 @@ public:
     void resized() override;
     void paint(juce::Graphics&) override;
 
+
+    // Edit Layout (FxRow): room left of the toggle column it can be nudged into, and the parts
+    // that move as "the toggle".
+    int leftSlack = 0;
+    juce::Array<juce::Component*> getToggleParts() { return { &enablePill, &slotTab }; }
+
 private:
     void timerCallback() override;   // low-rate re-sync from external changes (state load, undo)
     void changeListenerCallback(juce::ChangeBroadcaster*) override { applyTheme(); }
