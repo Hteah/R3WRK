@@ -19,8 +19,8 @@ constexpr bool kBoxedToggles = true;
 inline void drawBracketToggle(juce::Graphics& g, juce::Rectangle<float> area, const juce::String& text,
                               bool on, bool hovered, juce::Colour lit, juce::Colour dim)
 {
-    // On is the theme's text colour pulled 30% toward dim -- full text colour read stark white.
-    const juce::Colour onInk = lit.interpolatedWith(dim, 0.3f);
+    // On is the theme's text colour pulled 45% toward dim -- full text colour read stark white (30% still too bright).
+    const juce::Colour onInk = lit.interpolatedWith(dim, 0.45f);
     const juce::Colour ink = on ? onInk : (hovered ? dim.interpolatedWith(onInk, 0.5f) : dim);
     g.setColour(ink);
 
