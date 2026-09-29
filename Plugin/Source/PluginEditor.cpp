@@ -35,6 +35,15 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
     addChildComponent(fxRow);   // hidden until the drawer is opened -- see toggleFxDrawer()
 
     knobRow.onDrawerToggle = [this] { toggleFxDrawer(); };
+    knobRow.onReset = [this]
+    {
+        // Emergency reset: stop (committing an overdub pass as usual), then every knob and effect
+        // back to default. A recording in progress is left running -- stopping it is Record's job.
+        auto& doc = processorRef.document;
+        if (doc.overdubbing.load()) processorRef.stopOverdub();
+        if (doc.isPlaying.load())   processorRef.stopPlayback();
+        doc.resetSoundToDefaults();
+    };
 
     addChildComponent(layoutOverlay);
     layoutOverlay.getItems = [this]

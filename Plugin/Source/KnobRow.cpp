@@ -238,6 +238,12 @@ KnobRow::KnobRow(AudioDocument& doc)
     drawerButton.onClick = [this] { if (onDrawerToggle) onDrawerToggle(); };
     addAndMakeVisible(drawerButton);
 
+    resetButton.setWantsKeyboardFocus(false);
+    resetButton.setTooltip("Reset: stop, and put every knob and effect back to default");
+    resetButton.setLookAndFeel(&drawerLnF);
+    resetButton.onClick = [this] { if (onReset) onReset(); };
+    addAndMakeVisible(resetButton);
+
     applyTheme();
     syncModelBadge();
     theme->addChangeListener(this);
@@ -249,6 +255,7 @@ KnobRow::~KnobRow()
     for (auto* k : knobs)
         k->slider.setLookAndFeel(nullptr);   // detach before knobLnF is destroyed
     drawerButton.setLookAndFeel(nullptr);
+    resetButton.setLookAndFeel(nullptr);
     dirtCallout.close();
     dirtMoreButton.setLookAndFeel(nullptr);   // detach before dirtMoreLnF is destroyed
     theme->removeChangeListener(this);
@@ -281,6 +288,9 @@ void KnobRow::applyTheme()
     // Same text ink when open too (per the user -- accent read as dimmed in themes with a muted
     // accent); the glyph itself shows the state, dropping its outer orbit ring once open.
     drawerButton.setColour(juce::TextButton::textColourOnId,   pal.text);
+    resetButton.setColour(juce::TextButton::buttonColourId,  juce::Colours::transparentBlack);
+    resetButton.setColour(juce::TextButton::textColourOffId, pal.text);
+    resetButton.setColour(juce::TextButton::textColourOnId,  pal.text);
 
     dirtMoreButton.setColour(juce::TextButton::buttonColourId,  juce::Colours::transparentBlack);
     dirtMoreButton.setColour(juce::TextButton::textColourOffId, pal.textDim);
@@ -384,7 +394,12 @@ void KnobRow::resized()
                                   // (see drawOrbitIcon's fillFraction), so this reads slightly
                                   // smaller than a knob's own disc, not bigger.
     auto drawerArea = r.removeFromRight(drawerW);
-    drawerButton.setBounds(drawerArea.withSizeKeepingCentre(drawerW, drawerW));
+    // The reset button (boxed X) sits under the drawer toggle, level with the knob readouts; the
+    // toggle moves up into the caption/disc band above it.
+    constexpr int resetH = 24;
+    resetButton.setBounds(drawerArea.removeFromBottom(resetH).withSizeKeepingCentre(resetH, resetH));
+    const int toggleSide = juce::jmin(drawerW, drawerArea.getHeight());
+    drawerButton.setBounds(drawerArea.withSizeKeepingCentre(toggleSide, toggleSide));
     r.removeFromRight(6);
 
     const int gap      = 2;

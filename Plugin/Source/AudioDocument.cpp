@@ -166,6 +166,34 @@ bool AudioDocument::timePitchKnobsEngaged() const
         || std::abs(stretch - 1.0) > 1.0e-4;
 }
 
+void AudioDocument::resetSoundToDefaults()
+{
+    // Values = the member initialisers in AudioDocument.h.
+    playbackSpeed = 1.0;  playbackPitch = 0.0;  playbackStretch = 1.0;
+    dirtDrive = 0.0;  dirtRate = 1.0;  dirtBits = 1.0;
+    filterBase = 0.0;  filterWidth = 1.0;  filterHpQ = 0.0;  filterLpQ = 0.0;  filterOn = true;
+    playbackGainDb = 0.0;
+
+    overdubMonitor = false;  overdubMonitorFx = false;  autoRecordEnabled = false;
+    overdubLevel = 1.0;  overdubFeedback = 1.0;
+
+    rtrgLatched = false;  rtrgTime = 0.55;  rtrgFade = 0.5;
+
+    chorusEnabled = false;
+    chorusDel = 64 / 127.0;  chorusDep = 64 / 127.0;  chorusSpd = 64 / 127.0;  chorusMix = 1.0;
+    chorusFb = 0.0;  chorusWid = 0.0;  chorusLp = 1.0;  chorusInp = 64 / 127.0;
+
+    mimeoEnabled = false;
+    mimeoZone = 3.0 / 7.0;  mimeoRate = 0.5;  mimeoRepeats = 0.3;  mimeoColor = 0.5;  mimeoHalo = 0.0;
+    mimeoMix = 0.0;  mimeoSkew = 0.5;  mimeoPingPong = false;
+
+    spaceOn = false;
+    reverbSize = 0.5;  reverbAbsorb = 0.5;  reverbDecay = 0.5;  reverbTilt = 0.5;  reverbMix = 0.0;
+    reverbPredelay = 0.1;  reverbWidth = 0.5;
+    plexLevel = 0.5;  plexPlexus = 0.5;  plexSize = 0.5;  plexDiffuse = 0.5;  plexDecay = 0.5;
+    plexColor = 0.5;  plexMix = 0.0;  plexCouple = 0.5;  plexSkew = 0.5;
+}
+
 bool AudioDocument::playbackKnobsEngaged() const
 {
     return timePitchKnobsEngaged()

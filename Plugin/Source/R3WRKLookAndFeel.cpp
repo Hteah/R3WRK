@@ -433,6 +433,20 @@ namespace
         g.fillEllipse (cx - 2.6f * s, cy - 34.0f * s - 2.6f * s, 5.2f * s, 5.2f * s);   // planet on outer orbit (-90deg/top)
     }
 
+    // Reset (the knob row's reset-everything button, under the drawer toggle): a square outline
+    // with both diagonals -- an X in a box, from the user's reference image.
+    void drawResetIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
+    {
+        const float side = juce::jmin(bounds.getWidth(), bounds.getHeight()) * 0.62f;
+        const auto sq = juce::Rectangle<float>(side, side).withCentre(bounds.getCentre());
+        const float t = juce::jmax(1.2f, side * 0.07f);
+        g.setColour(ink);
+        g.drawRect(sq.reduced(t * 0.5f), t);
+        const auto in = sq.reduced(t);
+        g.drawLine(in.getX(), in.getY(), in.getRight(), in.getBottom(), t);
+        g.drawLine(in.getRight(), in.getY(), in.getX(), in.getBottom(), t);
+    }
+
     // "More" (opens the full popup editor -- Mimeophon/Plexiphon/Reverb's compact panels): a
     // small outlined ring with a filled dot centred inside it, replacing the old "..." text.
     void drawMoreIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
@@ -682,7 +696,7 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
         && text != iconReverse && text != iconClear && text != iconAutoRecord
         && text != iconSlice && text != iconFollow && text != iconDesktopRec
         && text != iconFloatTop && text != iconCaptureOut && text != iconBlackBox
-        && text != iconOrbit && text != iconMore && text != iconOverdub && text != iconMonitor
+        && text != iconOrbit && text != iconReset && text != iconMore && text != iconOverdub && text != iconMonitor
         && text != iconRecDot)
     {
         juce::LookAndFeel_V4::drawButtonText(g, button, isMouseOverButton, isButtonDown);
@@ -790,6 +804,11 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     if (text == iconOrbit)
     {
         drawOrbitIcon(g, bounds, ink, button.getToggleState());
+        return;
+    }
+    if (text == iconReset)
+    {
+        drawResetIcon(g, bounds, ink);
         return;
     }
     if (text == iconMore)

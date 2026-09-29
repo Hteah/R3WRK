@@ -38,8 +38,12 @@ public:
     // the FX drawer is actually open (it resizes the window), so this only reports the click;
     // call setDrawerOpen() back once the editor has decided the new state.
     std::function<void()> onDrawerToggle;
+
+    // Fired by the reset button under the drawer toggle (the boxed X): the editor stops the
+    // transport and puts every knob / effect back to default (AudioDocument::resetSoundToDefaults).
+    std::function<void()> onReset;
     void setDrawerOpen(bool open);
-    void setDrawerToggleVisible(bool v) { drawerButton.setVisible(v); }   // hidden in Edit Layout mode
+    void setDrawerToggleVisible(bool v) { drawerButton.setVisible(v); resetButton.setVisible(v); }   // hidden in Edit Layout mode
 
     void resized() override;
     void paint(juce::Graphics&) override;   // faint group dividers between the knob sections
@@ -167,6 +171,7 @@ private:
     // faint wash on hover/press/while the drawer is open.
     R3WRKIconOnlyLookAndFeel drawerLnF;
     juce::TextButton drawerButton { R3WRKLookAndFeel::iconOrbit };
+    juce::TextButton resetButton  { R3WRKLookAndFeel::iconReset };   // under it -- see onReset
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(KnobRow)
 };

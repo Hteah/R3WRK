@@ -96,6 +96,48 @@ int main()
         check(doc.getNumSamples() == beforeCut - 1000, "redo re-applied the cut");
     }
 
+    // --- reset button: every sound setting back to a fresh document's -----
+    {
+        std::cout << "-- reset to defaults --" << std::endl;
+        AudioDocument fresh, doc;
+        // Scramble every double/bool the reset covers (and the choices it must keep).
+        std::atomic<double>* ds[] = { &doc.playbackSpeed, &doc.playbackPitch, &doc.playbackStretch,
+            &doc.dirtDrive, &doc.dirtRate, &doc.dirtBits, &doc.filterBase, &doc.filterWidth, &doc.filterHpQ,
+            &doc.filterLpQ, &doc.playbackGainDb, &doc.overdubLevel, &doc.overdubFeedback, &doc.rtrgTime,
+            &doc.rtrgFade, &doc.chorusDel, &doc.chorusDep, &doc.chorusSpd, &doc.chorusMix, &doc.chorusFb,
+            &doc.chorusWid, &doc.chorusLp, &doc.chorusInp, &doc.mimeoZone, &doc.mimeoRate, &doc.mimeoRepeats,
+            &doc.mimeoColor, &doc.mimeoHalo, &doc.mimeoMix, &doc.mimeoSkew, &doc.reverbSize, &doc.reverbAbsorb,
+            &doc.reverbDecay, &doc.reverbTilt, &doc.reverbMix, &doc.reverbPredelay, &doc.reverbWidth,
+            &doc.plexLevel, &doc.plexPlexus, &doc.plexSize, &doc.plexDiffuse, &doc.plexDecay, &doc.plexColor,
+            &doc.plexMix, &doc.plexCouple, &doc.plexSkew };
+        std::atomic<double>* fs[] = { &fresh.playbackSpeed, &fresh.playbackPitch, &fresh.playbackStretch,
+            &fresh.dirtDrive, &fresh.dirtRate, &fresh.dirtBits, &fresh.filterBase, &fresh.filterWidth, &fresh.filterHpQ,
+            &fresh.filterLpQ, &fresh.playbackGainDb, &fresh.overdubLevel, &fresh.overdubFeedback, &fresh.rtrgTime,
+            &fresh.rtrgFade, &fresh.chorusDel, &fresh.chorusDep, &fresh.chorusSpd, &fresh.chorusMix, &fresh.chorusFb,
+            &fresh.chorusWid, &fresh.chorusLp, &fresh.chorusInp, &fresh.mimeoZone, &fresh.mimeoRate, &fresh.mimeoRepeats,
+            &fresh.mimeoColor, &fresh.mimeoHalo, &fresh.mimeoMix, &fresh.mimeoSkew, &fresh.reverbSize, &fresh.reverbAbsorb,
+            &fresh.reverbDecay, &fresh.reverbTilt, &fresh.reverbMix, &fresh.reverbPredelay, &fresh.reverbWidth,
+            &fresh.plexLevel, &fresh.plexPlexus, &fresh.plexSize, &fresh.plexDiffuse, &fresh.plexDecay, &fresh.plexColor,
+            &fresh.plexMix, &fresh.plexCouple, &fresh.plexSkew };
+        for (auto* d : ds) d->store(0.123);
+        std::atomic<bool>* bs[] = { &doc.filterOn, &doc.overdubMonitor, &doc.overdubMonitorFx, &doc.autoRecordEnabled,
+            &doc.rtrgLatched, &doc.chorusEnabled, &doc.mimeoEnabled, &doc.mimeoPingPong, &doc.spaceOn };
+        std::atomic<bool>* fb[] = { &fresh.filterOn, &fresh.overdubMonitor, &fresh.overdubMonitorFx, &fresh.autoRecordEnabled,
+            &fresh.rtrgLatched, &fresh.chorusEnabled, &fresh.mimeoEnabled, &fresh.mimeoPingPong, &fresh.spaceOn };
+        for (auto* b : bs) b->store(! b->load());
+        doc.fxSlotChorus = true;  doc.reverbEnabled = false;  doc.filterModel = 1;
+
+        doc.resetSoundToDefaults();
+
+        int badD = 0, badB = 0;
+        for (size_t i = 0; i < std::size(ds); ++i) if (std::abs(ds[i]->load() - fs[i]->load()) > 1e-12) ++badD;
+        for (size_t i = 0; i < std::size(bs); ++i) if (bs[i]->load() != fb[i]->load()) ++badB;
+        check(badD == 0, "reset: every knob matches a fresh document (" + juce::String(badD) + " off)");
+        check(badB == 0, "reset: every on/off matches a fresh document (" + juce::String(badB) + " off)");
+        check(doc.fxSlotChorus.load() && ! doc.reverbEnabled.load() && doc.filterModel.load() == 1,
+              "reset: keeps the slot / model choices");
+    }
+
     // --- each edit is its own undo step ------------------------------
     {
         std::cout << "-- each edit is its own undo step --" << std::endl;

@@ -1765,6 +1765,8 @@ void EditorToolbar::timerCallback()
         }
         if (monitorButton.getToggleState() != document.overdubMonitor.load())   // state load resets it
             monitorButton.setToggleState(document.overdubMonitor.load(), juce::dontSendNotification);
+        if (autoRecordButton.getToggleState() != document.autoRecordEnabled.load())   // the knob row's reset button
+            autoRecordButton.setToggleState(document.autoRecordEnabled.load(), juce::dontSendNotification);
         const bool active = document.overdubbing.load();
         overdubButton.setButtonText(active ? R3WRKLookAndFeel::iconRecDot : R3WRKLookAndFeel::iconOverdub);
 

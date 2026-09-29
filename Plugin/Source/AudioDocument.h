@@ -515,6 +515,14 @@ public:
     // True when ANY playback knob (time/pitch/stretch OR the filter) would change the sound.
     bool playbackKnobsEngaged() const;
 
+    // The knob row's reset button (the boxed X under the drawer toggle): every sound-shaping knob
+    // and effect back to its default -- Speed/Pitch/Stretch, Dirt (+ its popup), the filter knobs
+    // (filter on), Gain, every FX drawer effect off with its knobs at default (MIX 0 -> tails go
+    // silent), RTRG unlatched, Overdub level/feedback, Monitor + Auto-Record off. Keeps choices
+    // that aren't "sound": which model each slot shows, the filter model, RTRG sync/tempo, loop
+    // mode, selection / Start-End. Message thread; the transport side lives in the editor.
+    void resetSoundToDefaults();
+
     // Renders `src` through the current playback knobs so a written file captures the sound,
     // not the knob positions:
     //   time/pitch/stretch  -- the OFFLINE stretch engine, same mapping the real-time path
