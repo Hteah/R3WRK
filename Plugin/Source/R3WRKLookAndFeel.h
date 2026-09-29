@@ -9,35 +9,16 @@ juce::Font spaceMonoFont(float height, bool bold = true);
 juce::Font systemUIFont(float height, bool bold = true);
 
 // The on/off toggles (FX drawer CHO / RTRG / DLY / RVB / PLX, and the filter's MNM / OT badge):
-// the name inside four corner brackets, like a camera viewfinder -- thin dim ticks and a dim
-// name when off, heavier ticks and a full-ink bold name when on, in between while hovered.
-// Replaces the old filled rounded "pill" (too corporate next to R3WRK's hand-drawn line icons).
+// the name in plain typed brackets, "[RVB]" -- dim when off, bold full ink when on, in between
+// while hovered. Replaces the old filled rounded "pill" (too corporate next to R3WRK's
+// hand-drawn line icons); tried as dot-matrix and as drawn corner ticks before settling here.
 inline void drawBracketToggle(juce::Graphics& g, juce::Rectangle<float> area, const juce::String& text,
                               bool on, bool hovered, juce::Colour lit, juce::Colour dim)
 {
-    const juce::Colour ink = on ? lit : (hovered ? dim.interpolatedWith(lit, 0.5f) : dim);
-    const float stroke = on ? 1.5f : 1.0f;
-    const float inset = stroke * 0.5f;
-    const auto r = area.reduced(inset);
-    const float len = juce::jmin(4.2f, r.getHeight() * 0.3f);
-
-    juce::Path ticks;
-    auto corner = [&](juce::Point<float> p, float dx, float dy)
-    {
-        ticks.startNewSubPath(p.x, p.y + dy * len);
-        ticks.lineTo(p);
-        ticks.lineTo(p.x + dx * len, p.y);
-    };
-    corner(r.getTopLeft(),      1.0f,  1.0f);
-    corner(r.getTopRight(),    -1.0f,  1.0f);
-    corner(r.getBottomLeft(),   1.0f, -1.0f);
-    corner(r.getBottomRight(), -1.0f, -1.0f);
-    g.setColour(ink);
-    g.strokePath(ticks, juce::PathStrokeType(stroke, juce::PathStrokeType::mitered, juce::PathStrokeType::rounded));
-
+    g.setColour(on ? lit : (hovered ? dim.interpolatedWith(lit, 0.5f) : dim));
     // systemUIFont: Space Mono's strokes blur together at this size (see KnobRow::ModelBadge).
-    g.setFont(systemUIFont(text.length() > 3 ? 9.0f : 9.6f, on));
-    g.drawFittedText(text, area.toNearestInt(), juce::Justification::centred, 1, 0.8f);
+    g.setFont(systemUIFont(text.length() > 3 ? 10.0f : 11.0f, on));
+    g.drawFittedText("[" + text + "]", area.toNearestInt(), juce::Justification::centred, 1, 0.75f);
 }
 
 /**
