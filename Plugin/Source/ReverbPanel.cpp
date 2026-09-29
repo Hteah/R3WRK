@@ -166,8 +166,8 @@ void ReverbPanel::timerCallback()
 void ReverbPanel::applyTheme()
 {
     const auto& pal = theme->palette();
-    enablePill.fill   = pal.accent;
-    enablePill.ink    = pal.windowBg;
+    enablePill.fill   = pal.text;                                             // lit letters
+    enablePill.ink    = pal.windowBg.interpolatedWith(pal.textDim, 0.16f);   // unlit dot grid
     enablePill.border = pal.textDim;
     enablePill.repaint();
     slotTab.ink    = pal.textDim;
@@ -197,21 +197,8 @@ void ReverbPanel::openFullEditor()
 
 void ReverbPanel::EnablePill::paint(juce::Graphics& g)
 {
-    auto r = getLocalBounds().toFloat().reduced(0.5f);
-    constexpr float rad = 3.0f;
-    if (on)
-        g.setColour(fill);
-    else
-        g.setColour(fill.withAlpha(hovered ? 0.22f : 0.0f));
-    g.fillRoundedRectangle(r, rad);
-    g.setColour(border.withAlpha(on || hovered ? 0.95f : 0.55f));
-    g.drawRoundedRectangle(r, rad, 1.0f);
-    g.setColour(on ? ink : border);
-    // systemUIFont(), not Space Mono -- matches KnobRow::ModelBadge's own fix (see its comment):
-    // a proportional UI font stays legible at this pill's small size where the monospace app
-    // default reads cramped.
-    g.setFont(systemUIFont(11.0f));
-    g.drawText("RVB", getLocalBounds(), juce::Justification::centred);
+    // fill = lit letters, border = dim letters, ink = the unlit dot grid (see applyTheme()).
+    drawDotMatrixToggle(g, getLocalBounds().toFloat(), "RVB", on, hovered, fill, border, ink);
 }
 
 void ReverbPanel::resized()

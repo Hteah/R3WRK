@@ -238,15 +238,8 @@ private:
         std::function<void()> onClick;
         void paint(juce::Graphics& g) override
         {
-            auto r = getLocalBounds().toFloat().reduced(0.5f);
-            constexpr float rad = 3.0f;
-            g.setColour(on ? fill : fill.withAlpha(hovered ? 0.22f : 0.0f));
-            g.fillRoundedRectangle(r, rad);
-            g.setColour(border.withAlpha(on || hovered ? 0.95f : 0.55f));
-            g.drawRoundedRectangle(r, rad, 1.0f);
-            g.setColour(on ? ink : border);
-            g.setFont(systemUIFont(10.0f));   // 4 letters in the same 32px pill as "RVB"
-            g.drawText("RTRG", getLocalBounds(), juce::Justification::centred);
+            // fill = lit letters, border = dim letters, ink = the unlit dot grid (see applyTheme()).
+            drawDotMatrixToggle(g, getLocalBounds().toFloat(), "RTRG", on, hovered, fill, border, ink);
         }
         void mouseUp(const juce::MouseEvent&) override { if (onClick) onClick(); }
         void mouseEnter(const juce::MouseEvent&) override { hovered = true; repaint(); }
@@ -303,8 +296,8 @@ private:
     void applyTheme()
     {
         const auto& pal = theme->palette();
-        pill.fill = pal.accent;
-        pill.ink = pal.windowBg;
+        pill.fill = pal.text;                                            // lit letters
+        pill.ink = pal.windowBg.interpolatedWith(pal.textDim, 0.16f);  // unlit dot grid
         pill.border = pal.textDim;
         pill.repaint();
         slotTab.ink = pal.textDim;
