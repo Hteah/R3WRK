@@ -442,7 +442,40 @@ void KnobRow::resized()
             modelTab.setBounds((l.getRight() + rr.getX()) / 2 - bw / 2, cap.getCentreY() - 13 / 2, bw, 13);
         }
     }
+
+    // The user's Edit Layout nudges (LayoutTweaks), on top of the automatic layout above. The
+    // badge was placed from the unshifted knobs first, so moving a neighbour doesn't drag it.
+    if (const int dx = layout->get("badge.filter"); dx != 0)
+    {
+        modelBadge.setTopLeftPosition(modelBadge.getPosition().translated(dx, 0));
+        modelTab.setTopLeftPosition(modelTab.getPosition().translated(dx, 0));
+    }
+    for (auto* k : knobs)
+    {
+        const int dx = layout->get("knob." + k->caption.getText());
+        if (dx == 0) continue;
+        k->caption.setTopLeftPosition(k->caption.getPosition().translated(dx, 0));
+        k->slider.setTopLeftPosition(k->slider.getPosition().translated(dx, 0));
+        if (k == dirtKnob)
+            dirtMoreButton.setTopLeftPosition(dirtMoreButton.getPosition().translated(dx, 0));
+    }
     repaint();   // reposition the section dividers for the new knob width
+}
+
+void KnobRow::getLayoutItems(juce::Array<LayoutItem>& items)
+{
+    for (auto* k : knobs)
+    {
+        LayoutItem it { "knob." + k->caption.getText(), this,
+                        k->caption.getBounds().getUnion(k->slider.getBounds()), {} };
+        if (k == dirtKnob)
+            it.bounds = it.bounds.getUnion(dirtMoreButton.getBounds());
+        it.guides.add(layoutGuideRect(k->slider));
+        items.add(it);
+    }
+    if (modelBadge.isVisible() && ! modelBadge.getBounds().isEmpty())
+        items.add({ "badge.filter", this, modelBadge.getBounds().getUnion(modelTab.getBounds()),
+                    { modelBadge.getBounds() } });
 }
 
 void KnobRow::paint(juce::Graphics& g)

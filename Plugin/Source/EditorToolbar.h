@@ -8,6 +8,7 @@
 #include "OutputSettings.h"
 #include "R3WRKLookAndFeel.h"
 #include "PinnableCallout.h"
+#include "LayoutTweaks.h"
 
 /**
     A single control strip below the waveform:
@@ -96,7 +97,8 @@ public:
         tmiStretch, tmiExportSel,
         tmiSliceToFolder, tmiExportOt, tmiClearSlices,
         tmiOutputFolder, tmiTheme, tmiAutoRecordThreshold, tmiAudioSettings, tmiBlackBoxDuration,
-        tmiUndo, tmiRedo
+        tmiUndo, tmiRedo,
+        tmiEditLayout, tmiResetLayout
     };
 
     // `appMenu` is the macOS application ("R3WRK") menu -- Standalone only, wired up by
@@ -143,6 +145,7 @@ private:
     juce::SharedResourcePointer<ThemeManager> theme;
     lcd::HardwareLcdLookAndFeel toolsMenuLnf;   // Tools ▾ menu styling -- see showToolsMenu
     juce::SharedResourcePointer<OutputSettings> outputSettings;
+    juce::SharedResourcePointer<LayoutTweaks> layoutTweaks;   // Edit Layout / Reset Layout menu items
     R3WRKLookAndFeel toolbarLnF;
     Clipboard clipboard;
 

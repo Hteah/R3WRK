@@ -36,6 +36,18 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
 
     knobRow.onDrawerToggle = [this] { toggleFxDrawer(); };
 
+    addChildComponent(layoutOverlay);
+    layoutOverlay.getItems = [this]
+    {
+        juce::Array<LayoutItem> items;
+        knobRow.getLayoutItems(items);
+        if (fxDrawerOpen)
+            fxRow.getLayoutItems(items);
+        return items;
+    };
+    layoutOverlay.onDone = [this] { layoutTweaks->setEditing(false); };
+    layoutTweaks->addChangeListener(this);
+
     toolbar.onSourceNameChanged = [this](juce::String name)
     {
         header.setSourceName(name);
@@ -132,12 +144,34 @@ R3WRKAudioProcessorEditor::~R3WRKAudioProcessorEditor()
     floatOnTopButton.setLookAndFeel(nullptr);
     juce::LookAndFeel::setDefaultLookAndFeel(nullptr);   // detach before fontLnf is destroyed
     theme->removeChangeListener(this);
+    layoutTweaks->removeChangeListener(this);
 }
 
-void R3WRKAudioProcessorEditor::changeListenerCallback(juce::ChangeBroadcaster*)
+void R3WRKAudioProcessorEditor::changeListenerCallback(juce::ChangeBroadcaster* source)
 {
+    if (source == &layoutTweaks.getObject())
+    {
+        syncLayoutEditing();
+        return;
+    }
     applyHeaderButtonThemes();
     repaint();
+}
+
+void R3WRKAudioProcessorEditor::syncLayoutEditing()
+{
+    const bool editing = layoutTweaks->isEditing();
+    if (editing && ! fxDrawerOpen)
+        toggleFxDrawer();   // both rows on screen while editing
+    const bool wasVisible = layoutOverlay.isVisible();
+    layoutOverlay.setVisible(editing);
+    knobRow.setDrawerToggleVisible(! editing);   // [DONE] / [RESET] sit where it was
+    resized();   // re-applies the offsets and re-bounds the overlay
+    if (editing && ! wasVisible)
+    {
+        layoutOverlay.toFront(true);
+        layoutOverlay.grabKeyboardFocus();
+    }
 }
 
 void R3WRKAudioProcessorEditor::applyHeaderButtonThemes()
@@ -344,10 +378,13 @@ void R3WRKAudioProcessorEditor::resized()
     }
 
     knobRow.setBounds(area.removeFromBottom(83));   // knob strip, under the transport bar --
+    knobRow.resized();   // re-applies Edit Layout nudges even when its bounds didn't change
     // The FX drawer spaces its effects so its Gain knob sits right under the End knob.
     fxRow.setGainColumn(knobRow.getLastColumnXRange() + (knobRow.getX() - fxRow.getX()));
     // ...and starts its first toggle right under the Pitch knob's disc.
     fxRow.setFirstEdge(knobRow.getFirstKnobDiscLeft() + (knobRow.getX() - fxRow.getX()));
+    layoutOverlay.setBounds(fxDrawerOpen ? knobRow.getBounds().getUnion(fxRow.getBounds()) : knobRow.getBounds());
+    layoutOverlay.repaint();
         // 74 + 9 for the bigger caption/readout fonts (experiment/space-mono-font), so the
         // rotary disc gets that space back instead of losing it to the taller text
     area.removeFromBottom(4);

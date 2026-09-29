@@ -161,7 +161,39 @@ void FxRow::resized()
     // Whatever's left on the right stays empty, same as KnobRow leaving the drawer toggle's own
     // margin -- not stretched into it.
 
+    // The user's Edit Layout nudges (LayoutTweaks), on top of the automatic spacing above.
+    auto nudge = [this](const juce::String& id, std::initializer_list<juce::Component*> comps)
+    {
+        if (const int dx = layout->get(id); dx != 0)
+            for (auto* c : comps)
+                c->setTopLeftPosition(c->getPosition().translated(dx, 0));
+    };
+    nudge("fx.mod",   { &retrigPanel, &chorusPanel });
+    nudge("fx.dly",   { &mimeoPanel });
+    nudge("fx.space", { &plexPanel, &reverbPanel });
+    if (showGain)
+        nudge("fx.gain", { &gainCaption, &gainKnob });
+
     repaint();
+}
+
+void FxRow::getLayoutItems(juce::Array<LayoutItem>& items)
+{
+    // A slot's guides are its visible children: the toggle, the knob discs (see layoutGuideRect).
+    auto slot = [&](const juce::String& id, juce::Component& panel)
+    {
+        LayoutItem it { id, this, panel.getBounds(), {} };
+        for (auto* c : panel.getChildren())
+            if (c->isVisible() && dynamic_cast<juce::Label*>(c) == nullptr)
+                it.guides.add(layoutGuideRect(*c) + panel.getPosition());
+        items.add(it);
+    };
+    slot("fx.mod", retrigPanel.isVisible() ? static_cast<juce::Component&>(retrigPanel) : chorusPanel);
+    slot("fx.dly", mimeoPanel);
+    slot("fx.space", plexPanel.isVisible() ? static_cast<juce::Component&>(plexPanel) : reverbPanel);
+    if (showGain && ! gainKnob.getBounds().isEmpty())
+        items.add({ "fx.gain", this, gainCaption.getBounds().getUnion(gainKnob.getBounds()),
+                    { layoutGuideRect(gainKnob) } });
 }
 
 void FxRow::paint(juce::Graphics&)

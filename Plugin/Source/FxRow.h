@@ -9,6 +9,7 @@
 #include "ChorusPanel.h"
 #include "Theme.h"
 #include "R3WRKLookAndFeel.h"
+#include "LayoutTweaks.h"
 
 /**
     The collapsible "FX drawer" beneath the main KnobRow, revealed by the chevron on its right
@@ -58,12 +59,16 @@ public:
     // the knob row's Pitch disc, so the drawer lines up under it. -1 = not known yet.
     void setFirstEdge(int x) { firstEdge = x; resized(); }
 
+    // Edit Layout: the three slots + Gain, for LayoutEditOverlay.
+    void getLayoutItems(juce::Array<LayoutItem>& items);
+
 private:
     void changeListenerCallback(juce::ChangeBroadcaster*) override;
     void timerCallback() override;   // Gain knob follows state loads / undo; RVB/PLX + RTRG/CHO slots follow their switches
     void applyTheme();
 
     juce::SharedResourcePointer<ThemeManager> theme;
+    juce::SharedResourcePointer<LayoutTweaks> layout;   // Edit Layout nudges, applied in resized()
     LfoPanel lfoPanel;                // shelved -- see class comment; not shown, still fully wired
     RetrigPanel retrigPanel;          // 1st slot, shared with chorusPanel: only the selected
     ChorusPanel chorusPanel;          //   one shows (the tab above its pill switches RTRG <-> CHO)

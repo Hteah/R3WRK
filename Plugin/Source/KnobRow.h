@@ -6,6 +6,7 @@
 #include "R3WRKLookAndFeel.h"
 #include "PinnableCallout.h"
 #include "SlotSwitchTab.h"
+#include "LayoutTweaks.h"
 
 /**
     A horizontal strip of small rotary knobs beneath the transport bar.
@@ -38,6 +39,7 @@ public:
     // call setDrawerOpen() back once the editor has decided the new state.
     std::function<void()> onDrawerToggle;
     void setDrawerOpen(bool open);
+    void setDrawerToggleVisible(bool v) { drawerButton.setVisible(v); }   // hidden in Edit Layout mode
 
     void resized() override;
     void paint(juce::Graphics&) override;   // faint group dividers between the knob sections
@@ -62,6 +64,9 @@ public:
         const float diameter = juce::jmin(rotary.getWidth(), rotary.getHeight());
         return s.getX() + juce::roundToInt(rotary.getCentreX() - diameter * 0.5f);
     }
+
+    // Edit Layout: every movable item (each knob, the filter badge), for LayoutEditOverlay.
+    void getLayoutItems(juce::Array<LayoutItem>& items);
 
 private:
     void timerCallback() override;
@@ -140,6 +145,7 @@ private:
 
     AudioDocument& document;
     juce::SharedResourcePointer<ThemeManager> theme;
+    juce::SharedResourcePointer<LayoutTweaks> layout;   // Edit Layout nudges, applied in resized()
     KnobLookAndFeel knobLnF;
 
     juce::OwnedArray<Knob> knobs;

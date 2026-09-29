@@ -6,6 +6,7 @@
 #include "StandaloneMenuBar.h"
 #include "KnobRow.h"
 #include "FxRow.h"
+#include "LayoutEditOverlay.h"
 #include "WaveformDisplay.h"
 #include "SpectrogramDisplay.h"
 #include "TimeRuler.h"
@@ -111,6 +112,12 @@ private:
     EditorToolbar toolbar;
     KnobRow knobRow;
     FxRow fxRow;
+
+    // Edit Layout mode (Tools / app menu): an overlay over knobRow + fxRow for nudging items
+    // sideways; the offsets live in LayoutTweaks and the rows apply them. See LayoutEditOverlay.
+    juce::SharedResourcePointer<LayoutTweaks> layoutTweaks;
+    LayoutEditOverlay layoutOverlay;
+    void syncLayoutEditing();
 
     // Standalone only: the macOS application menu bar (File / Edit / Tools). nullptr in a
     // plugin (the host owns the menu bar). Installed via setMacMainMenu() in the ctor,

@@ -1398,6 +1398,8 @@ void EditorToolbar::showToolsMenu()
         // with, so it simply isn't offered here.
         m.addItem(tmiOutputFolder, juce::String::fromUTF8("Output Folder\xE2\x80\xA6"));
         m.addItem(tmiTheme,        juce::String::fromUTF8("Theme\xE2\x80\xA6"));
+        m.addItem(tmiEditLayout,   "Edit Layout", true, layoutTweaks->isEditing());
+        m.addItem(tmiResetLayout,  "Reset Layout", layoutTweaks->hasAny());
         m.addItem(tmiAutoRecordThreshold, juce::String::fromUTF8("Auto-Record Threshold\xE2\x80\xA6"));
         if (processor.isBlackBoxAvailable())
             m.addItem(tmiBlackBoxDuration, juce::String::fromUTF8("Black Box Length\xE2\x80\xA6"));
@@ -1511,6 +1513,8 @@ void EditorToolbar::buildMenuBarMenu(juce::PopupMenu& m, ToolsMenuGroup group)
             m.addItem(tmiAutoRecordThreshold, juce::String::fromUTF8("Auto-Record Threshold\xE2\x80\xA6"));
             m.addItem(tmiOutputFolder,  juce::String::fromUTF8("Output Folder\xE2\x80\xA6"));
             m.addItem(tmiTheme,         juce::String::fromUTF8("Theme\xE2\x80\xA6"));
+            m.addItem(tmiEditLayout,    "Edit Layout", true, layoutTweaks->isEditing());
+            m.addItem(tmiResetLayout,   "Reset Layout", layoutTweaks->hasAny());
             break;
     }
 }
@@ -1569,6 +1573,15 @@ void EditorToolbar::performToolsItem(int r)
            #endif
             break;
         case tmiTheme:        showThemeCallout();        break;
+        case tmiEditLayout:   layoutTweaks->setEditing(! layoutTweaks->isEditing()); break;
+        case tmiResetLayout:
+            juce::NativeMessageBox::showOkCancelBox(juce::MessageBoxIconType::QuestionIcon,
+                "Reset Layout", "Put every knob and effect back in its automatic position?", this,
+                juce::ModalCallbackFunction::create([](int ok)
+                {
+                    if (ok != 0) juce::SharedResourcePointer<LayoutTweaks>()->resetAll();
+                }));
+            break;
         case tmiAutoRecordThreshold: showAutoRecordThresholdCallout(); break;
         case tmiBlackBoxDuration: showBlackBoxDurationCallout(); break;
         case tmiUndo:      doUndo(); break;
