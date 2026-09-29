@@ -245,7 +245,9 @@ private:
         void paint(juce::Graphics& g) override
         {
             // fill = on ink, border = off ink (see applyTheme()).
-            drawBracketToggle(g, getLocalBounds().toFloat(), "RTRG", on, hovered, fill, border);
+            // No box: RTRG's "on" is the stutter latch (off nearly all the time), not the slot's
+            // on/off, so it's plain text -- dim idle, bright while latched.
+            drawBracketToggle(g, getLocalBounds().toFloat(), "RTRG", on, hovered, fill, border, false);
         }
         void mouseUp(const juce::MouseEvent&) override { if (onClick) onClick(); }
         void mouseEnter(const juce::MouseEvent&) override { hovered = true; repaint(); }

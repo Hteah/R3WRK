@@ -17,7 +17,8 @@ juce::Font systemUIFont(float height, bool bold = true);
 constexpr bool kBoxedToggles = true;
 
 inline void drawBracketToggle(juce::Graphics& g, juce::Rectangle<float> area, const juce::String& text,
-                              bool on, bool hovered, juce::Colour lit, juce::Colour dim)
+                              bool on, bool hovered, juce::Colour lit, juce::Colour dim,
+                              bool boxWhenOff = true)
 {
     // On is the theme's text colour pulled 30% toward dim -- full text colour read stark white.
     const juce::Colour onInk = lit.interpolatedWith(dim, 0.3f);
@@ -39,7 +40,7 @@ inline void drawBracketToggle(juce::Graphics& g, juce::Rectangle<float> area, co
     // Whole pixels, so the 1px frame (drawn just inside the rect) stays crisp.
     const auto box = area.withSizeKeepingCentre(juce::jmin(area.getWidth(), textW + 14.0f), area.getHeight())
                          .toNearestInt().toFloat();
-    if (! on)
+    if (! on && boxWhenOff)
         g.drawRect(box, 1.0f);   // on = just the name, bright -- the frame only shows while off
     g.setFont(font);
     g.drawFittedText(text, box.toNearestInt(), juce::Justification::centred, 1, 0.8f);
