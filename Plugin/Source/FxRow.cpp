@@ -1,4 +1,5 @@
 #include "FxRow.h"
+#include <algorithm>
 
 FxRow::FxRow(AudioDocument& doc, bool standalone)
     : lfoPanel(doc, standalone),
@@ -9,7 +10,7 @@ FxRow::FxRow(AudioDocument& doc, bool standalone)
     // PluginProcessor/AudioDocument side is untouched), just not shown or laid out here.
     // Deliberately no addAndMakeVisible() -- bringing it back is exactly that one line plus its
     // old slot in resized()/paint() below.
-    // Panels reach further left than they draw (room for a nudged toggle -- see placeSlot), so
+    // Panels reach further left than they draw (room for a moved toggle -- see packSlot), so
     // their empty area mustn't eat clicks meant for the slot underneath.
     for (juce::Component* p : { (juce::Component*) &retrigPanel, (juce::Component*) &chorusPanel, (juce::Component*) &mimeoPanel,
                                 (juce::Component*) &plexPanel, (juce::Component*) &reverbPanel })
@@ -67,15 +68,19 @@ FxRow::~FxRow()
 void FxRow::syncSpaceSlot()
 {
     const bool reverb = document.reverbEnabled.load();
+    if (reverbPanel.isVisible() == reverb && plexPanel.isVisible() != reverb) return;
     reverbPanel.setVisible(reverb);
     plexPanel.setVisible(! reverb);
+    resized();   // the two toggles' texts differ in width -> the rest re-packs
 }
 
 void FxRow::syncModSlot()
 {
     const bool chorus = document.fxSlotChorus.load();
+    if (chorusPanel.isVisible() == chorus && retrigPanel.isVisible() != chorus) return;
     chorusPanel.setVisible(chorus);
     retrigPanel.setVisible(! chorus);
+    resized();
 }
 
 void FxRow::timerCallback()
@@ -124,61 +129,32 @@ void FxRow::resized()
         resetButton.setBounds(juce::Rectangle<int>(resetSide, resetSide)
                                   .withCentre({ resetCentreX, getHeight() / 2 }));
 
-    auto full = getLocalBounds().reduced(4, 2);
-    constexpr int sectionGap = 16;   // matches KnobRow's dotGap between its own sections
+    // Packed left to right from the Pitch knob's disc edge, spaced from what's DRAWN (toggle text,
+    // knob discs, the "more" ring -- not the components' boxes): 12px between a toggle and its
+    // first knob and between the second knob and the "more" ring; 12px either side of the divider
+    // dots (see paint()) between slots and before Gain. The knob pairs keep the panels' own spacing.
+    int x = firstEdge >= 0 ? firstEdge : 8;
 
-    // Mimeophon/Plexiphon/Reverb's own resized() all pack pill(32) + gap(3) + 2*(knob 53 +
-    // gap 3) + "..."(20) -- kept as a literal here too (not plumbed through as a shared
-    // constant) so it can't silently drift from any one panel's own layout. knobW (53) matches
-    // KnobRow's own auto-fit upper bound, and pillW (32) matches KnobRow::ModelBadge's own size,
-    // so these read the same size as the top row's.
-    constexpr int panelW = 60 + 3 + (53 + 3) * 2 + 20;   // 195 (toggle column 60: fits "[RTRG]" at 16pt bold)
+    const int afterRetrig = packSlot(retrigPanel, x, "fx.mod");   // RTRG or CHO
+    const int afterChorus = packSlot(chorusPanel, x, "fx.mod");
+    x = chorusPanel.isVisible() ? afterChorus : afterRetrig;
 
-    // The first slot starts so its toggle's left edge sits under the Pitch knob's disc (each
-    // panel insets its toggle column by 4px -- see their resized()).
-    if (firstEdge >= 0)
+    x = packSlot(mimeoPanel, x, "fx.dly");
+
+    const int afterPlex   = packSlot(plexPanel, x, "fx.space");   // RVB or PLX
+    const int afterReverb = packSlot(reverbPanel, x, "fx.space");
+    x = reverbPanel.isVisible() ? afterReverb : afterPlex;
+
+    if (showGain)
     {
-        const int start = juce::jlimit(full.getX(), full.getRight(), firstEdge - 4);
-        full.setLeft(start);
-    }
-
-    // Then the three slots are spread with equal gaps: up to Gain (which starts exactly under
-    // End) in the Standalone, or out to End's right edge in the plugin (no Gain knob there).
-    int gap = sectionGap, lastGap = sectionGap;
-    if (! gainColumn.isEmpty())
-    {
-        if (showGain)
-        {
-            const int total = gainColumn.getStart() - full.getX() - 3 * panelW;
-            gap = juce::jmax(4, total / 3);
-            lastGap = juce::jmax(4, total - 2 * gap);   // takes the rounding remainder -> exact
-        }
-        else
-        {
-            const int total = gainColumn.getEnd() - full.getX() - 3 * panelW;
-            gap = juce::jmax(4, total / 2);
-        }
-    }
-
-    const auto modSlot = full.removeFromLeft(juce::jmin(panelW, full.getWidth()));   // RTRG or CHO
-    placeSlot(retrigPanel, modSlot, "fx.mod");
-    placeSlot(chorusPanel, modSlot, "fx.mod");
-    full.removeFromLeft(gap);
-
-    placeSlot(mimeoPanel, full.removeFromLeft(juce::jmin(panelW, full.getWidth())), "fx.dly");
-    full.removeFromLeft(gap);
-
-    const auto spaceSlot = full.removeFromLeft(juce::jmin(panelW, full.getWidth()));   // RVB or PLX
-    placeSlot(plexPanel, spaceSlot, "fx.space");
-    placeSlot(reverbPanel, spaceSlot, "fx.space");
-
-    if (showGain && full.getWidth() > lastGap + 40)
-    {
-        full.removeFromLeft(lastGap);
+        // Gain's disc starts where the next slot's toggle would.
         const int w = gainColumn.isEmpty() ? 53 : gainColumn.getLength();   // End's width when known
-        auto col = full.removeFromLeft(juce::jmin(w, full.getWidth()));
+        auto col = juce::Rectangle<int>(x, 2, w, getHeight() - 4);
         gainCaption.setBounds(col.removeFromTop(17));
         gainKnob.setBounds(col);
+        const int dx = x - layoutGuideRect(gainKnob).getX();
+        gainCaption.setTopLeftPosition(gainCaption.getPosition().translated(dx, 0));
+        gainKnob.setTopLeftPosition(gainKnob.getPosition().translated(dx, 0));
     }
     // Whatever's left on the right stays empty, same as KnobRow leaving the drawer toggle's own
     // margin -- not stretched into it.
@@ -190,7 +166,7 @@ void FxRow::resized()
             for (auto* c : comps)
                 c->setTopLeftPosition(c->getPosition().translated(dx, 0));
     };
-    // (The three slots and their toggles were nudged in placeSlot.)
+    // (The three slots and their toggles were nudged in packSlot.)
     if (showGain)
         nudge("fx.gain", { &gainCaption, &gainKnob });
 
@@ -198,18 +174,53 @@ void FxRow::resized()
 }
 
 template <typename Panel>
-void FxRow::placeSlot(Panel& panel, juce::Rectangle<int> slot, const juce::String& id)
+int FxRow::packSlot(Panel& panel, int x, const juce::String& id)
 {
-    // The panel's bounds reach kToggleSlack px further left than the slot (empty, and it lets
-    // clicks through -- see the ctor), so its toggle can be nudged left without being clipped.
+    // The panel reaches kToggleSlack px further left than its own layout (empty, and it lets
+    // clicks through -- see the ctor) and some spare width on the right, so its toggle and "more"
+    // dot can be moved without being clipped.
+    constexpr int panelW = 60 + 3 + (53 + 3) * 2 + 20;   // the panels' own pack: toggle 60, knobs 53, "more" 20
     panel.leftSlack = kToggleSlack;
-    panel.setBounds(slot.withLeft(slot.getX() - kToggleSlack).translated(layout->get(id), 0));
-    panel.resized();   // back to the automatic spot (a pure move doesn't re-run it) ...
+    panel.setBounds(0, 2, kToggleSlack + panelW + 24, getHeight() - 4);
+    panel.resized();   // the automatic spot (a pure move doesn't re-run it)
+
+    juce::Array<juce::Slider*> knobs;
+    juce::Component* more = nullptr;
+    for (auto* c : panel.getChildren())
+    {
+        if (! c->isVisible()) continue;
+        if (auto* sl = dynamic_cast<juce::Slider*>(c); sl != nullptr && sl->isRotary())
+            knobs.add(sl);
+        else if (auto* b = dynamic_cast<juce::TextButton*>(c);
+                 b != nullptr && b->getButtonText() == R3WRKLookAndFeel::iconMore)
+            more = b;
+    }
+    std::sort(knobs.begin(), knobs.end(), [](auto* a, auto* b) { return a->getX() < b->getX(); });
+
     const auto parts = panel.getToggleParts();
-    const int dx = juce::jmax(layout->get(id + ".toggle"), -parts.getFirst()->getX());
-    if (dx != 0)       // ... then the toggle's own nudge
-        for (auto* c : parts)
-            c->setTopLeftPosition(c->getPosition().translated(dx, 0));
+    auto shift = [](juce::Component* c, int dx) { c->setTopLeftPosition(c->getPosition().translated(dx, 0)); };
+    auto ink = toggleInkBounds(parts.getFirst()->getBounds(), panel.getToggleText());   // panel coords
+    int right = ink.getRight();
+
+    if (knobs.size() >= 2 && more != nullptr)
+    {
+        const auto k1 = layoutGuideRect(*knobs.getFirst());
+        const auto k2 = layoutGuideRect(*knobs[1]);
+        const int dxT = (k1.getX() - kSpacing) - ink.getRight();         // toggle text -> 12 -> knob
+        for (auto* c : parts) shift(c, dxT);
+        ink.translate(dxT, 0);
+        const auto ring = moreIconInkBounds(more->getBounds());
+        shift(more, juce::roundToInt((float) (k2.getRight() + kSpacing) - ring.getX()));   // knob -> 12 -> ring
+        right = juce::roundToInt(moreIconInkBounds(more->getBounds()).getRight());
+    }
+
+    // Toggle text starts at x; then the user's Edit Layout nudges on top.
+    panel.setTopLeftPosition(x - ink.getX() + layout->get(id), 2);
+    const int dxUser = juce::jmax(layout->get(id + ".toggle"), -parts.getFirst()->getX());
+    if (dxUser != 0)
+        for (auto* c : parts) shift(c, dxUser);
+
+    return x + (right - ink.getX()) + kSpacing + kDotsW + kSpacing;   // -> dots -> next item
 }
 
 void FxRow::getLayoutItems(juce::Array<LayoutItem>& items)
@@ -229,6 +240,9 @@ void FxRow::getLayoutItems(juce::Array<LayoutItem>& items)
             if (parts.contains(c))
                 tg.bounds = tg.bounds.isEmpty() ? c->getBounds() + panel.getPosition()
                                                 : tg.bounds.getUnion(c->getBounds() + panel.getPosition());
+            else if (auto* b = dynamic_cast<juce::TextButton*>(c);
+                     b != nullptr && b->getButtonText() == R3WRKLookAndFeel::iconMore)
+                it.guides.add(moreIconInkBounds(c->getBounds() + panel.getPosition()).toNearestInt());
             else
                 it.guides.add(layoutGuideRect(*c) + panel.getPosition());
         }

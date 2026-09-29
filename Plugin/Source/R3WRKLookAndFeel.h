@@ -52,6 +52,17 @@ inline juce::Rectangle<int> toggleInkBounds(juce::Rectangle<int> area, const juc
     return area.withSizeKeepingCentre(juce::jmin(area.getWidth(), juce::roundToInt(w)), area.getHeight());
 }
 
+// Where drawMoreIcon() puts ink in a "more" button of `buttonBounds` (the outlined ring, its
+// stroke included) -- for spacing measured from what's drawn, not the 20x16 button box.
+inline juce::Rectangle<float> moreIconInkBounds(juce::Rectangle<int> buttonBounds)
+{
+    const auto b = buttonBounds.toFloat();
+    const auto a = b.reduced(b.getHeight() * 0.14f);
+    const float d = juce::jmin(a.getWidth(), a.getHeight());
+    const float outer = d + juce::jmax(1.2f, d * 0.12f);
+    return juce::Rectangle<float>(outer, outer).withCentre(a.getCentre());
+}
+
 /**
     The shared custom look: rotary knobs (a flat disc, a thin outline, a single pointer
     line -- no value-arc, Eurorack/VCV-module-inspired), pill-shaped buttons (fully

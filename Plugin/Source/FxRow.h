@@ -70,7 +70,11 @@ public:
 
 private:
     static constexpr int kToggleSlack = 60;   // how far left of its slot a toggle can be nudged
-    template <typename Panel> void placeSlot(Panel& panel, juce::Rectangle<int> slot, const juce::String& id);
+    static constexpr int kSpacing = 12;       // px between drawn items (not within a knob pair)
+    static constexpr int kDotsW = 3;          // the divider dots' width (paint())
+    // Lays one slot's panel out with its toggle text starting at x; returns where the next item
+    // (after the divider dots) starts.
+    template <typename Panel> int packSlot(Panel& panel, int x, const juce::String& id);
 
 private:
     void changeListenerCallback(juce::ChangeBroadcaster*) override;
