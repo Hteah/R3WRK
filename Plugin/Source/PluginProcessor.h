@@ -199,6 +199,9 @@ private:
     // branch). Edge-detected so entering primes Dirt/filter/RTRG and leaving lets the effects
     // ring out exactly like a Stop does.
     bool wasLiveFx = false;
+    // The live-input FX chain (empty-waveform idle + recording): Dirt -> filter -> CHO/RTRG ->
+    // DLY/PLX -> RVB/SHM, no Gain (the callers add it -- recording keeps it out of the take).
+    void applyLiveFxChain (juce::AudioBuffer<float>& buffer, int numCh, int numSamples, bool fresh);
     bool stretcherPrimed = false;   // stretcher holds state from the current play pass
     bool rtFinished = false;        // final block sent; only drain from here on
     int  playbackDir = 1;           // +1 forward, -1 backward (ping-pong loop only); reset to

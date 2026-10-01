@@ -558,6 +558,14 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
 
     if (document.isRecording.load(std::memory_order_relaxed))
     {
+        // Recording goes through the effects (what you hear is what's recorded -- with every
+        // effect off this is the plain input, bit for bit). Carries straight on from the
+        // empty-waveform live FX if that was running. Gain stays out of the take (it's the output
+        // volume, and playback applies it again); it's added after the capture, for monitoring.
+        // stopRecording() then switches the recorded-in effects off so playback doesn't double them.
+        applyLiveFxChain(buffer, numCh, numSamples, ! wasLiveFx);
+        wasLiveFx = true;
+
         ensureRecordingCapacity(numCh, numSamples);
         for (int ch = 0; ch < numCh; ++ch)
             recordingAccumulator.copyFrom(ch, (int) recordingWritePos, buffer, ch, 0, numSamples);
@@ -582,10 +590,13 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         }
         document.recordedSamples.store(recordingWritePos, std::memory_order_relaxed);
 
+        applyPlaybackGain(buffer, numCh, 0, numSamples, {});
+        r3wrk::zeroNonFinite(buffer, numCh, numSamples);
+
         if (blackBoxCapacity > 0)
             appendToBlackBox(blackBoxInputScratch, numCh, numSamples);
         resetPassState();
-        return; // pass input through unchanged so the user can monitor while recording
+        return; // the (effected) input carries on to the output so the user can monitor while recording
     }
 
     if (document.isScrubbing.load(std::memory_order_relaxed))
@@ -1203,25 +1214,33 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     // below (reverbTailSilentSamples), once the tail's genuinely gone quiet.
     if (justStoppedPlaying || justLeftLiveFx)
     {
+        // Leaving live FX / a recording: seed from what was actually running -- stopRecording()
+        // may already have switched the recorded-in effects off, and their tails should still
+        // ring out rather than cut.
+        const bool fromLive = justLeftLiveFx && ! justStoppedPlaying;
         const bool spaceOn = document.spaceOn.load(std::memory_order_relaxed);
-        const bool reverbEngaged = spaceOn && document.reverbEnabled.load(std::memory_order_relaxed)
+        const bool reverbEngaged = fromLive ? lastReverbEngaged
+                                   : spaceOn && document.reverbEnabled.load(std::memory_order_relaxed)
                                     && document.reverbMix.load(std::memory_order_relaxed) > 0.001;
         reverbTailSamplesLeft = (reverbEngaged || reverbRingingOut) ? (int) (currentSampleRate * 300.0) : 0;
         reverbTailSilentSamples = 0;
 
-        const bool shimmerEngaged = spaceOn && document.shimmerEnabled.load(std::memory_order_relaxed)
+        const bool shimmerEngaged = fromLive ? lastShimmerEngaged
+                                    : spaceOn && document.shimmerEnabled.load(std::memory_order_relaxed)
                                     && document.shimmerMix.load(std::memory_order_relaxed) > 0.001;
         shimmerTailSamplesLeft = (shimmerEngaged || shimmerRingingOut) ? (int) (currentSampleRate * 300.0) : 0;
         reverbRingingOut = shimmerRingingOut = false;   // (a switch ring-out carries on as the idle tail)
         shimmerTailSilentSamples = 0;
 
         const bool delayOn = document.delayOn.load(std::memory_order_relaxed);
-        const bool plexEngaged = delayOn && document.plexEnabled.load(std::memory_order_relaxed)
+        const bool plexEngaged = fromLive ? lastPlexEngaged
+                                 : delayOn && document.plexEnabled.load(std::memory_order_relaxed)
                                  && document.plexMix.load(std::memory_order_relaxed) > 0.001;
         plexTailSamplesLeft = (plexEngaged || plexRingingOut) ? (int) (currentSampleRate * 300.0) : 0;
         plexTailSilentSamples = 0;
 
-        const bool mimeoEngaged = delayOn && document.mimeoEnabled.load(std::memory_order_relaxed)
+        const bool mimeoEngaged = fromLive ? lastMimeoEngaged
+                                  : delayOn && document.mimeoEnabled.load(std::memory_order_relaxed)
                                   && document.mimeoMix.load(std::memory_order_relaxed) > 0.001;
         mimeoTailSamplesLeft = (mimeoEngaged || mimeoRingingOut) ? (int) (currentSampleRate * 300.0) : 0;
         mimeoRingingOut = plexRingingOut = false;
@@ -1229,7 +1248,8 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
 
         // CHORUS only rings on with feedback (FB 0 dies within its ~45 ms of delay).
         const auto cp = chorusParams();
-        chorusTailSamplesLeft = (cp.enabled && r3wrk::MnmChorusEngine::raw127(cp.fb01) > 0) ? (int) (currentSampleRate * 300.0) : 0;
+        chorusTailSamplesLeft = ((fromLive ? lastChorusEngaged : cp.enabled) && r3wrk::MnmChorusEngine::raw127(cp.fb01) > 0)
+                                    ? (int) (currentSampleRate * 300.0) : 0;
         chorusTailSilentSamples = 0;
     }
 
@@ -1318,18 +1338,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     // while this runs; leaving this state re-seeds them (justLeftLiveFx above).
     if (liveFx)
     {
-        const bool fresh = ! wasLiveFx;
-        const int inCh = monitorInputChannels(buffer, numSamples);
-        if (inCh == 1 && numCh >= 2)
-            buffer.copyFrom(1, 0, buffer, 0, 0, numSamples);   // mono mic: feed both sides
-
-        r3wrk::zeroNonFinite(buffer, numCh, numSamples);
-        applyDirt(buffer, numCh, numSamples, fresh);
-        applyPlaybackFilter(buffer, numCh, 0, numSamples, fresh);
-        applyChorus(buffer, numCh, numSamples, fresh);
-        applyRetrig(buffer, numCh, numSamples, fresh);
-        applyDelaySlot(buffer, numCh, numSamples, fresh);   // DLY or PLX
-        applySpaceSlot(buffer, numCh, numSamples, fresh);   // RVB or SHM
+        applyLiveFxChain(buffer, numCh, numSamples, ! wasLiveFx);
         applyPlaybackGain(buffer, numCh, 0, numSamples, {});
         r3wrk::zeroNonFinite(buffer, numCh, numSamples);
 
@@ -1621,6 +1630,22 @@ int R3WRKAudioProcessor::monitorInputChannels(const juce::AudioBuffer<float>& in
     // Only the Standalone can be on a mono device (the built-in mic) with a silent right input;
     // in a DAW the host decides the input and a silent side is intentional.
     return wrapperType == wrapperType_Standalone ? r3wrk::liveInputChannels(input, n, numSamples) : n;
+}
+
+void R3WRKAudioProcessor::applyLiveFxChain(juce::AudioBuffer<float>& buffer, int numCh, int numSamples, bool fresh)
+{
+    const int inCh = monitorInputChannels(buffer, numSamples);
+    if (inCh == 1 && numCh >= 2)
+        buffer.copyFrom(1, 0, buffer, 0, 0, numSamples);   // mono mic: feed both sides
+
+    r3wrk::zeroNonFinite(buffer, numCh, numSamples);
+    applyDirt(buffer, numCh, numSamples, fresh);
+    applyPlaybackFilter(buffer, numCh, 0, numSamples, fresh);
+    applyChorus(buffer, numCh, numSamples, fresh);
+    applyRetrig(buffer, numCh, numSamples, fresh);
+    applyDelaySlot(buffer, numCh, numSamples, fresh);   // DLY or PLX
+    applySpaceSlot(buffer, numCh, numSamples, fresh);   // RVB or SHM
+    r3wrk::zeroNonFinite(buffer, numCh, numSamples);
 }
 
 void R3WRKAudioProcessor::applyDirt(juce::AudioBuffer<float>& buffer, int numCh, int numSamples, bool freshPlayPass)
@@ -2518,6 +2543,29 @@ void R3WRKAudioProcessor::stopRecording()
     document.loopStart = 0;
     document.loopEnd = document.getNumSamples();
     document.markAsOriginal();   // this take is the new "Revert to Original" baseline
+
+    // The take was recorded through the effects (see processBlock's recording branch), so switch
+    // the ones that were sounding off -- playback would otherwise apply them a second time. Knob
+    // settings are kept, so turning one back on is one click. Dirt has no on/off: it goes back to
+    // its clean defaults. Effects that were already off/transparent are left exactly as they were.
+    const auto& d = document;
+    if (d.fxSlotChorus.load() && d.chorusEnabled.load())
+        document.chorusEnabled = false;
+    document.rtrgLatched = false;
+    if (d.delayOn.load() && ((d.mimeoEnabled.load() && d.mimeoMix.load() > 0.001)
+                             || (d.plexEnabled.load() && d.plexMix.load() > 0.001)))
+        document.delayOn = false;
+    if (d.spaceOn.load() && ((d.reverbEnabled.load() && d.reverbMix.load() > 0.001)
+                             || (d.shimmerEnabled.load() && d.shimmerMix.load() > 0.001)))
+        document.spaceOn = false;
+    if (d.filterOn.load() && r3wrk::filterEngaged((r3wrk::FilterModel) d.filterModel.load(), d.filterBase.load(),
+                                                  d.filterWidth.load(), d.filterHpQ.load(), d.filterLpQ.load()))
+        document.filterOn = false;
+    if (r3wrk::DirtStage::engaged(d.dirtDrive.load(), d.dirtRate.load(), d.dirtBits.load()))
+    {
+        document.dirtDrive = 0.0;  document.dirtRate = 1.0;  document.dirtBits = 1.0;
+    }
+    document.shimmerFreeze = false;
 }
 
 //==============================================================================
