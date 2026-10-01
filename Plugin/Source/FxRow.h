@@ -96,7 +96,7 @@ private:
     void syncSpaceSlot();
 
     // Gain -- the output volume, last in the whole chain (after every effect, tails included;
-    // see PluginProcessor::processBlock). Standalone only, same as before; moved here from the
+    // see PluginProcessor::processBlock). Every build (Standalone-only until 2026-09-30); moved here from the
     // end of KnobRow to make room for Dirt. Styled like KnobRow's knobs.
     AudioDocument& document;
     const bool showGain;

@@ -139,13 +139,23 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
     // (see StandaloneWindowShape.mm: it's a real NSWindow with a native title bar under the
     // hood, just visually hidden), so the drawn grip was a redundant, non-native-looking
     // extra. Window is still resizable either way -- this only removes the drawn handle.
-    setResizable(true, false);
+    // Plugin builds DO get the drawn corner grip: some hosts (Ableton Live among them) only let a
+    // plugin window resize through it -- without it the VST couldn't be resized at all.
+    setResizable(true, ! standaloneWindow);
     setResizeLimits(680, 473 + topInset, kMaxEditorWidth, kMaxEditorHeight + topInset);
-    setSize(1000, 639 + topInset);
+    // Plugin: reopen at the size the user last left it (drawer-closed height, see the dtor).
+    const auto saved = standaloneWindow ? juce::Point<int>() : outputSettings->pluginEditorSize();
+    if (saved.x >= 680 && saved.y >= 473)
+        setSize(juce::jmin(saved.x, kMaxEditorWidth), juce::jmin(saved.y, kMaxEditorHeight));
+    else
+        setSize(1000, 639 + topInset);
 }
 
 R3WRKAudioProcessorEditor::~R3WRKAudioProcessorEditor()
 {
+    if (! standaloneWindow)   // remember the plugin window's size for the next instance
+        outputSettings->setPluginEditorSize({ getWidth(),
+                                              getHeight() - (fxDrawerOpen ? kFxRowHeight + kFxRowGap : 0) });
    #if JUCE_MAC
     if (macMenuBar != nullptr)
         juce::MenuBarModel::setMacMainMenu(nullptr);   // detach before the model is destroyed

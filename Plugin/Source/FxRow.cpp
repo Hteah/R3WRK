@@ -4,7 +4,7 @@
 FxRow::FxRow(AudioDocument& doc, bool standalone)
     : lfoPanel(doc, standalone),
       retrigPanel(doc, standalone), chorusPanel(doc), mimeoPanel(doc), plexPanel(doc), reverbPanel(doc), shimmerPanel(doc),
-      document(doc), showGain(standalone)
+      document(doc), showGain(true)   // Gain in every build now (was Standalone-only)
 {
     // lfoPanel is SHELVED (see class comment) -- constructed and fully wired (its
     // PluginProcessor/AudioDocument side is untouched), just not shown or laid out here.

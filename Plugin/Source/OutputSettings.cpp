@@ -9,6 +9,8 @@ namespace
     const juce::String kFloatOnTopKey  = "floatOnTop";
     const juce::String kInsertSilenceKey = "insertSilenceSecs";
     const juce::String kBlackBoxDurationKey = "blackBoxDurationSecs";
+    const juce::String kPluginEditorWKey = "pluginEditorWidth";
+    const juce::String kPluginEditorHKey = "pluginEditorHeight";
 
     juce::File defaultFolder()
     {
@@ -110,5 +112,17 @@ double OutputSettings::blackBoxDurationSecs()
 void OutputSettings::setBlackBoxDurationSecs(double secs)
 {
     props().setValue(kBlackBoxDurationKey, secs < 195.0 ? 90.0 : 300.0);
+    props().saveIfNeeded();
+}
+
+juce::Point<int> OutputSettings::pluginEditorSize()
+{
+    return { props().getIntValue(kPluginEditorWKey, 0), props().getIntValue(kPluginEditorHKey, 0) };
+}
+
+void OutputSettings::setPluginEditorSize(juce::Point<int> size)
+{
+    props().setValue(kPluginEditorWKey, size.x);
+    props().setValue(kPluginEditorHKey, size.y);
     props().saveIfNeeded();
 }

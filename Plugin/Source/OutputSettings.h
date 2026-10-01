@@ -44,6 +44,11 @@ public:
     double blackBoxDurationSecs();
     void setBlackBoxDurationSecs(double secs);
 
+    // Plugin (VST/AU) editor size, drawer closed, remembered across sessions so a new instance
+    // opens where the user last left it (the Standalone's window remembers its own). 0 = unset.
+    juce::Point<int> pluginEditorSize();
+    void setPluginEditorSize(juce::Point<int> size);
+
 private:
     juce::PropertiesFile& props();
     std::unique_ptr<juce::PropertiesFile> propsFile;
