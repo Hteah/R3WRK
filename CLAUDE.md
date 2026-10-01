@@ -262,6 +262,9 @@ Overdub, Overdub menu dot, Monitor ⋮ Record Desktop, Capture Output (Standalon
 ⋮ Scrub, Slice ⋮ Tools, Clear. Divider dots are placed by `paint()`'s `dotsBetween()` pairs -- update
 them with the order.
 
+**Title**: `TitleMark.h`, the vector "R3WRK" wordmark, centred on the window in the header row
+(13px cap, `Palette::text`, ignores clicks). `PluginEditor::resized()` stops `HeaderBar` 16px short of it.
+
 **Standalone window drag**: everything above the waveform acts as the title bar
 (`PluginEditor::isInTitleArea`): drag to move, double-click to zoom. `HeaderBar` passes clicks
 through except on the file name (click = open a file).
