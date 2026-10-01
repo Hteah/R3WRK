@@ -670,7 +670,7 @@ void R3WRKLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Button& but
         // their text to iconStop while active and text alone can't tell them apart from the
         // main transport's own Stop button.
         const bool thickRing = button.getName() == "desktopRec" || button.getName() == "captureOut"
-                             || button.getName() == "overdub"
+                             || button.getName() == "overdub" || button.getName() == "record"
                              || button.getName() == "clear";
         g.setColour(ink.withAlpha(0.45f));
         g.drawRoundedRectangle(bounds, radius, thickRing ? 2.2f : 1.2f);

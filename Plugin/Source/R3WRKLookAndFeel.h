@@ -129,7 +129,7 @@ public:
     static constexpr const char* iconOrbit         = "icon:orbit";          // the FX drawer toggle -- concentric dashed orbit rings around a centre dot, from the r3wrk Component Library reference sheet
     static constexpr const char* iconOverdub       = "icon:overdub";        // sound-on-sound: a record dot over an outlined one (a layer on a layer)
     static constexpr const char* iconMonitor       = "icon:monitor";        // headphones: hear the incoming audio (input Monitor)
-    static constexpr const char* iconRecDot        = "icon:recDot";         // a pulsing record-red dot: "recording now" (Overdub / Record Desktop / Capture Output while active)
+    static constexpr const char* iconRecDot        = "icon:recDot";         // a pulsing record-red dot: "recording now" (Record / Overdub / Record Desktop / Capture Output while active)
     static constexpr const char* iconReset         = "icon:reset";          // a square with both diagonals (an X in a box) -- the knob row's reset-everything button
     static constexpr const char* iconMore          = "icon:more";           // a single small filled circle -- the popup-editor "more" buttons (Mimeophon/Plexiphon/Reverb), replacing the old "..." text
 

@@ -195,6 +195,9 @@ private:
     // not on this transport strip -- see that class's followButton.
     juce::Label timeLabel;   // also carries the "● REC m:ss" elapsed time while recording
     juce::TextButton recordButton;
+    // Which look recordButton has: filled red disc (idle) or red ring + pulsing iconRecDot
+    // (recording). -1 = not applied yet / re-apply (applyTheme resets it).
+    int recordLook = -1;
     // Sound-on-sound overdub (toggle; filled red while a pass runs) and its "more" dot, which
     // opens OverdubPanel (Level / Feedback / Monitor) -- same pinnable popup as the effects.
     juce::TextButton overdubButton { R3WRKLookAndFeel::iconOverdub };

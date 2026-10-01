@@ -793,6 +793,7 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     addAndMakeVisible(sliceButton);
     addAndMakeVisible(timeLabel);
     addAndMakeVisible(recordButton);
+    recordButton.setName("record");   // thick red ring while recording, like Overdub / Record Desktop
     overdubButton.setName("overdub");   // thick red ring, like Record Desktop / Capture Output
     overdubButton.setLookAndFeel(&toolbarLnF);
     overdubButton.setWantsKeyboardFocus(false);
@@ -1052,8 +1053,11 @@ void EditorToolbar::applyTheme()
     sliceButton.setColour(juce::TextButton::textColourOffId, pal.screenText);
     sliceButton.setColour(juce::TextButton::textColourOnId, pal.windowBg);
 
+    // Filled red disc when idle; updateTransportButtonText() swaps it to the outlined red ring +
+    // pulsing dot while recording (re-applied there after a theme change via recordLook = -1).
     recordButton.setColour(juce::TextButton::buttonColourId, pal.recordButton);
-    recordButton.setColour(juce::TextButton::textColourOffId, juce::Colours::white);   // the stop-square ink while recording
+    recordButton.setColour(juce::TextButton::textColourOffId, pal.recordButton);
+    recordLook = -1;
 
     toolsButton.setColour(juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
     toolsButton.setColour(juce::TextButton::textColourOffId, pal.screenText);
@@ -1693,7 +1697,18 @@ void EditorToolbar::updateTransportButtonText()
     const bool desktopRec = processor.isDesktopRecording();
     const bool micRec = rec && ! desktopRec;   // document.isRecording is shared by both paths
     const bool playing = document.isPlaying.load();
-    recordButton.setButtonText(micRec ? R3WRKLookAndFeel::iconStop : juce::String());
+    // While recording, Record shows the same pulsing red "recording now" dot as Overdub /
+    // Record Desktop / Capture Output (ring + iconRecDot, pulsed in timerCallback); a click
+    // still stops. Idle: the filled red disc.
+    if (recordLook != (micRec ? 1 : 0))
+    {
+        recordLook = micRec ? 1 : 0;
+        const auto red = theme->palette().recordButton;
+        recordButton.setColour(juce::TextButton::buttonColourId, micRec ? juce::Colours::transparentBlack : red);
+        recordButton.setColour(juce::TextButton::textColourOffId, red);
+        recordButton.setButtonText(micRec ? R3WRKLookAndFeel::iconRecDot : juce::String());
+        recordButton.setTooltip(micRec ? juce::String::fromUTF8("Recording â click to stop") : juce::String("Record"));
+    }
     playButton.setButtonText(playing ? R3WRKLookAndFeel::iconStop : R3WRKLookAndFeel::iconPlay);
     refreshLoopButton();
     scrubButton.setToggleState(document.scrubModeEnabled, juce::dontSendNotification);
@@ -1774,7 +1789,7 @@ void EditorToolbar::timerCallback()
         // (about once a second).
         const double t = juce::Time::getMillisecondCounterHiRes() * 0.001;
         const double pulse = 0.5 + 0.5 * std::sin(t * juce::MathConstants<double>::twoPi * 1.0);
-        for (auto* b : { &overdubButton, &desktopRecButton, &captureOutButton })
+        for (auto* b : { &recordButton, &overdubButton, &desktopRecButton, &captureOutButton })
             if (b->getButtonText() == R3WRKLookAndFeel::iconRecDot)
             {
                 b->getProperties().set("pulse", pulse);
