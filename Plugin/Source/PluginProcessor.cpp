@@ -669,6 +669,9 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         resetPassState();   // so normal playback resets the stretcher cleanly if it resumes
         return;
     }
+    // Releasing a scrub is a stop as far as the effects are concerned: the idle branch below seeds
+    // their tails from this, exactly like a Stop (before, the scrub's delay/reverb was cut dead).
+    const bool justStoppedScrubbing = wasScrubbing;
     wasScrubbing = false;
 
     if (document.isPlaying.load(std::memory_order_relaxed))
@@ -1212,12 +1215,12 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     // tail length -- near-max Decay is *designed* for near-infinite sustain (matches the real
     // hardware); what actually ends it at a normal, finite Decay setting is the energy check
     // below (reverbTailSilentSamples), once the tail's genuinely gone quiet.
-    if (justStoppedPlaying || justLeftLiveFx)
+    if (justStoppedPlaying || justStoppedScrubbing || justLeftLiveFx)
     {
         // Leaving live FX / a recording: seed from what was actually running -- stopRecording()
         // may already have switched the recorded-in effects off, and their tails should still
         // ring out rather than cut.
-        const bool fromLive = justLeftLiveFx && ! justStoppedPlaying;
+        const bool fromLive = justLeftLiveFx && ! justStoppedPlaying && ! justStoppedScrubbing;
         const bool spaceOn = document.spaceOn.load(std::memory_order_relaxed);
         const bool reverbEngaged = fromLive ? lastReverbEngaged
                                    : spaceOn && document.reverbEnabled.load(std::memory_order_relaxed)
