@@ -297,7 +297,8 @@ void KnobRow::syncModelBadge()
     const bool ot = document.filterModel.load() == 1;
     const bool on = document.filterOn.load();
     const juce::String name = ot ? "OT" : "MNM";
-    if (modelBadge.text != name)
+    const bool modelChanged = modelBadge.text != name;
+    if (modelChanged)
     {
         modelBadge.text = name;
         modelTab.target = ot ? "MNM" : "OT";
@@ -305,7 +306,9 @@ void KnobRow::syncModelBadge()
         modelTab.repaint();
         for (auto* k : knobs) k->slider.updateText();   // Base/Width Hz readouts follow the model
     }
-    if (modelBadge.active != on || modelBadge.text != name)
+    // (modelChanged, not `text != name`: the block above already updated the text, so that test
+    // was always false and a model switch didn't repaint the badge until the mouse went over it.)
+    if (modelBadge.active != on || modelChanged)
     {
         modelBadge.active = on;
         modelBadge.repaint();
