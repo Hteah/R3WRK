@@ -133,6 +133,11 @@ public:
     static constexpr const char* iconReset         = "icon:reset";          // a square with both diagonals (an X in a box) -- the knob row's reset-everything button
     static constexpr const char* iconMore          = "icon:more";           // a single small filled circle -- the popup-editor "more" buttons (Mimeophon/Plexiphon/Reverb), replacing the old "..." text
 
+    // The plugin window's corner resize grip (PluginEditor: Ableton only resizes a plugin through
+    // it) stays grabbable -- with JUCE's resize cursor on hover -- but draws nothing: the user
+    // doesn't want the diagonal grip lines back.
+    void drawCornerResizer(juce::Graphics&, int, int, bool, bool) override {}
+
     void drawButtonText(juce::Graphics&, juce::TextButton&,
                        bool isMouseOverButton, bool isButtonDown) override;
 

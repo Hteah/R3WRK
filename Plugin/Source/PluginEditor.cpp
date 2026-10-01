@@ -139,8 +139,10 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
     // (see StandaloneWindowShape.mm: it's a real NSWindow with a native title bar under the
     // hood, just visually hidden), so the drawn grip was a redundant, non-native-looking
     // extra. Window is still resizable either way -- this only removes the drawn handle.
-    // Plugin builds DO get the drawn corner grip: some hosts (Ableton Live among them) only let a
-    // plugin window resize through it -- without it the VST couldn't be resized at all.
+    // Plugin builds DO get JUCE's corner grip: some hosts (Ableton Live among them) only let a
+    // plugin window resize through it -- without it the VST couldn't be resized at all. It's
+    // invisible (R3WRKLookAndFeel::drawCornerResizer draws nothing); hovering the bottom-right
+    // corner shows the resize cursor.
     setResizable(true, ! standaloneWindow);
     setResizeLimits(680, 473 + topInset, kMaxEditorWidth, kMaxEditorHeight + topInset);
     // Plugin: reopen at the size the user last left it (drawer-closed height, see the dtor).
