@@ -195,6 +195,10 @@ private:
     int rtChannels = 2;
     juce::AudioBuffer<float> rtScratchIn, rtScratchOut;
     bool wasPlaying = false;        // edge-detect play start -> reset the stretcher
+    // Empty waveform + idle: the live input runs through the FX chain (processBlock's idle
+    // branch). Edge-detected so entering primes Dirt/filter/RTRG and leaving lets the effects
+    // ring out exactly like a Stop does.
+    bool wasLiveFx = false;
     bool stretcherPrimed = false;   // stretcher holds state from the current play pass
     bool rtFinished = false;        // final block sent; only drain from here on
     int  playbackDir = 1;           // +1 forward, -1 backward (ping-pong loop only); reset to

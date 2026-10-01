@@ -1182,6 +1182,18 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     const bool justStoppedPlaying = wasPlaying;
     resetPassState();
 
+    // Empty waveform: the live input runs through the FX chain (see the live-FX block below).
+    // Known up front so leaving that state (a file loaded, a recording made) seeds the effect
+    // tails exactly like a Stop does. A missed try-lock means the message thread is mid-edit on
+    // the document -- which only happens when there's something there -- so it counts as
+    // non-empty.
+    bool liveFx = false;
+    {
+        const juce::CriticalSection::ScopedTryLockType stl(document.getLock());
+        liveFx = stl.isLocked() && document.isEmpty();
+    }
+    const bool justLeftLiveFx = wasLiveFx && ! liveFx;
+
     // A reverb tail outlives the signal that made it -- start a countdown the instant playback
     // stops (if the reverb was actually engaged), so applyReverb() keeps ticking with silence as
     // its "input" for a while after, letting only the already-recirculating tail ring out instead
@@ -1189,7 +1201,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     // tail length -- near-max Decay is *designed* for near-infinite sustain (matches the real
     // hardware); what actually ends it at a normal, finite Decay setting is the energy check
     // below (reverbTailSilentSamples), once the tail's genuinely gone quiet.
-    if (justStoppedPlaying)
+    if (justStoppedPlaying || justLeftLiveFx)
     {
         const bool spaceOn = document.spaceOn.load(std::memory_order_relaxed);
         const bool reverbEngaged = spaceOn && document.reverbEnabled.load(std::memory_order_relaxed)
@@ -1221,8 +1233,9 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         chorusTailSilentSamples = 0;
     }
 
-    // Neither recording nor playing back: leave `buffer` untouched so the host's input
-    // passes straight through -- except Auto-Record standby, which watches that same
+    // Neither recording nor playing back: the host's input passes through (through the FX chain
+    // while the waveform is empty -- see the live-FX block below; silent once there's a sample,
+    // unless Monitor is on) -- plus Auto-Record standby, which watches that same
     // pass-through input for a peak loud enough to cross autoRecordThresholdDb. Read-only:
     // it never touches `buffer` or starts recording itself, just flags it for the message
     // thread (see EditorToolbar::timerCallback) to act on -- see AudioDocument's comment.
@@ -1284,8 +1297,7 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     bool idleMonitor = false;
     int idleMonitorCh = 0;
     {
-        const juce::CriticalSection::ScopedTryLockType stl(document.getLock());
-        if (! stl.isLocked() || ! document.isEmpty())
+        if (! liveFx)
         {
             const int inCh = monitorInputChannels(buffer, numSamples);
             idleMonitorCh = inCh;
@@ -1297,6 +1309,35 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             buffer.clear();
         }
     }
+
+    // Live FX: with the waveform empty, the input (still in `buffer`) runs through the same chain
+    // playback uses -- Dirt, filter, CHO/RTRG, DLY/PLX, RVB/SHM, Gain -- so the drawer can be
+    // played live before anything is recorded. Effects that are off stay bit-exact bypasses.
+    // No Speed/Pitch/Stretch (those act on the stored sample) and no LFO modulation (same as
+    // scrub). The engines carry their own tails, so the idle tail ring-outs below stand down
+    // while this runs; leaving this state re-seeds them (justLeftLiveFx above).
+    if (liveFx)
+    {
+        const bool fresh = ! wasLiveFx;
+        const int inCh = monitorInputChannels(buffer, numSamples);
+        if (inCh == 1 && numCh >= 2)
+            buffer.copyFrom(1, 0, buffer, 0, 0, numSamples);   // mono mic: feed both sides
+
+        r3wrk::zeroNonFinite(buffer, numCh, numSamples);
+        applyDirt(buffer, numCh, numSamples, fresh);
+        applyPlaybackFilter(buffer, numCh, 0, numSamples, fresh);
+        applyChorus(buffer, numCh, numSamples, fresh);
+        applyRetrig(buffer, numCh, numSamples, fresh);
+        applyDelaySlot(buffer, numCh, numSamples, fresh);   // DLY or PLX
+        applySpaceSlot(buffer, numCh, numSamples, fresh);   // RVB or SHM
+        applyPlaybackGain(buffer, numCh, 0, numSamples, {});
+        r3wrk::zeroNonFinite(buffer, numCh, numSamples);
+
+        reverbTailSamplesLeft = shimmerTailSamplesLeft = plexTailSamplesLeft = mimeoTailSamplesLeft = 0;
+        chorusTailSamplesLeft = 0;
+        tailGainWasApplied = false;   // Gain already ran above -- the tail block mustn't apply it again
+    }
+    wasLiveFx = liveFx;
 
     // CHORUS tail first (it sits first in the chain). Same silence detector as the reverb's below.
     if (chorusTailSamplesLeft > 0)
