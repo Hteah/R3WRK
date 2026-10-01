@@ -46,9 +46,6 @@ public:
 
     // The last knob's (End's) x range, in this component's coordinates -- the FX drawer spaces
     // its effects so its Gain knob sits right under it (FxRow::setGainColumn).
-    // The drawer toggle's centre x (this component's coordinates) -- the FX drawer centres its
-    // reset button under it (FxRow::setResetCentreX).
-    int getDrawerToggleCentreX() const { return drawerButton.getBounds().getCentreX(); }
 
     juce::Range<int> getLastColumnXRange() const
     {

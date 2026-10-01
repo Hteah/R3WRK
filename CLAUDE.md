@@ -142,7 +142,7 @@ last) → NaN safety net → capture-output**. Notes on the newer pieces:
 - **Filter on/off**: the MNM/OT badge in the knob row is the filter's on/off (`AudioDocument::filterOn`,
   state R3WX; older projects load it on); off glides the filter open and bypasses, knobs untouched.
   The `SlotSwitchTab` above it switches the model (`filterModel`).
-- **Reset button** (boxed X under the drawer toggle, in the FX drawer): `FxRow::onReset` -> the editor
+- **Reset button** (red lightning bolt, 12px right of the FX drawer's Gain knob): `FxRow::onReset` -> the editor
   ends an overdub pass, stops playback, then `AudioDocument::resetSoundToDefaults()` -- every
   sound-shaping knob/effect back to its member-initialiser default (effects off, MIX 0 so tails go
   silent). Keeps slot/model choices, loop mode, selection; a running recording is left alone. **When

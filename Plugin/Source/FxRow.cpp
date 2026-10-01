@@ -122,8 +122,8 @@ void FxRow::applyTheme()
     gainKnob.setColour(juce::Slider::textBoxTextColourId, pal.text);
     gainKnob.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
     resetButton.setColour(juce::TextButton::buttonColourId,  juce::Colours::transparentBlack);
-    resetButton.setColour(juce::TextButton::textColourOffId, pal.accent);   // the knobs' ring colour
-    resetButton.setColour(juce::TextButton::textColourOnId,  pal.accent);
+    resetButton.setColour(juce::TextButton::textColourOffId, pal.recordButton);   // danger red, like Clear
+    resetButton.setColour(juce::TextButton::textColourOnId,  pal.recordButton);
     repaint();
 }
 
@@ -134,13 +134,6 @@ void FxRow::resized()
     // its own CONTENT width -- not stretched across an equal third of the row -- same "packed
     // from the left, sized to content" idiom each panel already uses for its own internal
     // pill+knobs.
-    // Reset button: centred under the drawer toggle, vertically centred in the row. 42px box ->
-    // the X's square is ~26px, the size of the open drawer toggle's glyph.
-    constexpr int resetSide = 42;
-    if (resetCentreX >= 0)
-        resetButton.setBounds(juce::Rectangle<int>(resetSide, resetSide)
-                                  .withCentre({ resetCentreX, getHeight() / 2 }));
-
     // Packed left to right from the Pitch knob's disc edge, spaced from what's DRAWN (toggle text,
     // knob discs, the "more" ring -- not the components' boxes): 12px between a toggle and its
     // first knob and between the second knob and the "more" ring; 12px either side of the divider
@@ -183,6 +176,15 @@ void FxRow::resized()
     // (The three slots and their toggles were nudged in packSlot.)
     if (showGain)
         nudge("fx.gain", { &gainCaption, &gainKnob });
+
+    // Reset (lightning bolt): 12px right of the Gain disc, level with its centre -- placed after
+    // the nudge so it follows Gain. A 32px box -> a ~26px-tall bolt, about the knob discs' scale.
+    {
+        constexpr int resetSide = 32;
+        const auto disc = showGain ? layoutGuideRect(gainKnob) : juce::Rectangle<int>(x, getHeight() / 2, 0, 0);
+        resetButton.setBounds(juce::Rectangle<int>(resetSide, resetSide)
+                                  .withPosition(disc.getRight() + kSpacing, disc.getCentreY() - resetSide / 2));
+    }
 
     repaint();
 }

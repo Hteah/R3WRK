@@ -435,16 +435,24 @@ namespace
 
     // Reset (the knob row's reset-everything button, under the drawer toggle): a square outline
     // with both diagonals -- an X in a box, from the user's reference image.
+    // Reset: a filled "danger" lightning bolt (the drawer's reset-everything button).
     void drawResetIcon(juce::Graphics& g, juce::Rectangle<float> bounds, juce::Colour ink)
     {
-        const float side = juce::jmin(bounds.getWidth(), bounds.getHeight()) * 0.62f;
-        const auto sq = juce::Rectangle<float>(side, side).withCentre(bounds.getCentre());
-        const float t = 1.3f;   // about a Space Mono stroke at the knob readouts' size
+        const float h = juce::jmin(bounds.getWidth(), bounds.getHeight()) * 0.82f;
+        const auto box = juce::Rectangle<float>(h * 0.62f, h).withCentre(bounds.getCentre());
+        auto pt = [&box](float x, float y) { return juce::Point<float>(box.getX() + x * box.getWidth(),
+                                                                       box.getY() + y * box.getHeight()); };
+        juce::Path bolt;
+        bolt.startNewSubPath(pt(0.64f, 0.00f));
+        bolt.lineTo(pt(0.06f, 0.58f));
+        bolt.lineTo(pt(0.44f, 0.58f));
+        bolt.lineTo(pt(0.30f, 1.00f));
+        bolt.lineTo(pt(0.94f, 0.38f));
+        bolt.lineTo(pt(0.56f, 0.38f));
+        bolt.lineTo(pt(0.74f, 0.00f));
+        bolt.closeSubPath();
         g.setColour(ink);
-        g.drawRect(sq.reduced(t * 0.5f), t);
-        const auto in = sq.reduced(t);
-        g.drawLine(in.getX(), in.getY(), in.getRight(), in.getBottom(), t);
-        g.drawLine(in.getRight(), in.getY(), in.getX(), in.getBottom(), t);
+        g.fillPath(bolt);
     }
 
     // "More" (opens the full popup editor -- Mimeophon/Plexiphon/Reverb's compact panels): a
@@ -808,7 +816,7 @@ void R3WRKLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     }
     if (text == iconReset)
     {
-        drawResetIcon(g, bounds, ink);
+        drawResetIcon(g, bounds, isMouseOverButton ? ink.brighter(0.25f) : ink);
         return;
     }
     if (text == iconMore)

@@ -25,7 +25,7 @@ namespace
             setUpKnob(decay, "DECAY", document.shimmerDecay, [](double v)
             {
                 const double s = r3wrk::ShimmerReverb::decaySeconds(v);
-                return juce::String(s, s < 10.0 ? 1 : 0) + " s";
+                return (s < 10.0 ? juce::String(s, 1) : juce::String(juce::roundToInt(s))) + " s";
             });
             setUpKnob(tone, "TONE", document.shimmerTone, [](double v)
             {
@@ -158,7 +158,7 @@ ShimmerPanel::ShimmerPanel(AudioDocument& doc) : document(doc)
     decayKnob.slider.textFromValueFunction = [](double v)
     {
         const double s = r3wrk::ShimmerReverb::decaySeconds(v);
-        return juce::String(s, s < 10.0 ? 1 : 0) + " s";
+        return (s < 10.0 ? juce::String(s, 1) : juce::String(juce::roundToInt(s))) + " s";
     };
     decayKnob.slider.updateText();
     decayKnob.slider.setLookAndFeel(&knobLnF);
