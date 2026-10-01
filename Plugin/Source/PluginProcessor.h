@@ -81,11 +81,10 @@ public:
     juce::File stopOutputCaptureAndWrite(const juce::File& dest, const AudioSaveOptions& opts);
     bool isCapturingOutput() const { return capturingOutput.load(std::memory_order_relaxed); }
 
-    // "Black Box" (VST/AU only): a ring buffer that always records this track's raw input in
-    // the background, no arming needed -- see appendToBlackBox(), called at the very top of
-    // processBlock(). isBlackBoxAvailable() is false in the Standalone app (it already has
-    // Record Desktop / Capture Output as its own explicit safety nets, and there's no "track
-    // input" to a Standalone instance the way there is to a plugin insert).
+    // "Black Box": a ring buffer that always records the raw input (a plugin's track input, the
+    // Standalone's audio-settings input) in the background, no arming needed -- see
+    // appendToBlackBox(), called at the very top of processBlock(). Plugin-only until 2026-09-30;
+    // the Standalone has it too now, alongside Record Desktop / Capture Output.
     // getBlackBoxSnapshot() hands the popup a chronological (oldest-first) copy of whatever's
     // currently in the ring, up to the full getBlackBoxDurationSecs() once it has wrapped at
     // least once; safe to call from the message thread.
@@ -157,8 +156,8 @@ private:
     // blackBoxBuffer against the audio thread's writer -- appendToBlackBox() only ever
     // tryEnter()s it, so the audio thread never blocks; on the rare contended call (the UI
     // taking a snapshot) it just drops that one block rather than risk a priority inversion.
-    // blackBoxCapacity is 0 in the Standalone app (allocation skipped in reallocateBlackBoxBuffer()),
-    // which doubles as isBlackBoxAvailable()'s flag.
+    // blackBoxCapacity is 0 until prepareToPlay() allocates the ring, which doubles as
+    // isBlackBoxAvailable()'s flag.
     double blackBoxDurationSecs = kBlackBoxDurationLong;   // see setBlackBoxDurationSecs()
     mutable juce::CriticalSection blackBoxLock;   // mutable: getBlackBoxSnapshot() locks it from a const method
     juce::AudioBuffer<float> blackBoxBuffer;

@@ -2352,9 +2352,6 @@ void R3WRKAudioProcessor::captureOutput(const juce::AudioBuffer<float>& out, int
 // carrying resampling/splicing machinery just for this.
 void R3WRKAudioProcessor::reallocateBlackBoxBuffer()
 {
-    if (wrapperType == wrapperType_Standalone)
-        return;
-
     const int chans = juce::jmax(1, getTotalNumInputChannels());
     const int capacity = (int) (blackBoxDurationSecs * currentSampleRate);
     const juce::ScopedLock sl(blackBoxLock);

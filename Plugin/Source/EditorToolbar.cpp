@@ -831,8 +831,7 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
         addAndMakeVisible(desktopRecButton);
         addAndMakeVisible(captureOutButton);
     }
-    if (isPluginBuild)
-        addAndMakeVisible(blackBoxButton);
+    addAndMakeVisible(blackBoxButton);   // Standalone too (it was plugin-only before)
 
     timeLabel.setFont(juce::FontOptions(juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::plain));
     timeLabel.setJustificationType(juce::Justification::centredRight);
@@ -865,7 +864,7 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     blackBoxButton.setTooltip(
         "Black Box -- always recording the last "
         + juce::String(processor.getBlackBoxDurationSecs() < 195.0 ? "90 seconds" : "5 minutes")
-        + " of this track's input in the background, no arming needed. Click to review, trim, "
+        + (standaloneApp ? " of the input" : " of this track's input") + " in the background, no arming needed. Click to review, trim, "
           "and load, save, or drag out a take you forgot to hit Record for.");
 
     for (auto* b : { &playFromStartButton, &playButton,
@@ -903,12 +902,9 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
         };
     }
 
-    if (isPluginBuild)
-    {
-        blackBoxButton.setLookAndFeel(&toolbarLnF);
-        blackBoxButton.setWantsKeyboardFocus(false);
-        blackBoxButton.onClick = [this] { showBlackBoxPopup(); };
-    }
+    blackBoxButton.setLookAndFeel(&toolbarLnF);
+    blackBoxButton.setWantsKeyboardFocus(false);
+    blackBoxButton.onClick = [this] { showBlackBoxPopup(); };
 
     recordButton.onClick        = [this] { toggleTransport(); };
     playButton.onClick          = [this] { togglePlay(); };
@@ -1131,16 +1127,9 @@ void EditorToolbar::paint(juce::Graphics& g)
             g.fillEllipse(x - radius, y - radius, radius * 2.0f, radius * 2.0f);
     };
 
-    if (standaloneApp)
-    {
-        dotsBetween(monitorButton, desktopRecButton);
-        dotsBetween(captureOutButton, scrubButton);
-    }
-    if (isPluginBuild)
-    {
-        dotsBetween(monitorButton, blackBoxButton);
-        dotsBetween(blackBoxButton, scrubButton);
-    }
+    // Monitor | (Record Desktop, Capture Output,) Black Box | Scrub
+    dotsBetween(monitorButton, standaloneApp ? static_cast<juce::Component&>(desktopRecButton) : blackBoxButton);
+    dotsBetween(blackBoxButton, scrubButton);
     dotsBetween(sliceButton, toolsButton);
     dotsBetween(autoRecordButton, overdubButton);    // Record/Auto-Record | Overdub/Monitor
 }
@@ -2052,8 +2041,8 @@ void EditorToolbar::resized()
     };
     auto add = [&](juce::Component& c, int rightMargin = 16) { addWide(c, 28, rightMargin); };
     // Order set by the user: transport (Play-from-start, Play, Loop) -> primary record
-    // (Record, Auto-Record) -> input (Overdub + its menu, Monitor) -> secondary record (Record Desktop, Capture Output; standalone
-    // only -- or Black Box; plugin only) -> waveform tools (Scrub, Slice) -> Tools menu ->
+    // (Record, Auto-Record) -> input (Overdub + its menu, Monitor) -> secondary record (Record Desktop, Capture Output --
+    // standalone only -- then Black Box) -> waveform tools (Scrub, Slice) -> Tools menu ->
     // Clear, with the time readout pinned right. All round icon buttons. paint() drops a
     // divider dot in each widened (gap + dotGap) gap. (Follow-playhead moved to the header
     // row -- see PluginEditor.)
@@ -2065,20 +2054,39 @@ void EditorToolbar::resized()
     add(autoRecordButton, gap + dotGap);            // divider before Overdub
     add(overdubButton, 2);
     addWide(overdubMoreButton, 20, gap);            // the FX drawer's "more" dot size (20 x 16)
-    add(monitorButton, (standaloneApp || isPluginBuild) ? gap + dotGap : gap);   // dot before the next section
+    add(monitorButton, gap + dotGap);               // dot before the next section
     if (standaloneApp)
     {
         add(desktopRecButton);
-        add(captureOutButton, gap + dotGap);                     // dot before Scrub
+        add(captureOutButton);
     }
-    if (isPluginBuild)
-        add(blackBoxButton, gap + dotGap);                       // dot before Scrub
+    add(blackBoxButton, gap + dotGap);                           // dot before Scrub
     add(scrubButton);
     add(sliceButton, gap + dotGap);                              // dot before Tools
     add(toolsButton);
     add(clearButton);
     fb.items.add(juce::FlexItem().withFlex(1.0f));
     addWide(timeLabel, 150, gap);
+    // The readout keeps enough width to stay readable at narrow widths -- the round buttons give
+    // way instead (with Black Box in the Standalone row it otherwise squeezed down to "00: / ...").
+    fb.items.getReference(fb.items.size() - 1).minWidth = 64.0f;
+
+    // Narrow windows: once the buttons are down to their minimum size, the fixed gaps are what
+    // overflow -- scale every gap down just enough (not below ~half) to fit the row. Wide windows
+    // keep the full 16 / 30 px spacing (scale 1).
+    {
+        float minWidths = 0.0f, margins = 0.0f;
+        for (auto& item : fb.items)
+        {
+            minWidths += item.minWidth;
+            margins   += item.margin.right;
+        }
+        const float spare = (float) row.getWidth() - minWidths;
+        const float scale = margins > 0.0f ? juce::jlimit(0.45f, 1.0f, spare / margins) : 1.0f;
+        if (scale < 1.0f)
+            for (auto& item : fb.items)
+                item.margin.right *= scale;
+    }
     fb.performLayout(row);
 
     // A narrow window squeezes the buttons' widths (down to withMinWidth) but not their height,

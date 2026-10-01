@@ -61,7 +61,7 @@ public:
     void toggleTransport();   // Record button: record if idle, else stop
     void toggleDesktopRecording();   // Standalone-only "Record Desktop" button: system-audio capture on/off
     void toggleOutputCapture();      // Standalone-only "Capture Output" button: tap the playback output to a WAV
-    void showBlackBoxPopup();        // Plugin-only "Black Box" button: review/trim the rolling 90s background capture
+    void showBlackBoxPopup();        // "Black Box" button: review/trim the rolling background capture (90 s or 5 min)
     void togglePlay();        // Space: play if idle, else stop
     void playFromStart();     // restarts playback at sample 0 (region-snapped, see processBlock)
 
