@@ -7,21 +7,19 @@
 #include "SlotSwitchTab.h"
 
 /**
-    The PLEXIPHON cell of the FX drawer (4th slot, replacing GRANULAR's old placeholder -- see
-    FxRow::resized()): a real Plexiphon (PlexiphonEngine.h / PluginProcessor::applyPlexiphon()),
-    not a placeholder Section. Two primary knobs -- Plexus (the central control per the manual)
-    and Mix -- sit directly in the drawer, the same footprint the placeholder Section used to
-    occupy there; a "..." button opens the full control set (Level, Plexus, Size, Diffuse,
-    Decay, Color, Mix) in a popup, the same juce::CallOutBox pattern ReverbPanel/LfoPanel use
-    for their own editors.
+    The SHM cell of the FX drawer: the clean shimmer reverb (ShimmerEngine.h / PluginProcessor::
+    applyShimmer()), sharing the last slot with RVB (ShimmerPanel -- this is a copy of it, kept
+    separate per the drawer's one-panel-per-effect pattern). Decay + Mix in the drawer; the
+    "more" dot opens all nine controls (Size, Decay, Tone, Width, Mix, Shimmer, Interval,
+    Movement, Freeze).
 */
-class PlexiphonPanel : public juce::Component,
-                       private juce::Timer,
-                       private juce::ChangeListener
+class ShimmerPanel : public juce::Component,
+                    private juce::Timer,
+                    private juce::ChangeListener
 {
 public:
-    explicit PlexiphonPanel(AudioDocument& document);
-    ~PlexiphonPanel() override;
+    explicit ShimmerPanel(AudioDocument& document);
+    ~ShimmerPanel() override;
 
     void resized() override;
     void paint(juce::Graphics&) override;
@@ -31,7 +29,7 @@ public:
     // that move as "the toggle".
     int leftSlack = 0;
     juce::Array<juce::Component*> getToggleParts() { return { &enablePill, &slotTab }; }
-    juce::String getToggleText() const { return "PLX"; }
+    juce::String getToggleText() const { return "SHM"; }
 
 private:
     void timerCallback() override;   // low-rate re-sync from external changes (state load, undo)
@@ -42,8 +40,9 @@ private:
     AudioDocument& document;
     juce::SharedResourcePointer<ThemeManager> theme;
 
-    // Small enable pill -- same visual language as ReverbPanel/LfoPanel's own (each place draws
-    // its own rather than sharing one component -- established precedent).
+    // Small enable pill -- same rounded-pill visual language as FxRow::EnablePill / LfoPanel::
+    // Row's own pill; each place draws its own rather than sharing one component (established
+    // precedent -- see LfoPanel::Row::paint).
     struct EnablePill : juce::Component, public juce::SettableTooltipClient
     {
         juce::Colour fill, ink, border;
@@ -54,7 +53,7 @@ private:
         void mouseEnter(const juce::MouseEvent&) override { hovered = true; repaint(); }
         void mouseExit(const juce::MouseEvent&) override { hovered = false; repaint(); }
     };
-    EnablePill enablePill;       // the DLY/PLX slot's on/off (AudioDocument::delayOn)
+    EnablePill enablePill;       // the RVB/SHM slot's on/off (AudioDocument::spaceOn)
     SlotSwitchTab slotTab;       // above the pill: switches the slot to the other model
 
     struct Knob
@@ -62,8 +61,8 @@ private:
         juce::Label caption;
         juce::Slider slider { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow };
     };
-    Knob plexusKnob, mixKnob;
-    // plexusKnob/mixKnob's sliders are constructed as a PluginEditor member before its ctor body
+    Knob decayKnob, mixKnob;
+    // decayKnob/mixKnob's sliders are constructed as a PluginEditor member before its ctor body
     // installs fontLnf as the app-wide default LookAndFeel (see PluginEditor.cpp), so each
     // slider's textbox Label would otherwise get created (and cached) against JUCE's own stock
     // default rather than R3WRKLookAndFeel's Space Mono override -- explicit attach, same
@@ -77,5 +76,5 @@ private:
     juce::TextButton moreButton { R3WRKLookAndFeel::iconMore };
     PinnableCallout moreCallout;   // the full editor popup -- see PinnableCallout.h
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PlexiphonPanel)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ShimmerPanel)
 };

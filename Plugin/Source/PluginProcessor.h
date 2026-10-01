@@ -11,6 +11,7 @@
 #include "ReverbEngine.h"
 #include "PlexiphonEngine.h"
 #include "MimeophonEngine.h"
+#include "ShimmerEngine.h"
 #include "RetrigEngine.h"
 #include "MnmChorusEngine.h"
 
@@ -450,14 +451,41 @@ private:
     float applyPlexiphon (juce::AudioBuffer<float>& buffer, int numCh, int numSamples, bool freshPlayPass,
                          bool tailOnly = false);
 
-    // The RVB / PLX "space" slot: runs whichever model is selected (reverbEnabled / plexEnabled)
-    // and lets the one you just switched away from ring out (tailOnly, fed silence) until it's
-    // quiet, instead of cutting its tail off.
+    // SHM clean shimmer reverb (r3wrk::ShimmerReverb, ShimmerEngine.h) -- the space slot's other
+    // model. Exact structural mirror of the Reverb wiring above (block-rate smoothing here, Size
+    // and Freeze additionally smoothed per sample inside the engine; resets only on its enable
+    // edge, never on freshPlayPass).
+    r3wrk::ShimmerReverb shimmerDsp;
+    juce::SmoothedValue<double> smoothedShimmerSize     { 0.5 };
+    juce::SmoothedValue<double> smoothedShimmerDecay    { 0.5483 };
+    juce::SmoothedValue<double> smoothedShimmerTone     { 0.5 };
+    juce::SmoothedValue<double> smoothedShimmerAmount   { 0.15 };
+    juce::SmoothedValue<double> smoothedShimmerMovement { 0.3 };
+    juce::SmoothedValue<double> smoothedShimmerWidth    { 1.0 };
+    juce::SmoothedValue<double> smoothedShimmerMix      { 0.0 };
+    int  shimmerTailSamplesLeft   = 0;
+    int  shimmerTailSilentSamples = 0;
+    bool lastShimmerEngaged = false;
+    float applyShimmer (juce::AudioBuffer<float>& buffer, int numCh, int numSamples, bool freshPlayPass,
+                        bool tailOnly = false);
+
+    // The RVB / SHM "space" slot: runs whichever model is selected (reverbEnabled /
+    // shimmerEnabled) and lets the one you just switched away from ring out (tailOnly, fed
+    // silence) until it's quiet, instead of cutting its tail off.
     bool lastReverbSelected = true;
     bool lastSpaceOn = false;
-    bool reverbRingingOut = false, plexRingingOut = false;
+    bool reverbRingingOut = false, shimmerRingingOut = false;
     int  ringOutSilentSamples = 0, ringOutSamplesLeft = 0;
     void applySpaceSlot (juce::AudioBuffer<float>& buffer, int numCh, int numSamples, bool freshPlayPass);
+
+    // The DLY / PLX delay slot: same scheme as the space slot (mimeoEnabled / plexEnabled select,
+    // delayOn is the pill), its own ring-out state. Deliberately a copy of applySpaceSlot rather
+    // than a shared helper -- small explicit duplication over touching proven code.
+    bool lastMimeoSelected = true;
+    bool lastDelayOn = false;
+    bool mimeoRingingOut = false, plexRingingOut = false;
+    int  delayRingOutSilentSamples = 0, delayRingOutSamplesLeft = 0;
+    void applyDelaySlot (juce::AudioBuffer<float>& buffer, int numCh, int numSamples, bool freshPlayPass);
 
     // RTRG (r3wrk::RetrigEngine, RetrigEngine.h): after the filter, before Mimeophon. Tempo is
     // the host's (VST/AU) or the RTRG popup's BPM (Standalone), see processBlock.

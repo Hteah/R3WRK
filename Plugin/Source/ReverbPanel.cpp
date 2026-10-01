@@ -93,18 +93,18 @@ namespace
 
 ReverbPanel::ReverbPanel(AudioDocument& doc) : document(doc)
 {
-    // RVB and PLX share one drawer slot. The pill is the slot's on/off (AudioDocument::spaceOn --
-    // off lets the tail ring out); the small tab above it switches the slot to PLX, like the
+    // RVB and SHM share one drawer slot. The pill is the slot's on/off (AudioDocument::spaceOn --
+    // off lets the tail ring out); the small tab above it switches the slot to SHM, like the
     // RTRG/CHO slot's.
     enablePill.onClick = [this] { document.spaceOn.store(! document.spaceOn.load()); };
     enablePill.setTooltip("RVB: click to switch on/off (off lets the tail ring out)");
     addAndMakeVisible(enablePill);
 
-    slotTab.target = "PLX";
-    slotTab.setTooltip("Switch this slot to PLX");
+    slotTab.target = "SHM";
+    slotTab.setTooltip("Switch this slot to SHM");
     slotTab.onClick = [this]
     {
-        document.plexEnabled.store(true);
+        document.shimmerEnabled.store(true);
         document.reverbEnabled.store(false);
     };
     addAndMakeVisible(slotTab);

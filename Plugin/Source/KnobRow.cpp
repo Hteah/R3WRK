@@ -233,7 +233,7 @@ KnobRow::KnobRow(AudioDocument& doc)
 
     drawerButton.setClickingTogglesState(false);   // the editor decides open/closed, not the button itself
     drawerButton.setWantsKeyboardFocus(false);
-    drawerButton.setTooltip("More effects (Retrig, Delay, Reverb / Plexiphon)");
+    drawerButton.setTooltip("More effects (Retrig / Chorus, Delay / PLX, Reverb / Shimmer)");
     drawerButton.setLookAndFeel(&drawerLnF);
     drawerButton.onClick = [this] { if (onDrawerToggle) onDrawerToggle(); };
     addAndMakeVisible(drawerButton);

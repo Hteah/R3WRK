@@ -9,7 +9,8 @@
 
 namespace
 {
-    constexpr int kStateMagic     = 0x52335758;   // 'R3WX' - adds the filter's on/off
+    constexpr int kStateMagic     = 0x52335759;   // 'R3WY' - PLX moves to the delay slot (+ delayOn); adds SHM
+    constexpr int kStateMagicR3WX = 0x52335758;   // 'R3WX' - adds the filter's on/off
     constexpr int kStateMagicR3WW = 0x52335757;   // 'R3WW' - adds the RVB/PLX slot's on/off pill
     constexpr int kStateMagicR3WV = 0x52335756;   // 'R3WV' - CHORUS becomes the MnM FX-CHORUS clone (8 params)
     constexpr int kStateMagicR3WU = 0x52335755;   // 'R3WU' - adds CHORUS (Juno-style, retired) + the RTRG/CHO slot switch
@@ -172,9 +173,28 @@ void R3WRKAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     lastChorusEngaged = false;
     chorusTailSamplesLeft = chorusTailSilentSamples = 0;
     chorusTailScratch.setSize(2, juce::jmax(8192, juce::jmax(0, samplesPerBlock) * 4));
-    reverbRingingOut = plexRingingOut = false;
+    reverbRingingOut = shimmerRingingOut = false;
     lastReverbSelected = document.reverbEnabled.load();
     lastSpaceOn = document.spaceOn.load();
+    mimeoRingingOut = plexRingingOut = false;
+    lastMimeoSelected = document.mimeoEnabled.load();
+    lastDelayOn = document.delayOn.load();
+
+    shimmerDsp.prepare(sampleRate);
+    constexpr double shimmerRampSeconds = 0.05;
+    for (auto* sv : { &smoothedShimmerSize, &smoothedShimmerDecay, &smoothedShimmerTone, &smoothedShimmerAmount,
+                      &smoothedShimmerMovement, &smoothedShimmerWidth, &smoothedShimmerMix })
+        sv->reset(sampleRate, shimmerRampSeconds);
+    smoothedShimmerSize.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.shimmerSize.load()));
+    smoothedShimmerDecay.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.shimmerDecay.load()));
+    smoothedShimmerTone.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.shimmerTone.load()));
+    smoothedShimmerAmount.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.shimmerAmount.load()));
+    smoothedShimmerMovement.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.shimmerMovement.load()));
+    smoothedShimmerWidth.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.shimmerWidth.load()));
+    smoothedShimmerMix.setCurrentAndTargetValue(juce::jlimit(0.0, 1.0, document.shimmerMix.load()));
+    shimmerTailSamplesLeft = 0;
+    shimmerTailSilentSamples = 0;
+    lastShimmerEngaged = false;
 
     mimeoDsp.prepare(sampleRate);
     constexpr double mimeoRampSeconds = 0.05;
@@ -624,8 +644,8 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         applyPlaybackFilter(buffer, numCh, 0, numSamples, ! wasScrubbing);
         applyChorus(buffer, numCh, numSamples, ! wasScrubbing);
         applyRetrig(buffer, numCh, numSamples, ! wasScrubbing);
-        applyMimeophon(buffer, numCh, numSamples, ! wasScrubbing);
-        applySpaceSlot(buffer, numCh, numSamples, ! wasScrubbing);   // RVB or PLX
+        applyDelaySlot(buffer, numCh, numSamples, ! wasScrubbing);   // DLY or PLX
+        applySpaceSlot(buffer, numCh, numSamples, ! wasScrubbing);   // RVB or SHM
         applyPlaybackGain(buffer, numCh, 0, numSamples, {});   // volume, last; LFOs don't run while scrubbing
         r3wrk::zeroNonFinite(buffer, numCh, numSamples);   // safety net: never hand the host a NaN
         captureOutput(buffer, numCh, numSamples);
@@ -1123,15 +1143,15 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         applyChorus(buffer, numCh, numSamples, ! wasPlaying);
         applyRetrig(buffer, numCh, numSamples, ! wasPlaying);
 
-        // Mimeophon, after filter and gain, before Reverb/Plexiphon -- a conventional "delay
-        // before reverb" chain position, and matches the FX drawer's own left-to-right slot
-        // order (Delay is the leftmost slot). Unchunked: not LFO-modulated in phase 1.
-        applyMimeophon(buffer, numCh, numSamples, ! wasPlaying);
+        // The delay slot (Mimeophon or Plexiphon -- see applyDelaySlot()), after filter and
+        // gain, before the reverb slot -- a conventional "delay before reverb" chain position,
+        // matching the FX drawer's left-to-right slot order. Unchunked: not LFO-modulated.
+        applyDelaySlot(buffer, numCh, numSamples, ! wasPlaying);
 
         // Reverb, after filter/gain/Mimeophon -- like a send on the end of the strip. Unchunked:
         // not LFO-modulated in phase 1, so nothing here needs kLfoModUpdateSamples's finer
         // update rate. freshPlayPass primes it the same way the filter/gain above do.
-        // RVB and PLX share one slot -- whichever's selected (see applySpaceSlot()).
+        // RVB and SHM share one slot -- whichever's selected (see applySpaceSlot()).
         applySpaceSlot(buffer, numCh, numSamples, ! wasPlaying);
 
         // Gain: the volume knob, after everything (effect tails included), in the same chunks
@@ -1177,15 +1197,22 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         reverbTailSamplesLeft = (reverbEngaged || reverbRingingOut) ? (int) (currentSampleRate * 300.0) : 0;
         reverbTailSilentSamples = 0;
 
-        const bool plexEngaged = spaceOn && document.plexEnabled.load(std::memory_order_relaxed)
+        const bool shimmerEngaged = spaceOn && document.shimmerEnabled.load(std::memory_order_relaxed)
+                                    && document.shimmerMix.load(std::memory_order_relaxed) > 0.001;
+        shimmerTailSamplesLeft = (shimmerEngaged || shimmerRingingOut) ? (int) (currentSampleRate * 300.0) : 0;
+        reverbRingingOut = shimmerRingingOut = false;   // (a switch ring-out carries on as the idle tail)
+        shimmerTailSilentSamples = 0;
+
+        const bool delayOn = document.delayOn.load(std::memory_order_relaxed);
+        const bool plexEngaged = delayOn && document.plexEnabled.load(std::memory_order_relaxed)
                                  && document.plexMix.load(std::memory_order_relaxed) > 0.001;
         plexTailSamplesLeft = (plexEngaged || plexRingingOut) ? (int) (currentSampleRate * 300.0) : 0;
-        reverbRingingOut = plexRingingOut = false;   // (a switch ring-out carries on as the idle tail)
         plexTailSilentSamples = 0;
 
-        const bool mimeoEngaged = document.mimeoEnabled.load(std::memory_order_relaxed)
+        const bool mimeoEngaged = delayOn && document.mimeoEnabled.load(std::memory_order_relaxed)
                                   && document.mimeoMix.load(std::memory_order_relaxed) > 0.001;
-        mimeoTailSamplesLeft = mimeoEngaged ? (int) (currentSampleRate * 300.0) : 0;
+        mimeoTailSamplesLeft = (mimeoEngaged || mimeoRingingOut) ? (int) (currentSampleRate * 300.0) : 0;
+        mimeoRingingOut = plexRingingOut = false;
         mimeoTailSilentSamples = 0;
 
         // CHORUS only rings on with feedback (FB 0 dies within its ~45 ms of delay).
@@ -1311,6 +1338,22 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             reverbTailSamplesLeft = 0;
     }
 
+    // Same idle tail-ring-out treatment for SHM -- see the block above.
+    if (shimmerTailSamplesLeft > 0)
+    {
+        const int n = juce::jmin(shimmerTailSamplesLeft, numSamples);
+        const float wetPeak = applyShimmer(buffer, numCh, n, false, true);
+        shimmerTailSamplesLeft -= n;
+
+        constexpr float kSilenceThreshold = 0.0005f;
+        if (wetPeak > kSilenceThreshold)
+            shimmerTailSilentSamples = 0;
+        else
+            shimmerTailSilentSamples += n;
+        if (shimmerTailSilentSamples > (int) (currentSampleRate * 2.0))
+            shimmerTailSamplesLeft = 0;
+    }
+
     // Same idle tail-ring-out treatment for Plexiphon -- see the block above.
     if (plexTailSamplesLeft > 0)
     {
@@ -1344,12 +1387,12 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     }
 
     // Gain is the volume knob, after everything -- effect tails ringing out after Stop included.
-    if (reverbTailSamplesLeft > 0 || plexTailSamplesLeft > 0 || mimeoTailSamplesLeft > 0
+    if (reverbTailSamplesLeft > 0 || shimmerTailSamplesLeft > 0 || plexTailSamplesLeft > 0 || mimeoTailSamplesLeft > 0
         || chorusTailSamplesLeft > 0 || tailGainWasApplied)
     {
         applyPlaybackGain(buffer, numCh, 0, numSamples, {});
-        tailGainWasApplied = reverbTailSamplesLeft > 0 || plexTailSamplesLeft > 0 || mimeoTailSamplesLeft > 0
-                             || chorusTailSamplesLeft > 0;
+        tailGainWasApplied = reverbTailSamplesLeft > 0 || shimmerTailSamplesLeft > 0 || plexTailSamplesLeft > 0
+                             || mimeoTailSamplesLeft > 0 || chorusTailSamplesLeft > 0;
     }
 
     if (idleMonitor)
@@ -1770,6 +1813,88 @@ float R3WRKAudioProcessor::applyReverb(juce::AudioBuffer<float>& buffer, int num
     return peak;
 }
 
+float R3WRKAudioProcessor::applyShimmer(juce::AudioBuffer<float>& buffer, int numCh, int numSamples,
+                                        bool freshPlayPass, bool tailOnly)
+{
+    const auto get = [](const std::atomic<double>& a) { return juce::jlimit(0.0, 1.0, a.load(std::memory_order_relaxed)); };
+    const double size01 = get(document.shimmerSize), decay01 = get(document.shimmerDecay);
+    const double tone01 = get(document.shimmerTone), amount01 = get(document.shimmerAmount);
+    const double movement01 = get(document.shimmerMovement), width01 = get(document.shimmerWidth);
+    const double mix01 = get(document.shimmerMix);
+
+    if (freshPlayPass)
+    {
+        // Never resets shimmerDsp here -- same reasoning as applyReverb(): a still-decaying tail
+        // isn't wiped by an incidental wasPlaying flip. Only the enable edge below resets it.
+        smoothedShimmerSize.setCurrentAndTargetValue(size01);
+        smoothedShimmerDecay.setCurrentAndTargetValue(decay01);
+        smoothedShimmerTone.setCurrentAndTargetValue(tone01);
+        smoothedShimmerAmount.setCurrentAndTargetValue(amount01);
+        smoothedShimmerMovement.setCurrentAndTargetValue(movement01);
+        smoothedShimmerWidth.setCurrentAndTargetValue(width01);
+        smoothedShimmerMix.setCurrentAndTargetValue(mix01);
+    }
+    smoothedShimmerSize.setTargetValue(size01);
+    smoothedShimmerDecay.setTargetValue(decay01);
+    smoothedShimmerTone.setTargetValue(tone01);
+    smoothedShimmerAmount.setTargetValue(amount01);
+    smoothedShimmerMovement.setTargetValue(movement01);
+    smoothedShimmerWidth.setTargetValue(width01);
+    smoothedShimmerMix.setTargetValue(mix01);
+    const double size     = smoothedShimmerSize.skip(numSamples);
+    const double decay    = smoothedShimmerDecay.skip(numSamples);
+    const double tone     = smoothedShimmerTone.skip(numSamples);
+    const double amount   = smoothedShimmerAmount.skip(numSamples);
+    const double movement = smoothedShimmerMovement.skip(numSamples);
+    const double width    = smoothedShimmerWidth.skip(numSamples);
+    const double mix      = smoothedShimmerMix.skip(numSamples);
+
+    const bool engaged = (document.shimmerEnabled.load(std::memory_order_relaxed) || tailOnly) && mix > 0.001;   // tailOnly: also a deselected model ringing out
+
+    shimmerDsp.setParams(size, decay, tone, amount, document.shimmerFifth.load(std::memory_order_relaxed),
+                         movement, width, mix, document.shimmerFreeze.load(std::memory_order_relaxed));
+    if (engaged && ! lastShimmerEngaged)
+    {
+        shimmerDsp.reset();
+        shimmerDsp.snapSmoothers();
+    }
+    lastShimmerEngaged = engaged;
+
+    if (! engaged)
+        return 0.0f;
+
+    float peak = 0.0f;
+    if (numCh <= 1)
+    {
+        auto* data = buffer.getWritePointer(0);
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const float in = tailOnly ? 0.0f : data[i];
+            float outL, outR;
+            shimmerDsp.processSample(in, in, outL, outR);
+            const float mono = 0.5f * (outL + outR);
+            peak = juce::jmax(peak, std::abs(mono));
+            data[i] = tailOnly ? (data[i] + mono) : mono;
+        }
+    }
+    else
+    {
+        auto* left  = buffer.getWritePointer(0);
+        auto* right = buffer.getWritePointer(1);
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const float inL = tailOnly ? 0.0f : left[i];
+            const float inR = tailOnly ? 0.0f : right[i];
+            float outL, outR;
+            shimmerDsp.processSample(inL, inR, outL, outR);
+            peak = juce::jmax(peak, std::abs(outL), std::abs(outR));
+            left[i]  = tailOnly ? (left[i]  + outL) : outL;
+            right[i] = tailOnly ? (right[i] + outR) : outR;
+        }
+    }
+    return peak;
+}
+
 float R3WRKAudioProcessor::applyPlexiphon(juce::AudioBuffer<float>& buffer, int numCh, int numSamples,
                                           bool freshPlayPass, bool tailOnly)
 {
@@ -1928,6 +2053,66 @@ float R3WRKAudioProcessor::applyChorusTail(juce::AudioBuffer<float>& buffer, int
     return peak;
 }
 
+// The DLY / PLX delay slot -- a copy of applySpaceSlot() below with its own state (see the header).
+void R3WRKAudioProcessor::applyDelaySlot(juce::AudioBuffer<float>& buffer, int numCh, int numSamples,
+                                         bool freshPlayPass)
+{
+    const bool mimeoSelected = document.mimeoEnabled.load(std::memory_order_relaxed);
+    if (mimeoSelected != lastMimeoSelected)
+    {
+        // Switched: the model you left keeps ringing out (if it was sounding); the one you
+        // switched to stops ringing out and plays normally, its tail carrying straight on.
+        // While the pill is off nothing plays normally, so a tail that's ringing keeps ringing.
+        const bool off = ! document.delayOn.load(std::memory_order_relaxed);
+        mimeoRingingOut = (! mimeoSelected && lastMimeoEngaged) || (off && mimeoRingingOut);
+        plexRingingOut   = (mimeoSelected && lastPlexEngaged)     || (off && plexRingingOut);
+        delayRingOutSilentSamples = 0;
+        delayRingOutSamplesLeft = (int) (currentSampleRate * 300.0);   // same generous ceiling as the idle tails
+        lastMimeoSelected = mimeoSelected;
+    }
+
+    // The on/off pill. Off: the selected model rings out (same path as a model switch) instead of
+    // being cut. On again: it stops ringing out and plays normally, its tail carrying straight on.
+    const bool delayOn = document.delayOn.load(std::memory_order_relaxed);
+    if (delayOn != lastDelayOn)
+    {
+        if (! delayOn)
+        {
+            if (mimeoSelected && lastMimeoEngaged) mimeoRingingOut = true;
+            if (! mimeoSelected && lastPlexEngaged) plexRingingOut = true;
+            delayRingOutSilentSamples = 0;
+            delayRingOutSamplesLeft = (int) (currentSampleRate * 300.0);
+        }
+        else
+        {
+            if (mimeoSelected) mimeoRingingOut = false;
+            else                plexRingingOut = false;
+        }
+        lastDelayOn = delayOn;
+    }
+
+    // While off, the selected model isn't run normally at all -- only its ring-out below. (A
+    // normal call would mark it disengaged, and the ring-out call would then see an enable edge
+    // and reset the engine, killing the very tail it's meant to let ring.)
+    if (delayOn)
+    {
+        if (mimeoSelected)
+            applyMimeophon(buffer, numCh, numSamples, freshPlayPass);
+        else
+            applyPlexiphon(buffer, numCh, numSamples, freshPlayPass);
+    }
+
+    if (mimeoRingingOut || plexRingingOut)
+    {
+        const float wetPeak = mimeoRingingOut ? applyMimeophon(buffer, numCh, numSamples, false, true)
+                                               : applyPlexiphon(buffer, numCh, numSamples, false, true);
+        delayRingOutSamplesLeft -= numSamples;
+        delayRingOutSilentSamples = wetPeak > 0.0005f ? 0 : delayRingOutSilentSamples + numSamples;
+        if (delayRingOutSilentSamples > (int) (currentSampleRate * 2.0) || delayRingOutSamplesLeft <= 0)
+            mimeoRingingOut = plexRingingOut = false;
+    }
+}
+
 void R3WRKAudioProcessor::applySpaceSlot(juce::AudioBuffer<float>& buffer, int numCh, int numSamples,
                                          bool freshPlayPass)
 {
@@ -1939,7 +2124,7 @@ void R3WRKAudioProcessor::applySpaceSlot(juce::AudioBuffer<float>& buffer, int n
         // While the pill is off nothing plays normally, so a tail that's ringing keeps ringing.
         const bool off = ! document.spaceOn.load(std::memory_order_relaxed);
         reverbRingingOut = (! reverbSelected && lastReverbEngaged) || (off && reverbRingingOut);
-        plexRingingOut   = (reverbSelected && lastPlexEngaged)     || (off && plexRingingOut);
+        shimmerRingingOut   = (reverbSelected && lastShimmerEngaged)     || (off && shimmerRingingOut);
         ringOutSilentSamples = 0;
         ringOutSamplesLeft = (int) (currentSampleRate * 300.0);   // same generous ceiling as the idle tails
         lastReverbSelected = reverbSelected;
@@ -1953,14 +2138,14 @@ void R3WRKAudioProcessor::applySpaceSlot(juce::AudioBuffer<float>& buffer, int n
         if (! spaceOn)
         {
             if (reverbSelected && lastReverbEngaged) reverbRingingOut = true;
-            if (! reverbSelected && lastPlexEngaged) plexRingingOut = true;
+            if (! reverbSelected && lastShimmerEngaged) shimmerRingingOut = true;
             ringOutSilentSamples = 0;
             ringOutSamplesLeft = (int) (currentSampleRate * 300.0);
         }
         else
         {
             if (reverbSelected) reverbRingingOut = false;
-            else                plexRingingOut = false;
+            else                shimmerRingingOut = false;
         }
         lastSpaceOn = spaceOn;
     }
@@ -1973,17 +2158,17 @@ void R3WRKAudioProcessor::applySpaceSlot(juce::AudioBuffer<float>& buffer, int n
         if (reverbSelected)
             applyReverb(buffer, numCh, numSamples, freshPlayPass);
         else
-            applyPlexiphon(buffer, numCh, numSamples, freshPlayPass);
+            applyShimmer(buffer, numCh, numSamples, freshPlayPass);
     }
 
-    if (reverbRingingOut || plexRingingOut)
+    if (reverbRingingOut || shimmerRingingOut)
     {
         const float wetPeak = reverbRingingOut ? applyReverb(buffer, numCh, numSamples, false, true)
-                                               : applyPlexiphon(buffer, numCh, numSamples, false, true);
+                                               : applyShimmer(buffer, numCh, numSamples, false, true);
         ringOutSamplesLeft -= numSamples;
         ringOutSilentSamples = wetPeak > 0.0005f ? 0 : ringOutSilentSamples + numSamples;
         if (ringOutSilentSamples > (int) (currentSampleRate * 2.0) || ringOutSamplesLeft <= 0)
-            reverbRingingOut = plexRingingOut = false;
+            reverbRingingOut = shimmerRingingOut = false;
     }
 }
 
@@ -2029,7 +2214,7 @@ float R3WRKAudioProcessor::applyMimeophon(juce::AudioBuffer<float>& buffer, int 
     const double skew    = smoothedMimeoSkew.skip(numSamples);
     const double mix     = smoothedMimeoMix.skip(numSamples);
 
-    const bool engaged = document.mimeoEnabled.load(std::memory_order_relaxed) && mix > 0.001;
+    const bool engaged = (document.mimeoEnabled.load(std::memory_order_relaxed) || tailOnly) && mix > 0.001;   // tailOnly: also a deselected model ringing out
 
     if (engaged && ! lastMimeoEngaged)
         mimeoDsp.reset();
@@ -2577,6 +2762,16 @@ void R3WRKAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     out.writeBool(document.fxSlotChorus.load());
     out.writeBool(document.spaceOn.load());             // R3WW+
     out.writeBool(document.filterOn.load());            // R3WX+
+    out.writeBool(document.delayOn.load());             // R3WY+ (mimeoEnabled/plexEnabled are now the delay slot's selector)
+    out.writeBool(document.shimmerEnabled.load());
+    out.writeDouble(document.shimmerSize.load());
+    out.writeDouble(document.shimmerDecay.load());
+    out.writeDouble(document.shimmerTone.load());
+    out.writeDouble(document.shimmerAmount.load());
+    out.writeBool(document.shimmerFifth.load());
+    out.writeDouble(document.shimmerMovement.load());
+    out.writeDouble(document.shimmerWidth.load());
+    out.writeDouble(document.shimmerMix.load());        // (shimmerFreeze is session-only)
 
     auto& buf = document.getBuffer();
     for (int ch = 0; ch < buf.getNumChannels(); ++ch)
@@ -2592,12 +2787,14 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     juce::MemoryInputStream in(data, (size_t) sizeInBytes, false);
     const int magic = in.readInt();
-    if (magic != kStateMagic && magic != kStateMagicR3WW && magic != kStateMagicR3WV && magic != kStateMagicR3WU && magic != kStateMagicR3WT &&magic != kStateMagicR3WS && magic != kStateMagicR3WR && magic != kStateMagicR3WQ && magic != kStateMagicR3WP && magic != kStateMagicR3WO && magic != kStateMagicR3WN && magic != kStateMagicR3WM && magic != kStateMagicR3WL && magic != kStateMagicR3WK && magic != kStateMagicR3WJ && magic != kStateMagicR3WI && magic != kStateMagicR3WH && magic != kStateMagicR3WG && magic != kStateMagicR3WF && magic != kStateMagicR3WE && magic != kStateMagicR3WD
+    if (magic != kStateMagic && magic != kStateMagicR3WX && magic != kStateMagicR3WW && magic != kStateMagicR3WV && magic != kStateMagicR3WU && magic != kStateMagicR3WT &&magic != kStateMagicR3WS && magic != kStateMagicR3WR && magic != kStateMagicR3WQ && magic != kStateMagicR3WP && magic != kStateMagicR3WO && magic != kStateMagicR3WN && magic != kStateMagicR3WM && magic != kStateMagicR3WL && magic != kStateMagicR3WK && magic != kStateMagicR3WJ && magic != kStateMagicR3WI && magic != kStateMagicR3WH && magic != kStateMagicR3WG && magic != kStateMagicR3WF && magic != kStateMagicR3WE && magic != kStateMagicR3WD
         && magic != kStateMagicR3WC && magic != kStateMagicR3WB && magic != kStateMagicR3WA
         && magic != kStateMagicR3W9 && magic != kStateMagicR3W8 && magic != kStateMagicR3W7
         && magic != kStateMagicR3W6 && magic != kStateMagicR3W5)
         return;
-    // R3WX: adds the filter on/off (filterOn) after spaceOn; older projects load it on. R3WW: adds the RVB/PLX on/off pill (spaceOn) after the chorus slot; older projects load it on. R3WV: the CHORUS block becomes enabled + DEL/DEP/SPD/MIX/FB/WID/LP/INP + slot (MnM FX-CHORUS clone). R3WU: adds CHORUS (enabled/mode/metal/mix/rate/width/hiss/ring, retired Juno-style) + the RTRG/CHO slot switch after RTRG. R3WT: adds RTRG after Monitor DRY/FX. R3WS: adds Monitor DRY/FX after Plexiphon Couple/Skew. R3WR: adds Plexiphon Couple/Skew after Overdub. R3WQ: adds Overdub level/feedback/monitor after Dirt. R3WP: adds Dirt drive/rate/bits after Mimeophon Ping-Pong. R3WO: adds Mimeophon Ping-Pong after Skew. R3WN: adds Mimeophon Skew after the other
+    // R3WY: adds delayOn + SHM (enabled, size, decay, tone, amount, fifth, movement, width, mix)
+    // after filterOn, and re-means mimeoEnabled/plexEnabled as the delay slot's selector (older
+    // projects are migrated below). R3WX: adds the filter on/off (filterOn) after spaceOn; older projects load it on. R3WW: adds the RVB/PLX on/off pill (spaceOn) after the chorus slot; older projects load it on. R3WV: the CHORUS block becomes enabled + DEL/DEP/SPD/MIX/FB/WID/LP/INP + slot (MnM FX-CHORUS clone). R3WU: adds CHORUS (enabled/mode/metal/mix/rate/width/hiss/ring, retired Juno-style) + the RTRG/CHO slot switch after RTRG. R3WT: adds RTRG after Monitor DRY/FX. R3WS: adds Monitor DRY/FX after Plexiphon Couple/Skew. R3WR: adds Plexiphon Couple/Skew after Overdub. R3WQ: adds Overdub level/feedback/monitor after Dirt. R3WP: adds Dirt drive/rate/bits after Mimeophon Ping-Pong. R3WO: adds Mimeophon Ping-Pong after Skew. R3WN: adds Mimeophon Skew after the other
     // Mimeophon params. R3WM: adds the Mimeophon
     // params after the Plexiphon params. R3WL: adds the Plexiphon
     // params after reverb Width. R3WK: adds reverb Width after Pre-
@@ -2612,7 +2809,8 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     // MnM model). R3W8..R3WA: the old OT-style Base/Width filter with a single resonance
     // (+ later Drive, + later 12/24 slope). R3W6/R3W7: the even older mode/cutoff filter.
     // R3W5: none.
-    const bool hasFilterOn         = (magic == kStateMagic);                                  // R3WX
+    const bool hasShimmer          = (magic == kStateMagic);                                  // R3WY
+    const bool hasFilterOn         = (hasShimmer || magic == kStateMagicR3WX);                // R3WX+
     const bool hasSpaceOn          = (hasFilterOn || magic == kStateMagicR3WW);               // R3WW+
     const bool hasMnmChorus        = (hasSpaceOn || magic == kStateMagicR3WV);                // R3WV+
     const bool hasJunoChorus       = (magic == kStateMagicR3WU);                              // R3WU only
@@ -2851,6 +3049,35 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     // Before R3WX the filter had no on/off -- load it on, so an older project sounds the same.
     const bool filterOnLoaded = hasFilterOn ? in.readBool() : true;
 
+    // R3WY: PLX moved from the space slot (RVB/PLX) to the delay slot (DLY/PLX), and SHM took its
+    // place. Before it, mxEnabled was Mimeophon's own on/off and pxEnabled meant "PLX selected in
+    // the space slot". Migrate: PLX keeps sounding from the delay slot if the delay wasn't also on
+    // (one slot can't hold both); the space slot goes back to RVB, off if PLX had been the one in it.
+    bool delayOnLoaded = false, shimmerSelected = false;
+    double shSize = 0.5, shDecay = 0.5483, shTone = 0.5, shAmount = 0.15, shMovement = 0.3, shWidth = 1.0, shMix = 0.0;
+    bool shFifth = false;
+    bool spaceOnFinal = spaceOnLoaded;
+    if (hasShimmer)
+    {
+        delayOnLoaded = in.readBool();
+        shimmerSelected = in.readBool();
+        shSize = in.readDouble();  shDecay = in.readDouble();  shTone = in.readDouble();  shAmount = in.readDouble();
+        shFifth = in.readBool();
+        shMovement = in.readDouble();  shWidth = in.readDouble();  shMix = in.readDouble();
+        rvEnabled = ! shimmerSelected;
+    }
+    else
+    {
+        const bool oldPlexInSpace = pxEnabled;
+        const bool oldMimeoOn = mxEnabled;
+        const bool plexToDelay = oldPlexInSpace && ! oldMimeoOn;
+        pxEnabled = plexToDelay;
+        mxEnabled = ! plexToDelay;
+        delayOnLoaded = plexToDelay ? spaceOnLoaded : oldMimeoOn;
+        if (oldPlexInSpace) spaceOnFinal = false;
+        rvEnabled = true;
+    }
+
     if (numCh <= 0 || numCh > kMaxStateChannels || numSamples < 0 || numSamples > 0x7fffffff)
         return;
 
@@ -2953,8 +3180,19 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     document.chorusLp.store(juce::jlimit(0.0, 1.0, choLp));
     document.chorusInp.store(juce::jlimit(0.0, 1.0, choInp));
     document.fxSlotChorus.store(choSlot);
-    document.spaceOn.store(spaceOnLoaded);
+    document.spaceOn.store(spaceOnFinal);
     document.filterOn.store(filterOnLoaded);
+    document.delayOn.store(delayOnLoaded);
+    document.shimmerEnabled.store(! rvEnabled);
+    document.shimmerSize.store(juce::jlimit(0.0, 1.0, shSize));
+    document.shimmerDecay.store(juce::jlimit(0.0, 1.0, shDecay));
+    document.shimmerTone.store(juce::jlimit(0.0, 1.0, shTone));
+    document.shimmerAmount.store(juce::jlimit(0.0, 1.0, shAmount));
+    document.shimmerFifth.store(shFifth);
+    document.shimmerMovement.store(juce::jlimit(0.0, 1.0, shMovement));
+    document.shimmerWidth.store(juce::jlimit(0.0, 1.0, shWidth));
+    document.shimmerMix.store(juce::jlimit(0.0, 1.0, shMix));
+    document.shimmerFreeze.store(false);
 
     document.setSourceFilePath(sourceFilePath);   // "" on an older state blob -- header shows "Untitled"
 

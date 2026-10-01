@@ -100,18 +100,18 @@ namespace
 
 PlexiphonPanel::PlexiphonPanel(AudioDocument& doc) : document(doc)
 {
-    // RVB and PLX share one drawer slot. The pill is the slot's on/off (AudioDocument::spaceOn --
-    // off lets the tail ring out); the small tab above it switches the slot to RVB, like the
-    // RTRG/CHO slot's.
-    enablePill.onClick = [this] { document.spaceOn.store(! document.spaceOn.load()); };
+    // DLY and PLX share the delay slot (since R3WY; PLX used to share RVB's). The pill is the
+    // slot's on/off (AudioDocument::delayOn -- off lets the tail ring out); the small tab above it
+    // switches the slot to DLY, like the RTRG/CHO slot's.
+    enablePill.onClick = [this] { document.delayOn.store(! document.delayOn.load()); };
     enablePill.setTooltip("PLX: click to switch on/off (off lets the tail ring out)");
     addAndMakeVisible(enablePill);
 
-    slotTab.target = "RVB";
-    slotTab.setTooltip("Switch this slot to RVB");
+    slotTab.target = "DLY";
+    slotTab.setTooltip("Switch this slot to DLY");
     slotTab.onClick = [this]
     {
-        document.reverbEnabled.store(true);
+        document.mimeoEnabled.store(true);
         document.plexEnabled.store(false);
     };
     addAndMakeVisible(slotTab);
@@ -157,7 +157,7 @@ void PlexiphonPanel::timerCallback()
 {
     // Low-rate re-sync so an external change (a state/project load, undo) is reflected even
     // though this panel stays on screen continuously -- ReverbPanel/LfoPanel do the same.
-    const bool on = document.spaceOn.load();   // lit = the slot is on
+    const bool on = document.delayOn.load();   // lit = the slot is on
     if (on != enablePill.on) { enablePill.on = on; enablePill.repaint(); }
 
     auto resync = [](juce::Slider& s, double docVal)

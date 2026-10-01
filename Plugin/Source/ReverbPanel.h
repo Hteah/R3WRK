@@ -55,7 +55,7 @@ private:
         void mouseEnter(const juce::MouseEvent&) override { hovered = true; repaint(); }
         void mouseExit(const juce::MouseEvent&) override { hovered = false; repaint(); }
     };
-    EnablePill enablePill;       // the RVB/PLX slot's on/off (AudioDocument::spaceOn)
+    EnablePill enablePill;       // the RVB/SHM slot's on/off (AudioDocument::spaceOn)
     SlotSwitchTab slotTab;       // above the pill: switches the slot to the other model
 
     struct Knob

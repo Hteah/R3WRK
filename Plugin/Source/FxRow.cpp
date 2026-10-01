@@ -3,7 +3,7 @@
 
 FxRow::FxRow(AudioDocument& doc, bool standalone)
     : lfoPanel(doc, standalone),
-      retrigPanel(doc, standalone), chorusPanel(doc), mimeoPanel(doc), plexPanel(doc), reverbPanel(doc),
+      retrigPanel(doc, standalone), chorusPanel(doc), mimeoPanel(doc), plexPanel(doc), reverbPanel(doc), shimmerPanel(doc),
       document(doc), showGain(standalone)
 {
     // lfoPanel is SHELVED (see class comment) -- constructed and fully wired (its
@@ -13,14 +13,16 @@ FxRow::FxRow(AudioDocument& doc, bool standalone)
     // Panels reach further left than they draw (room for a moved toggle -- see packSlot), so
     // their empty area mustn't eat clicks meant for the slot underneath.
     for (juce::Component* p : { (juce::Component*) &retrigPanel, (juce::Component*) &chorusPanel, (juce::Component*) &mimeoPanel,
-                                (juce::Component*) &plexPanel, (juce::Component*) &reverbPanel })
+                                (juce::Component*) &plexPanel, (juce::Component*) &reverbPanel, (juce::Component*) &shimmerPanel })
         p->setInterceptsMouseClicks(false, true);
     addChildComponent(retrigPanel);   // syncModSlot() shows RTRG or CHO
     addChildComponent(chorusPanel);
     syncModSlot();
-    addAndMakeVisible(mimeoPanel);
-    addChildComponent(plexPanel);     // syncSpaceSlot() shows whichever model is selected
-    addChildComponent(reverbPanel);
+    addChildComponent(mimeoPanel);    // syncDelaySlot() shows DLY or PLX
+    addChildComponent(plexPanel);
+    syncDelaySlot();
+    addChildComponent(reverbPanel);   // syncSpaceSlot() shows RVB or SHM
+    addChildComponent(shimmerPanel);
     syncSpaceSlot();
 
     if (showGain)
@@ -68,10 +70,19 @@ FxRow::~FxRow()
 void FxRow::syncSpaceSlot()
 {
     const bool reverb = document.reverbEnabled.load();
-    if (reverbPanel.isVisible() == reverb && plexPanel.isVisible() != reverb) return;
+    if (reverbPanel.isVisible() == reverb && shimmerPanel.isVisible() != reverb) return;
     reverbPanel.setVisible(reverb);
-    plexPanel.setVisible(! reverb);
+    shimmerPanel.setVisible(! reverb);
     resized();   // the two toggles' texts differ in width -> the rest re-packs
+}
+
+void FxRow::syncDelaySlot()
+{
+    const bool mimeo = document.mimeoEnabled.load();
+    if (mimeoPanel.isVisible() == mimeo && plexPanel.isVisible() != mimeo) return;
+    mimeoPanel.setVisible(mimeo);
+    plexPanel.setVisible(! mimeo);
+    resized();
 }
 
 void FxRow::syncModSlot()
@@ -86,6 +97,7 @@ void FxRow::syncModSlot()
 void FxRow::timerCallback()
 {
     syncSpaceSlot();
+    syncDelaySlot();
     syncModSlot();
     if (! showGain || gainKnob.isMouseButtonDown())
         return;
@@ -117,7 +129,7 @@ void FxRow::applyTheme()
 
 void FxRow::resized()
 {
-    // One row, three slots: RTRG-or-CHO | Delay (Mimeophon) | Reverb-or-Plexiphon, then Gain. (LFO is shelved -- see
+    // One row, three slots: RTRG-or-CHO | DLY-or-PLX | RVB-or-SHM, then Gain. (LFO is shelved -- see
     // class comment -- and takes no space here.) All three are real Components, each packed to
     // its own CONTENT width -- not stretched across an equal third of the row -- same "packed
     // from the left, sized to content" idiom each panel already uses for its own internal
@@ -139,11 +151,13 @@ void FxRow::resized()
     const int afterChorus = packSlot(chorusPanel, x, "fx.mod");
     x = chorusPanel.isVisible() ? afterChorus : afterRetrig;
 
-    x = packSlot(mimeoPanel, x, "fx.dly");
+    const int afterMimeo = packSlot(mimeoPanel, x, "fx.dly");   // DLY or PLX
+    const int afterPlex  = packSlot(plexPanel, x, "fx.dly");
+    x = mimeoPanel.isVisible() ? afterMimeo : afterPlex;
 
-    const int afterPlex   = packSlot(plexPanel, x, "fx.space");   // RVB or PLX
-    const int afterReverb = packSlot(reverbPanel, x, "fx.space");
-    x = reverbPanel.isVisible() ? afterReverb : afterPlex;
+    const int afterShimmer = packSlot(shimmerPanel, x, "fx.space");   // RVB or SHM
+    const int afterReverb  = packSlot(reverbPanel, x, "fx.space");
+    x = reverbPanel.isVisible() ? afterReverb : afterShimmer;
 
     if (showGain)
     {
@@ -261,9 +275,10 @@ void FxRow::getLayoutItems(juce::Array<LayoutItem>& items)
     };
     if (retrigPanel.isVisible()) slot("fx.mod", retrigPanel, retrigPanel.leftSlack, retrigPanel.getToggleParts(), retrigPanel.getToggleText());
     else                         slot("fx.mod", chorusPanel, chorusPanel.leftSlack, chorusPanel.getToggleParts(), chorusPanel.getToggleText());
-    slot("fx.dly", mimeoPanel, mimeoPanel.leftSlack, mimeoPanel.getToggleParts(), mimeoPanel.getToggleText());
-    if (plexPanel.isVisible()) slot("fx.space", plexPanel, plexPanel.leftSlack, plexPanel.getToggleParts(), plexPanel.getToggleText());
-    else                       slot("fx.space", reverbPanel, reverbPanel.leftSlack, reverbPanel.getToggleParts(), reverbPanel.getToggleText());
+    if (plexPanel.isVisible()) slot("fx.dly", plexPanel, plexPanel.leftSlack, plexPanel.getToggleParts(), plexPanel.getToggleText());
+    else                       slot("fx.dly", mimeoPanel, mimeoPanel.leftSlack, mimeoPanel.getToggleParts(), mimeoPanel.getToggleText());
+    if (shimmerPanel.isVisible()) slot("fx.space", shimmerPanel, shimmerPanel.leftSlack, shimmerPanel.getToggleParts(), shimmerPanel.getToggleText());
+    else                          slot("fx.space", reverbPanel, reverbPanel.leftSlack, reverbPanel.getToggleParts(), reverbPanel.getToggleText());
     items.addArray(toggles);
     if (showGain && ! gainKnob.getBounds().isEmpty())
         items.add({ "fx.gain", this, gainCaption.getBounds().getUnion(gainKnob.getBounds()),

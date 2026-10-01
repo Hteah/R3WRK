@@ -4,6 +4,7 @@
 #include <JuceHeader.h>
 #include <cstring>
 #include <complex>
+#include <map>
 #include "../Source/AudioDocument.h"
 #include "../Source/EditActions.h"
 #include "../Source/TimeStretchEngine.h"
@@ -11,6 +12,7 @@
 #include "../Source/ReverbEngine.h"
 #include "../Source/PlexiphonEngine.h"
 #include "../Source/MimeophonEngine.h"
+#include "../Source/ShimmerEngine.h"
 #include "../Source/Theme.h"
 #include "../Source/DragScanRender.h"
 #include "../Source/LofiStretch.h"
@@ -65,8 +67,121 @@ namespace
     }
 }
 
-int main()
+// `R3WRKSmokeTest --render-shm <outDir> [inDir]`: renders SHM (100% wet) over the S-4 comparison
+// grid -- built-in click / 100 ms pink burst / C3 saw (+ any 48 kHz WAVs in inDir, e.g. a drum
+// loop) x Size 25/50/100% x Decay 25/50/100%, a Tone sweep, and Freeze on a sustained saw --
+// as 48 kHz / 24-bit WAVs named like the S-4 recordings (see ~/Documents/Claude/SHMTUNE).
+namespace
 {
+    int renderShimmerGrid(const juce::File& outDir, const juce::File& inDir)
+    {
+        constexpr double fs = 48000.0;
+        outDir.createDirectory();
+        auto writeWav = [&](const juce::String& name, const juce::AudioBuffer<float>& buf)
+        {
+            const auto f = outDir.getChildFile(name + ".wav");
+            f.deleteFile();
+            std::unique_ptr<juce::OutputStream> stream(f.createOutputStream());
+            juce::WavAudioFormat wav;
+            auto w = wav.createWriterFor(stream, juce::AudioFormatWriterOptions{}.withSampleRate(fs)
+                                                     .withNumChannels(2).withBitsPerSample(24));
+            if (w == nullptr) { std::cout << "  can't write " << f.getFullPathName() << std::endl; return; }
+            w->writeFromAudioSampleBuffer(buf, 0, buf.getNumSamples());
+            std::cout << "  " << f.getFileName() << std::endl;
+        };
+
+        // Test signals (stereo, mono content), each padded later by the tail length.
+        std::map<juce::String, juce::AudioBuffer<float>> signals;
+        {
+            juce::AudioBuffer<float> b(2, (int) (fs * 0.2)); b.clear();
+            b.setSample(0, (int) (fs * 0.1), 1.0f); b.setSample(1, (int) (fs * 0.1), 1.0f);
+            signals["click"] = b;
+        }
+        {
+            juce::AudioBuffer<float> b(2, (int) (fs * 0.2)); b.clear();
+            juce::Random rng(7);
+            double b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;   // Paul Kellet's pink filter
+            const int n = (int) (fs * 0.1), edge = (int) (fs * 0.002);
+            for (int i = 0; i < n; ++i)
+            {
+                const double w = rng.nextDouble() * 2.0 - 1.0;
+                b0 = 0.99886 * b0 + w * 0.0555179; b1 = 0.99332 * b1 + w * 0.0750759;
+                b2 = 0.96900 * b2 + w * 0.1538520; b3 = 0.86650 * b3 + w * 0.3104856;
+                b4 = 0.55000 * b4 + w * 0.5329522; b5 = -0.7616 * b5 - w * 0.0168980;
+                const double pink = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11;
+                b6 = w * 0.115926;
+                const double env = juce::jmin(1.0, (double) i / edge, (double) (n - 1 - i) / edge);
+                b.setSample(0, i, (float) (0.5 * pink * env)); b.setSample(1, i, (float) (0.5 * pink * env));
+            }
+            signals["pink"] = b;
+        }
+        auto saw = [&](double seconds)
+        {
+            juce::AudioBuffer<float> b(2, (int) (fs * seconds));
+            const double f0 = 130.8128, edge = fs * 0.005;
+            for (int i = 0; i < b.getNumSamples(); ++i)
+            {
+                double v = 0.0;   // band-limited (additive) saw
+                for (int h = 1; h * f0 < 18000.0; ++h)
+                    v += std::sin(juce::MathConstants<double>::twoPi * h * f0 * i / fs) / h;
+                const double env = juce::jmin(1.0, i / edge, (b.getNumSamples() - 1 - i) / edge);
+                b.setSample(0, i, (float) (0.2 * v * env)); b.setSample(1, i, (float) (0.2 * v * env));
+            }
+            return b;
+        };
+        signals["sawC3"] = saw(2.0);
+        if (inDir.isDirectory())
+            for (const auto& f : inDir.findChildFiles(juce::File::findFiles, false, "*.wav"))
+            {
+                juce::AudioFormatManager fm; fm.registerBasicFormats();
+                std::unique_ptr<juce::AudioFormatReader> r(fm.createReaderFor(f));
+                if (r == nullptr || std::abs(r->sampleRate - fs) > 1.0) { std::cout << "  skip (not 48 kHz): " << f.getFileName() << std::endl; continue; }
+                juce::AudioBuffer<float> b(2, (int) r->lengthInSamples);
+                r->read(&b, 0, b.getNumSamples(), 0, true, true);
+                signals[f.getFileNameWithoutExtension()] = b;
+            }
+
+        auto render = [&](const juce::AudioBuffer<float>& in, double size01, double decay01, double tone01,
+                          double freezeAt, double extraSeconds)
+        {
+            r3wrk::ShimmerReverb e; e.prepare(fs);
+            e.setParams(size01, decay01, tone01, 0.0, false, 0.3, 1.0, 1.0, false);
+            e.snapSmoothers();
+            const int n = in.getNumSamples() + (int) (fs * extraSeconds);
+            juce::AudioBuffer<float> out(2, n);
+            for (int i = 0; i < n; ++i)
+            {
+                if (freezeAt > 0.0 && i % 64 == 0)
+                    e.setParams(size01, decay01, tone01, 0.0, false, 0.3, 1.0, 1.0, i >= (int) (fs * freezeAt));
+                const float l = i < in.getNumSamples() ? in.getSample(0, i) : 0.0f;
+                const float r = i < in.getNumSamples() ? in.getSample(1, i) : 0.0f;
+                float ol, orr; e.processSample(l, r, ol, orr);
+                out.setSample(0, i, ol); out.setSample(1, i, orr);
+            }
+            return out;
+        };
+        auto pctName = [](double v) { return juce::String(juce::roundToInt(v * 100.0)); };
+
+        std::cout << "Rendering SHM comparison grid to " << outDir.getFullPathName() << std::endl;
+        for (auto& [name, sig] : signals)
+            for (double size : { 0.25, 0.5, 1.0 })
+                for (double decay : { 0.25, 0.5, 1.0 })
+                {
+                    const double tail = juce::jmin(30.0, r3wrk::ShimmerReverb::decaySeconds(decay) * 1.5 + 1.0);
+                    writeWav(name + "_s" + pctName(size) + "_d" + pctName(decay), render(sig, size, decay, 0.5, 0.0, tail));
+                }
+        for (int tone : { -100, -50, 50, 100 })
+            writeWav("pink_s50_d50_t" + juce::String(tone), render(signals["pink"], 0.5, 0.5, 0.5 + tone / 200.0, 0.0, 8.0));
+        writeWav("freeze_sawC3_s50_d50", render(saw(4.0), 0.5, 0.5, 0.5, 2.0, 6.0));
+        return 0;
+    }
+}
+
+int main(int argc, char** argv)
+{
+    if (argc >= 3 && juce::String(argv[1]) == "--render-shm")
+        return renderShimmerGrid(juce::File::getCurrentWorkingDirectory().getChildFile(argv[2]),
+                                 argc >= 4 ? juce::File::getCurrentWorkingDirectory().getChildFile(argv[3]) : juce::File());
     const double sr = 44100.0;
     std::cout << "=== R3WRK core engine smoke test ===" << std::endl;
 
@@ -109,7 +224,8 @@ int main()
             &doc.mimeoColor, &doc.mimeoHalo, &doc.mimeoMix, &doc.mimeoSkew, &doc.reverbSize, &doc.reverbAbsorb,
             &doc.reverbDecay, &doc.reverbTilt, &doc.reverbMix, &doc.reverbPredelay, &doc.reverbWidth,
             &doc.plexLevel, &doc.plexPlexus, &doc.plexSize, &doc.plexDiffuse, &doc.plexDecay, &doc.plexColor,
-            &doc.plexMix, &doc.plexCouple, &doc.plexSkew };
+            &doc.plexMix, &doc.plexCouple, &doc.plexSkew, &doc.shimmerSize, &doc.shimmerDecay,
+            &doc.shimmerTone, &doc.shimmerAmount, &doc.shimmerMovement, &doc.shimmerWidth, &doc.shimmerMix };
         std::atomic<double>* fs[] = { &fresh.playbackSpeed, &fresh.playbackPitch, &fresh.playbackStretch,
             &fresh.dirtDrive, &fresh.dirtRate, &fresh.dirtBits, &fresh.filterBase, &fresh.filterWidth, &fresh.filterHpQ,
             &fresh.filterLpQ, &fresh.playbackGainDb, &fresh.overdubLevel, &fresh.overdubFeedback, &fresh.rtrgTime,
@@ -118,14 +234,18 @@ int main()
             &fresh.mimeoColor, &fresh.mimeoHalo, &fresh.mimeoMix, &fresh.mimeoSkew, &fresh.reverbSize, &fresh.reverbAbsorb,
             &fresh.reverbDecay, &fresh.reverbTilt, &fresh.reverbMix, &fresh.reverbPredelay, &fresh.reverbWidth,
             &fresh.plexLevel, &fresh.plexPlexus, &fresh.plexSize, &fresh.plexDiffuse, &fresh.plexDecay, &fresh.plexColor,
-            &fresh.plexMix, &fresh.plexCouple, &fresh.plexSkew };
+            &fresh.plexMix, &fresh.plexCouple, &fresh.plexSkew, &fresh.shimmerSize, &fresh.shimmerDecay,
+            &fresh.shimmerTone, &fresh.shimmerAmount, &fresh.shimmerMovement, &fresh.shimmerWidth, &fresh.shimmerMix };
         for (auto* d : ds) d->store(0.123);
         std::atomic<bool>* bs[] = { &doc.filterOn, &doc.overdubMonitor, &doc.overdubMonitorFx, &doc.autoRecordEnabled,
-            &doc.rtrgLatched, &doc.chorusEnabled, &doc.mimeoEnabled, &doc.mimeoPingPong, &doc.spaceOn };
+            &doc.rtrgLatched, &doc.chorusEnabled, &doc.delayOn, &doc.mimeoPingPong, &doc.spaceOn,
+            &doc.shimmerFifth, &doc.shimmerFreeze };
         std::atomic<bool>* fb[] = { &fresh.filterOn, &fresh.overdubMonitor, &fresh.overdubMonitorFx, &fresh.autoRecordEnabled,
-            &fresh.rtrgLatched, &fresh.chorusEnabled, &fresh.mimeoEnabled, &fresh.mimeoPingPong, &fresh.spaceOn };
+            &fresh.rtrgLatched, &fresh.chorusEnabled, &fresh.delayOn, &fresh.mimeoPingPong, &fresh.spaceOn,
+            &fresh.shimmerFifth, &fresh.shimmerFreeze };
         for (auto* b : bs) b->store(! b->load());
         doc.fxSlotChorus = true;  doc.reverbEnabled = false;  doc.filterModel = 1;
+        doc.shimmerEnabled = true;  doc.mimeoEnabled = false;  doc.plexEnabled = true;
 
         doc.resetSoundToDefaults();
 
@@ -134,7 +254,8 @@ int main()
         for (size_t i = 0; i < std::size(bs); ++i) if (bs[i]->load() != fb[i]->load()) ++badB;
         check(badD == 0, "reset: every knob matches a fresh document (" + juce::String(badD) + " off)");
         check(badB == 0, "reset: every on/off matches a fresh document (" + juce::String(badB) + " off)");
-        check(doc.fxSlotChorus.load() && ! doc.reverbEnabled.load() && doc.filterModel.load() == 1,
+        check(doc.fxSlotChorus.load() && ! doc.reverbEnabled.load() && doc.filterModel.load() == 1
+                  && doc.shimmerEnabled.load() && ! doc.mimeoEnabled.load() && doc.plexEnabled.load(),
               "reset: keeps the slot / model choices");
     }
 
@@ -2661,6 +2782,288 @@ int main()
         check(Palette::fromString("futureKey:ff00ff00;accent:ff112233").accent == juce::Colour(0xff112233)
                   && Palette::fromString("futureKey:ff00ff00") == Palette(),
               "unknown keys are ignored, missing keys keep Midnight defaults");
+    }
+
+    // --- SHM clean shimmer reverb (r3wrk::ShimmerReverb) ---------------------------------------
+    {
+        std::cout << "\n-- SHM shimmer reverb (ShimmerReverb) --" << std::endl;
+        using r3wrk::ShimmerReverb;
+        juce::Random rng(1234);
+
+        // Stress: max Decay + max Shimmer + full Movement, Size/Tone swept, Interval and Freeze
+        // toggled, full-scale white noise -- at three sample rates -- then the input stops (Freeze
+        // off). Finite throughout, and the tail must then decay (no runaway). (A 20 s tank fed
+        // continuous full-scale noise legitimately builds up to the +-4 safety clamp, so peak
+        // level isn't the instability signal -- what happens after the input stops is.)
+        for (double fs : { 44100.0, 48000.0, 96000.0 })
+        {
+            ShimmerReverb e; e.prepare(fs);
+            const int nIn = (int) (fs * (fs == 48000.0 ? 30.0 : 10.0));
+            const int n = nIn + (int) (fs * 10.0);
+            const int block = 256;
+            bool nonFinite = false; float peak = 0.0f;
+            double eAfter1 = 0.0, eAfter10 = 0.0;
+            for (int i = 0; i < n; ++i)
+            {
+                if (i % block == 0)
+                {
+                    const double t = i / fs;
+                    const double tri = std::abs(std::fmod(t, 2.0) - 1.0);   // 0..1..0 every 2 s
+                    const bool freeze = i < nIn && ((int) (t / 5.0)) % 2 == 1;
+                    e.setParams(i < nIn ? tri : 0.5, 1.0, i < nIn ? std::fmod(t * 0.37, 1.0) : 0.5, 1.0,
+                                ((int) t) % 3 == 0, 1.0, 1.0, 1.0, freeze);
+                }
+                const bool feeding = i < nIn;
+                const float a = feeding ? rng.nextFloat() * 2.0f - 1.0f : 0.0f;
+                const float b = feeding ? rng.nextFloat() * 2.0f - 1.0f : 0.0f;
+                float l, r; e.processSample(a, b, l, r);
+                if (! std::isfinite(l) || ! std::isfinite(r)) nonFinite = true;
+                peak = juce::jmax(peak, std::abs(l), std::abs(r));
+                const double p = (double) l * l + (double) r * r;
+                if (i >= nIn + (int) fs && i < nIn + (int) (fs * 2.0)) eAfter1 += p;
+                if (i >= n - (int) fs) eAfter10 += p;
+            }
+            const double drop = 10.0 * std::log10((eAfter10 + 1e-30) / (eAfter1 + 1e-30));
+            std::cout << "  stress @" << fs << ": peak " << peak << ", tail 1 s -> 10 s after input: " << drop << " dB" << std::endl;
+            check(! nonFinite, "SHM stays finite under max Decay/Shimmer/Movement + sweeps @ " + juce::String(fs));
+            check(peak <= 4.0f, "SHM peak stays within the safety clamp under stress @ " + juce::String(fs));
+            check(drop < -20.0, "SHM tail decays once the input stops after the stress (no runaway) @ " + juce::String(fs));
+        }
+
+        // RT60 via Schroeder backward integration of the impulse response (-5..-25 dB fit, x3).
+        auto measureRt60 = [](double decay01, double fs)
+        {
+            ShimmerReverb e; e.prepare(fs);
+            e.setParams(0.5, decay01, 0.5, 0.0, false, 0.0, 1.0, 1.0, false);
+            e.snapSmoothers();
+            const int n = (int) (fs * (ShimmerReverb::decaySeconds(decay01) * 1.5 + 1.0));
+            std::vector<double> en((size_t) n);
+            for (int i = 0; i < n; ++i)
+            {
+                float l, r; const float in = i == 0 ? 1.0f : 0.0f;
+                e.processSample(in, in, l, r);
+                en[(size_t) i] = (double) l * l + (double) r * r;
+            }
+            std::vector<double> sch((size_t) n);
+            double acc = 0.0;
+            for (int i = n - 1; i >= 0; --i) { acc += en[(size_t) i]; sch[(size_t) i] = acc; }
+            const double total = sch[0];
+            int i5 = -1, i25 = -1;
+            for (int i = 0; i < n; ++i)
+            {
+                const double db = 10.0 * std::log10(sch[(size_t) i] / total + 1e-30);
+                if (i5 < 0 && db <= -5.0) i5 = i;
+                if (i25 < 0 && db <= -25.0) { i25 = i; break; }
+            }
+            return (i5 < 0 || i25 < 0) ? -1.0 : 3.0 * (i25 - i5) / fs;
+        };
+        for (double secs : { 1.0, 3.0, 8.0, 20.0 })
+        {
+            const double d01 = std::log(secs / 0.3) / std::log(20.0 / 0.3);
+            const double rt = measureRt60(d01, 48000.0);
+            std::cout << "  RT60 target " << secs << " s -> measured " << rt << " s" << std::endl;
+            check(rt > 0.8 * secs && rt < 1.2 * secs, "SHM measured RT60 within 20% of Decay = " + juce::String(secs) + " s");
+        }
+        {
+            const double rt = measureRt60(std::log(3.0 / 0.3) / std::log(20.0 / 0.3), 96000.0);
+            check(rt > 2.4 && rt < 3.6, "SHM RT60 holds at 96 kHz (3 s -> " + juce::String(rt, 2) + " s)");
+        }
+        // RT60 must not depend on Size (the gains follow the line lengths).
+        auto measureRt60AtSize = [&](double size01)
+        {
+            ShimmerReverb e; e.prepare(48000.0);
+            e.setParams(size01, std::log(3.0 / 0.3) / std::log(20.0 / 0.3), 0.5, 0.0, false, 0.0, 1.0, 1.0, false);
+            e.snapSmoothers();
+            const int n = 48000 * 6;
+            std::vector<double> sch((size_t) n);
+            for (int i = 0; i < n; ++i)
+            {
+                float l, r; const float in = i == 0 ? 1.0f : 0.0f;
+                e.processSample(in, in, l, r);
+                sch[(size_t) i] = (double) l * l + (double) r * r;
+            }
+            for (int i = n - 2; i >= 0; --i) sch[(size_t) i] += sch[(size_t) i + 1];
+            int i5 = -1, i25 = -1;
+            for (int i = 0; i < n && i25 < 0; ++i)
+            {
+                const double db = 10.0 * std::log10(sch[(size_t) i] / sch[0] + 1e-30);
+                if (i5 < 0 && db <= -5.0) i5 = i;
+                if (db <= -25.0) i25 = i;
+            }
+            return 3.0 * (i25 - i5) / 48000.0;
+        };
+        for (double size01 : { 0.0, 0.25, 1.0 })
+        {
+            const double rt = measureRt60AtSize(size01);
+            check(rt > 2.4 && rt < 3.6, "SHM RT60 independent of Size (Size " + juce::String(size01, 2) + " -> " + juce::String(rt, 2) + " s)");
+        }
+
+        // Decay 20 s holds at the smallest Size too (the shortest lines are where a loop-gain cap
+        // would bite first).
+        {
+            ShimmerReverb e; e.prepare(48000.0);
+            e.setParams(0.0, 1.0, 0.5, 0.15, false, 0.3, 1.0, 1.0, false);
+            e.snapSmoothers();
+            double e1 = 0.0, e2 = 0.0;
+            for (int i = 0; i < 48000 * 7; ++i)
+            {
+                float l, r; const float in = i == 0 ? 1.0f : 0.0f;
+                e.processSample(in, in, l, r);
+                const double p = (double) l * l + (double) r * r;
+                if (i >= 48000 && i < 48000 * 2) e1 += p;
+                if (i >= 48000 * 6) e2 += p;
+            }
+            const double dbPerS = 10.0 * std::log10(e2 / e1) / 5.0;
+            std::cout << "  Decay 20 s @ Size 0, Shimmer 15%: " << dbPerS << " dB/s (ideal -3)" << std::endl;
+            check(dbPerS > -3.6 && dbPerS < -2.4, "SHM Decay 20 s holds at Size 0 with Shimmer on (" + juce::String(dbPerS, 2) + " dB/s)");
+        }
+
+        // Octave stacks never climb, even at max Decay + max Shimmer: 880 stays under 440 and
+        // 1760 under 880 in the tail (440 Hz burst again).
+        {
+            const double fs = 48000.0;
+            ShimmerReverb e; e.prepare(fs);
+            e.setParams(0.5, 1.0, 0.5, 1.0, false, 0.0, 1.0, 1.0, false);
+            e.snapSmoothers();
+            std::vector<float> tail;
+            for (int i = 0; i < (int) (fs * 8.0); ++i)
+            {
+                const double t = i / fs;
+                const double env = t >= 1.0 ? 0.0 : juce::jmin(1.0, t / 0.05, (1.0 - t) / 0.05);
+                const float in = (float) (0.3 * env * std::sin(juce::MathConstants<double>::twoPi * 440.0 * t));
+                float l, r; e.processSample(in, in, l, r);
+                if (i >= (int) (fs * 6.0) && i < (int) (fs * 8.0)) tail.push_back(0.5f * (l + r));
+            }
+            auto g = [&](double hz)
+            {
+                const double w = juce::MathConstants<double>::twoPi * hz / fs, c = 2.0 * std::cos(w);
+                double s1 = 0.0, s2 = 0.0;
+                for (size_t j = 0; j < tail.size(); ++j)
+                {
+                    const double win = 0.5 - 0.5 * std::cos(juce::MathConstants<double>::twoPi * (double) j / (double) tail.size());
+                    const double s0 = tail[j] * win + c * s1 - s2; s2 = s1; s1 = s0;
+                }
+                return 10.0 * std::log10(s1 * s1 + s2 * s2 - c * s1 * s2 + 1e-30);
+            };
+            const double f1 = g(440.0), f2 = g(880.0), f4 = g(1760.0);
+            std::cout << "  max Decay+Shimmer tail 6-8 s: 440 " << f1 << " dB, 880 " << f2 << ", 1760 " << f4 << std::endl;
+            check(f2 < f1 && f4 < f2, "SHM octave stacks die out (each quieter than the last) at max Decay + Shimmer");
+        }
+
+        // Tone swept into the highpass side and back to centre: nothing left behind in the loop
+        // (an earlier version froze the HP state at centre and built up DC every pass).
+        {
+            const double fs = 48000.0;
+            ShimmerReverb e; e.prepare(fs);
+            double sumOut = 0.0, eA = 0.0, eB = 0.0;
+            for (int i = 0; i < (int) (fs * 16.0); ++i)
+            {
+                if (i % 256 == 0)
+                    e.setParams(0.5, 1.0, i < (int) (fs * 4.0) ? 0.5 + 0.5 * std::sin(i / fs * 3.0) : 0.5,
+                                0.0, false, 0.0, 1.0, 1.0, false);
+                const float a = i < (int) (fs * 4.0) ? rng.nextFloat() - 0.5f : 0.0f;
+                float l, r; e.processSample(a, a, l, r);
+                if (i >= (int) (fs * 5.0) && i < (int) (fs * 6.0)) eA += (double) l * l;
+                if (i >= (int) (fs * 15.0)) { eB += (double) l * l; sumOut += l; }
+            }
+            const double drop = 10.0 * std::log10((eB + 1e-30) / (eA + 1e-30));
+            const double dc = sumOut / fs;
+            std::cout << "  Tone swept then centred: tail 5 s -> 15 s " << drop << " dB, DC at 15 s " << dc << std::endl;
+            check(drop < -20.0 && std::abs(dc) < 0.01, "SHM Tone back at centre leaves no DC building in the loop");
+        }
+
+        // Mix 0 = the dry signal, bit for bit.
+        {
+            ShimmerReverb e; e.prepare(48000.0);
+            e.setParams(0.5, 0.7, 0.3, 0.6, false, 0.5, 1.0, 0.0, false);
+            bool exact = true;
+            for (int i = 0; i < 48000; ++i)
+            {
+                const float a = rng.nextFloat() - 0.5f, b = rng.nextFloat() - 0.5f;
+                float l, r; e.processSample(a, b, l, r);
+                if (l != a || r != b) exact = false;
+            }
+            check(exact, "SHM at Mix 0 passes the dry signal bit-exact");
+        }
+
+        // Freeze: 1 s of noise (shimmer up), then Freeze with the input still running -- the held
+        // tail's energy stays within 1 dB from 2-3 s to 11-12 s, and nothing new gets in.
+        {
+            const double fs = 48000.0;
+            ShimmerReverb e; e.prepare(fs);
+            double eEarly = 0.0, eLate = 0.0;
+            for (int i = 0; i < (int) (fs * 12.0); ++i)
+            {
+                if (i % 256 == 0) e.setParams(0.5, 0.55, 0.5, 0.6, false, 0.3, 1.0, 1.0, i >= (int) fs);
+                const float a = (rng.nextFloat() - 0.5f) * 0.5f;
+                float l, r; e.processSample(a, a, l, r);
+                const double p = (double) l * l + (double) r * r;
+                if (i >= (int) (fs * 2.0) && i < (int) (fs * 3.0)) eEarly += p;
+                if (i >= (int) (fs * 11.0)) eLate += p;
+            }
+            const double db = 10.0 * std::log10(eLate / juce::jmax(1e-30, eEarly));
+            std::cout << "  freeze energy change 2-3 s -> 11-12 s: " << db << " dB" << std::endl;
+            check(eEarly > 1e-6 && std::abs(db) < 1.0, "SHM Freeze holds the tail within 1 dB over ~9 s");
+        }
+
+        // Shimmer 0 adds no octave; Shimmer up adds a clearly audible (but quiet) one. 440 Hz
+        // burst with smooth 50 ms edges (no click to smear broadband energy into the tail),
+        // Movement 0, measure 880 vs 440 in a Hann-windowed tail with a Goertzel.
+        auto octaveRatioDb = [&](double shimmer01)
+        {
+            const double fs = 48000.0;
+            ShimmerReverb e; e.prepare(fs);
+            e.setParams(0.5, 0.6, 0.5, shimmer01, false, 0.0, 1.0, 1.0, false);
+            e.snapSmoothers();
+            auto goertzel = [fs](const std::vector<float>& x, double hz)
+            {
+                const double w = juce::MathConstants<double>::twoPi * hz / fs, c = 2.0 * std::cos(w);
+                double s1 = 0.0, s2 = 0.0;
+                const size_t len = x.size();
+                for (size_t j = 0; j < len; ++j)
+                {
+                    const double win = 0.5 - 0.5 * std::cos(juce::MathConstants<double>::twoPi * (double) j / (double) len);
+                    const double s0 = x[j] * win + c * s1 - s2; s2 = s1; s1 = s0;
+                }
+                return s1 * s1 + s2 * s2 - c * s1 * s2;
+            };
+            std::vector<float> tail;
+            for (int i = 0; i < (int) (fs * 3.0); ++i)
+            {
+                const double t = i / fs;
+                const double env = t >= 1.0 ? 0.0 : juce::jmin(1.0, t / 0.05, (1.0 - t) / 0.05);
+                const float in = (float) (0.3 * env * std::sin(juce::MathConstants<double>::twoPi * 440.0 * t));
+                float l, r; e.processSample(in, in, l, r);
+                if (i >= (int) (fs * 1.5) && i < (int) (fs * 2.5)) tail.push_back(0.5f * (l + r));
+            }
+            return 10.0 * std::log10((goertzel(tail, 880.0) + 1e-30) / (goertzel(tail, 440.0) + 1e-30));
+        };
+        const double oct0 = octaveRatioDb(0.0), octMid = octaveRatioDb(0.15), octMax = octaveRatioDb(1.0);
+        std::cout << "  880/440 Hz in the tail: shimmer 0 -> " << oct0 << " dB, 15% -> " << octMid
+                  << " dB, max -> " << octMax << " dB" << std::endl;
+        check(oct0 < -60.0, "SHM at Shimmer 0 adds no octave");
+        check(octMax > oct0 + 20.0, "SHM Shimmer adds an octave layer");
+        check(octMax < 0.0, "SHM octave stays under the fundamental even at max Shimmer");
+
+        // Level (info) + CPU: 10 s at 96 kHz.
+        {
+            const double fs = 96000.0;
+            ShimmerReverb e; e.prepare(fs);
+            e.setParams(0.5, 0.55, 0.5, 0.15, false, 0.3, 1.0, 1.0, false);
+            const int n = (int) (fs * 10.0);
+            double inE = 0.0, outE = 0.0;
+            const auto t0 = juce::Time::getMillisecondCounterHiRes();
+            for (int i = 0; i < n; ++i)
+            {
+                const float a = rng.nextFloat() - 0.5f, b = rng.nextFloat() - 0.5f;
+                float l, r; e.processSample(a, b, l, r);
+                if (i > n / 2) { inE += a * a + b * b; outE += (double) l * l + (double) r * r; }
+            }
+            const double ms = juce::Time::getMillisecondCounterHiRes() - t0;
+            std::cout << "  wet/dry level on noise (defaults): " << 10.0 * std::log10(outE / inE) << " dB" << std::endl;
+            std::cout << "  CPU: 10 s @96 kHz in " << ms << " ms (" << (ms / 100.0) << "% of one core)" << std::endl;
+            check(ms < 2500.0, "SHM runs well under realtime at 96 kHz (< 25% of a core)");
+        }
     }
 
     std::cout << "===========================================" << std::endl;

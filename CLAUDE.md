@@ -8,9 +8,10 @@ R3WRK is an Edison-style pop-out audio recorder/editor, built as a JUCE plugin (
 Standalone app): waveform + spectrogram views, record/play/loop, cut/copy/paste/trim/delete/undo,
 normalize/gain/fade/reverse/silence, lofi time/pitch effects (tape Speed, Paulstretch Stretch, granular+grit Pitch), export-selection
 to WAV, a live knob row (tape Speed/Pitch/Stretch, a Monomachine-modelled multimode filter,
-Start/End selection), and an FX drawer (a Monomachine-modelled CHORUS / RTRG buffer retrig sharing one slot, Mimeophon delay, Plexiphon reverb-FDN, Erbe-Verb reverb;
-LFO built but currently shelved/hidden). Builds and runs on macOS only (Apple Silicon, Xcode, JUCE
-8.0.15).
+Start/End selection), and an FX drawer (three shared slots: Monomachine-modelled CHORUS / RTRG buffer retrig,
+Mimeophon delay / Plexiphon FDN, Erbe-Verb reverb / SHM clean shimmer reverb; LFO built but currently
+shelved/hidden). Builds and runs on macOS only (universal binary: Apple Silicon + Intel, Xcode, JUCE
+8.0.15 -- `CMAKE_OSX_ARCHITECTURES` defaults to `arm64;x86_64` in `Plugin/CMakeLists.txt`).
 
 ## Build / test / install
 
@@ -91,7 +92,7 @@ selection is packed into one `std::atomic<uint64_t>` (`selPacked`) rather than t
 
 Plays the document region (selection, else loop points, else whole clip) from the buffer under a
 try-lock (loop reading: `Source/RegionGather.h`), then runs a fixed chain:
-**NaN safety net → Dirt → filter → Chorus → RTRG → Mimeophon → Reverb/Plexiphon → Gain (master volume,
+**NaN safety net → Dirt → filter → Chorus → RTRG → delay slot (Mimeophon/Plexiphon) → space slot (Reverb/SHM) → Gain (master volume,
 last) → NaN safety net → capture-output**. Notes on the newer pieces:
 - **Dirt** (`DirtStage.h`, popup `DirtPanel.h`): Octatrack-style drive → sample-rate → bits, ahead
   of the filter. Defaults are a bit-exact bypass.
@@ -122,10 +123,22 @@ last) → NaN safety net → capture-output**. Notes on the newer pieces:
   recording; DRY (after Gain) or FX (mixed in before Dirt). Never restored ON from state.
 - **Plexiphon v2** (`PlexiphonEngine.h`): two 8-line FDNs (L/R), PLEXUS = active lines + echo→reverb
   line lengths + identity→Hadamard; COUPLE/SKEW stereo; cut-only COLOR.
-- **RVB / PLX slot** (`applySpaceSlot()`): Erbe-Verb and Plexiphon share the last drawer slot.
-  The `SlotSwitchTab` above the pill picks the model (`reverbEnabled` / `plexEnabled`); the pill is
+- **RVB / SHM slot** (`applySpaceSlot()`): Erbe-Verb and SHM share the last drawer slot.
+  The `SlotSwitchTab` above the pill picks the model (`reverbEnabled` / `shimmerEnabled`); the pill is
   the slot's on/off (`AudioDocument::spaceOn`, state R3WW; older projects load it on). Switching
   off or switching models lets the tail ring out instead of cutting it. MIX 0 is just silent.
+- **DLY / PLX slot** (`applyDelaySlot()`, a deliberate copy of `applySpaceSlot()`): Mimeophon and
+  Plexiphon share the middle slot, same scheme -- `mimeoEnabled` / `plexEnabled` are the SELECTOR
+  (not on/off) and `AudioDocument::delayOn` is the pill. PLX moved here from the space slot in R3WY;
+  `setStateInformation` migrates older projects (PLX goes to the delay slot if DLY wasn't also on;
+  the space slot goes back to RVB).
+- **SHM** (`ShimmerEngine.h`, panel `ShimmerPanel`): clean shimmer reverb voiced after the S-4's
+  Vast (behaviour, not code -- design doc "r3wrk -- Clean Shimmer Reverb Plan", 2026-09-29). 8-line
+  Householder FDN, allpass-interpolated modulated reads (FIR/cubic interpolation drained RT60 and
+  Freeze -- measured), Tone transparent at centre, shimmer feed capped by stack power (not the doc's
+  `g + shimmer <= 0.98`, which capped Decay at ~8-12 s). `shimmerFreeze` is session-only. Tuning
+  against the S-4: companion `~/Documents/Claude/SHMTUNE` (`analyze.py`) + the smoke test binary's
+  `--render-shm <outDir> [inDir]` mode, which renders the same test-signal grid.
 - **Filter on/off**: the MNM/OT badge in the knob row is the filter's on/off (`AudioDocument::filterOn`,
   state R3WX; older projects load it on); off glides the filter open and bypasses, knobs untouched.
   The `SlotSwitchTab` above it switches the model (`filterModel`).
@@ -155,7 +168,7 @@ Modelled from real measurements of the Elektron Monomachine's filter (companion 
 has no `juce_dsp` dependency) — `r3wrk::MultiModeFilter` chains one HP + one LP 2-pole stage, each
 self-bypassing when open.
 
-### FX drawer (Mimeophon / Plexiphon / Reverb / LFO)
+### FX drawer (Mimeophon / Plexiphon / Reverb / SHM / LFO)
 
 `FxRow` (`Source/FxRow.h/.cpp`) is a collapsible row under the main `KnobRow`, toggled by
 `PluginEditor::toggleFxDrawer()` (grows the window rather than displacing anything). Each effect is
@@ -167,6 +180,8 @@ codebase's established style:
   shared FDN-family primitives (`DelayLine`, `AllpassDiffuser`, `OnePoleLowpass`, `Biquad` shelf
   helpers, `chebyshevPerturb`) that `MimeophonEngine.h`/`PlexiphonEngine.h` both `#include` and
   reuse rather than duplicating.
+- `Source/ShimmerEngine.h` — SHM, 8-line Householder FDN + dual-head octave/fifth shifter in the
+  loop (see the SHM bullet above).
 - `Source/PlexiphonEngine.h` — 8-line FDN with a continuously-morphing feedback matrix (sparse
   permutation ↔ dense Hadamard), Make Noise Plexiphon.
 - `Source/MimeophonEngine.h` — stereo tape/BBD-style echo, Make Noise/Tom Erbe Mimeophon (Zone,
@@ -181,7 +196,7 @@ codebase's established style:
   `PluginProcessor::numActiveLfoSlots()`'s `kLfoFeatureShelved` switch — re-enabling is a two-line
   change (see `FxRow.h`'s own comment), not a rewrite.
 
-Each engine has a matching compact `*Panel` (`RetrigPanel`, `ChorusPanel`, `MimeophonPanel`,
+Each engine has a matching compact `*Panel` (`RetrigPanel`, `ChorusPanel`, `MimeophonPanel`, `ShimmerPanel`,
 `PlexiphonPanel`, `ReverbPanel`) that lives directly in the drawer (toggle + 2 primary knobs + a
 "more" dot), plus a `juce::CallOutBox` popup (the "more" dot; double-click pins it) exposing the full
 parameter set.

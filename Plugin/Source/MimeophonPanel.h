@@ -4,6 +4,7 @@
 #include "AudioDocument.h"
 #include "Theme.h"
 #include "R3WRKLookAndFeel.h"
+#include "SlotSwitchTab.h"
 
 /**
     The DELAY cell of the FX drawer, replacing its old placeholder Section: a real Mimeophon
@@ -28,7 +29,7 @@ public:
     // Edit Layout (FxRow): room left of the toggle column it can be nudged into, and the parts
     // that move as "the toggle".
     int leftSlack = 0;
-    juce::Array<juce::Component*> getToggleParts() { return { &enablePill }; }
+    juce::Array<juce::Component*> getToggleParts() { return { &enablePill, &slotTab }; }
     juce::String getToggleText() const { return "DLY"; }
 
 private:
@@ -42,7 +43,7 @@ private:
 
     // Small enable pill -- same visual language as ReverbPanel/PlexiphonPanel/LfoPanel's own
     // (each place draws its own rather than sharing one component -- established precedent).
-    struct EnablePill : juce::Component
+    struct EnablePill : juce::Component, public juce::SettableTooltipClient
     {
         juce::Colour fill, ink, border;
         bool on = false, hovered = false;
@@ -52,7 +53,8 @@ private:
         void mouseEnter(const juce::MouseEvent&) override { hovered = true; repaint(); }
         void mouseExit(const juce::MouseEvent&) override { hovered = false; repaint(); }
     };
-    EnablePill enablePill;
+    EnablePill enablePill;       // the DLY/PLX slot's on/off (AudioDocument::delayOn)
+    SlotSwitchTab slotTab;       // above the pill: switches the slot to PLX
 
     struct Knob
     {

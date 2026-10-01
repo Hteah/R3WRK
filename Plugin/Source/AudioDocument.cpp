@@ -183,7 +183,7 @@ void AudioDocument::resetSoundToDefaults()
     chorusDel = 64 / 127.0;  chorusDep = 64 / 127.0;  chorusSpd = 64 / 127.0;  chorusMix = 1.0;
     chorusFb = 0.0;  chorusWid = 0.0;  chorusLp = 1.0;  chorusInp = 64 / 127.0;
 
-    mimeoEnabled = false;
+    delayOn = false;
     mimeoZone = 3.0 / 7.0;  mimeoRate = 0.5;  mimeoRepeats = 0.3;  mimeoColor = 0.5;  mimeoHalo = 0.0;
     mimeoMix = 0.0;  mimeoSkew = 0.5;  mimeoPingPong = false;
 
@@ -192,6 +192,9 @@ void AudioDocument::resetSoundToDefaults()
     reverbPredelay = 0.1;  reverbWidth = 0.5;
     plexLevel = 0.5;  plexPlexus = 0.5;  plexSize = 0.5;  plexDiffuse = 0.5;  plexDecay = 0.5;
     plexColor = 0.5;  plexMix = 0.0;  plexCouple = 0.5;  plexSkew = 0.5;
+    shimmerSize = 0.5;  shimmerDecay = 0.5483;  shimmerTone = 0.5;  shimmerAmount = 0.15;
+    shimmerFifth = false;  shimmerMovement = 0.3;  shimmerWidth = 1.0;  shimmerMix = 0.0;
+    shimmerFreeze = false;
 }
 
 bool AudioDocument::playbackKnobsEngaged() const

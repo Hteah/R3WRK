@@ -375,12 +375,14 @@ public:
     // phase doesn't add yet). All 0..1 except reverbPredelay, which maps to 7-500ms the same way
     // FxRow reads out any other ms-ranged knob. Mix defaults to 0 (inert until touched), same
     // non-destructive-default convention as the filter/gain knobs above.
-    // RVB and PLX share one drawer slot ("space"): reverbEnabled / plexEnabled mean "this model
-    // is the selected one" -- exactly one is true (RVB by default), switched by the small tab
-    // above the pill. spaceOn is the slot's on/off pill (off by default; projects from before it
-    // existed load with it on). Switching off, or switching models, lets the tail ring out.
+    // RVB and SHM share one drawer slot ("space"): reverbEnabled / shimmerEnabled mean "this
+    // model is the selected one" -- exactly one is true (RVB by default), switched by the small
+    // tab above the pill. spaceOn is the slot's on/off pill (off by default; projects from before
+    // it existed load with it on). Switching off, or switching models, lets the tail ring out.
+    // (Before R3WY this slot was RVB / PLX; PLX now shares the delay slot -- see delayOn.)
     std::atomic<bool>   spaceOn        { false };
     std::atomic<bool>   reverbEnabled  { true };
+    std::atomic<bool>   shimmerEnabled { false };
     std::atomic<double> reverbSize     { 0.5 };
     std::atomic<double> reverbAbsorb   { 0.5 };
     std::atomic<double> reverbDecay    { 0.5 };
@@ -392,6 +394,21 @@ public:
     // default convention as the others -- adding this knob doesn't retroactively change the
     // sound of an existing saved session until it's actually turned.
     std::atomic<double> reverbWidth { 0.5 };
+
+    // SHM -- clean shimmer reverb (r3wrk::ShimmerReverb, ShimmerEngine.h), the space slot's other
+    // model. All 0..1 knob positions (mappings live in ShimmerReverb: Decay 0.3-20 s exponential,
+    // Size 0.3-1.5x, Tone 0.5 = centre, Shimmer = 0..0.25 loop gain); shimmerFifth switches the
+    // interval from +12 to +7 semitones. shimmerFreeze is session-only (never saved -- a project
+    // shouldn't open holding a frozen, input-muted tank). Mix defaults to 0 like every effect.
+    std::atomic<double> shimmerSize     { 0.5 };
+    std::atomic<double> shimmerDecay    { 0.5483 };   // ~3 s
+    std::atomic<double> shimmerTone     { 0.5 };
+    std::atomic<double> shimmerAmount   { 0.15 };
+    std::atomic<bool>   shimmerFifth    { false };
+    std::atomic<double> shimmerMovement { 0.3 };
+    std::atomic<double> shimmerWidth    { 1.0 };
+    std::atomic<double> shimmerMix      { 0.0 };
+    std::atomic<bool>   shimmerFreeze   { false };
 
     //==============================================================================
     // RTRG (r3wrk::RetrigEngine, RetrigEngine.h) -- Octatrack-style buffer retrig, first in the FX
@@ -428,8 +445,11 @@ public:
     // Plexiphon (r3wrk::PlexiphonEngine, PlexiphonEngine.h) -- phase 1: mono core network
     // (Level/Mix/Plexus/Size/Diffuse/Decay/Color), live monitoring only, same not-yet-baked-
     // into-Save/Export caveat as the reverb above. Couple/Skew/Send are deferred to a later
-    // pass. All 0..1. Mix defaults to 0, enabled defaults to false -- same non-destructive-
-    // default convention as every other effect here.
+    // pass. All 0..1. Mix defaults to 0 -- same non-destructive-default convention as every
+    // other effect here. Since R3WY PLX shares the delay slot with DLY: plexEnabled /
+    // mimeoEnabled mean "this model is the selected one" (exactly one true, DLY by default) and
+    // delayOn is the slot's on/off pill -- same scheme as the space slot above.
+    std::atomic<bool>   delayOn     { false };
     std::atomic<bool>   plexEnabled { false };
     std::atomic<double> plexLevel   { 0.5 };
     std::atomic<double> plexPlexus  { 0.5 };
@@ -450,9 +470,10 @@ public:
     // Export caveat as the reverb/Plexiphon above. Flip/Freeze/Skew/uRate/Tempo sync are
     // deferred to a later pass. All 0..1 -- Zone stays a 0..1 knob that snaps to one of 8
     // positions at the DSP layer (see mimeoZoneRangeMs()), same convention as every other
-    // knob here rather than a raw discrete int. Mix defaults to 0, enabled defaults to false --
-    // same non-destructive-default convention as every other effect here.
-    std::atomic<bool>   mimeoEnabled { false };
+    // knob here rather than a raw discrete int. Mix defaults to 0 -- same non-destructive-default
+    // convention as every other effect here. mimeoEnabled = DLY is the delay slot's selected
+    // model (see delayOn above); before R3WY it was Mimeophon's own on/off.
+    std::atomic<bool>   mimeoEnabled { true };
     std::atomic<double> mimeoZone    { 3.0 / 7.0 };   // a middle-ish zone by default
     std::atomic<double> mimeoRate    { 0.5 };
     std::atomic<double> mimeoRepeats { 0.3 };

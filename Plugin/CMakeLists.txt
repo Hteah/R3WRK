@@ -1,4 +1,11 @@
 cmake_minimum_required(VERSION 3.22)
+
+# Universal binary (Apple Silicon + Intel) for the Mac beta. Before project() so it applies to
+# every target; an explicit -DCMAKE_OSX_ARCHITECTURES=... still wins.
+if(APPLE AND NOT CMAKE_OSX_ARCHITECTURES)
+    set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Target architectures" FORCE)
+endif()
+
 project(R3WRK VERSION 0.1.0)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -77,6 +84,7 @@ target_sources(R3WRK
         Source/FxRow.cpp
         Source/LfoPanel.cpp
         Source/ReverbPanel.cpp
+        Source/ShimmerPanel.cpp
         Source/PlexiphonPanel.cpp
         Source/MimeophonPanel.cpp
         Source/R3WRKLookAndFeel.cpp
