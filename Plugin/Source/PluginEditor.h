@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
 #include "HeaderBar.h"
+#include "TitleMark.h"
 #include "EditorToolbar.h"
 #include "StandaloneMenuBar.h"
 #include "KnobRow.h"
@@ -108,6 +109,7 @@ private:
     bool floatStateApplied = false;
 
     HeaderBar header;
+    TitleMark titleMark;   // "R3WRK" wordmark, top middle of the header row
     WaveformDisplay waveformDisplay;
     SpectrogramDisplay spectrogramDisplay;
     TimeRuler timeRuler;

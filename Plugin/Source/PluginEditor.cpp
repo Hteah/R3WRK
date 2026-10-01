@@ -27,6 +27,7 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
     juce::LookAndFeel::setDefaultLookAndFeel(&fontLnf);
 
     addAndMakeVisible(header);
+    addAndMakeVisible(titleMark);
     addAndMakeVisible(waveformDisplay);
     addChildComponent(spectrogramDisplay); // built but not currently reachable from the UI
     addAndMakeVisible(timeRuler);
@@ -381,6 +382,13 @@ void R3WRKAudioProcessorEditor::resized()
         }
         followButton.setBounds(headerRow.removeFromRight(36).withSizeKeepingCentre(34, 30));
         headerRow.removeFromRight(6);
+
+        // Wordmark centred on the whole window (not on what's left of the row), same height
+        // as the row. The file name + readout stop short of it so they never run underneath.
+        const int titleW = titleMark.getPreferredWidth();
+        titleMark.setBounds(juce::Rectangle<int>(titleW, headerRow.getHeight())
+                                .withCentre({ getLocalBounds().getCentreX(), headerRow.getCentreY() }));
+        headerRow.setRight(juce::jmin(headerRow.getRight(), titleMark.getX() - 16));
         header.setBounds(headerRow);
     }
     area.removeFromTop(6);
