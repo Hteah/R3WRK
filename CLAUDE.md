@@ -281,7 +281,9 @@ pulsing `iconRecDot` (the toolbar timer sets each button's "pulse" property).
 **Plugin window**: the VST/AU gets JUCE's corner resize grip (Ableton only resizes plugins through
 it), drawn invisible (`R3WRKLookAndFeel::drawCornerResizer` is empty -- the user rejected the grip
 lines), and reopens at the size it was last closed at (`OutputSettings::pluginEditorSize`). The
-DAW's own title bar can't be removed from a plugin.
+DAW's own title bar can't be removed from a plugin. Minimum size: 680 x `kMinEditorHeight` (330,
+drawer closed) -- everything but the waveform/spectrogram is a fixed 207 px, so only the waveform
+shrinks (~120 px at the minimum; was 473 / ~266 px, too tall for a laptop).
 
 **Title**: `TitleMark.h`, the vector "R3WRK" wordmark, centred on the window in the header row
 (13px cap, `Palette::text`, ignores clicks). `PluginEditor::resized()` stops `HeaderBar` 16px short of it.

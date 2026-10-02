@@ -71,6 +71,11 @@ private:
     // Upper resize limit -- deliberately far past any real display (5K is 2560x1440 points,
     // 6K 3008x1692, super-ultrawides 5120 wide) so the Standalone can zoom / go full screen on
     // anything. It used to be 2200x1300, which stopped a 27" window well short of the edges.
+    // Smallest editor height with the FX drawer closed (+ kFxRowHeight + kFxRowGap when open, +
+    // kMacTrafficLightInset in the Standalone). Everything but the waveform/spectrogram is a fixed
+    // 207 px, so this leaves the waveform ~120 px (~60 per stereo lane) -- shorter for laptop
+    // screens (was 473, a ~266 px waveform).
+    static constexpr int kMinEditorHeight = 330;
     static constexpr int kMaxEditorWidth  = 8192;
     static constexpr int kMaxEditorHeight = 4608;
     const bool standaloneWindow;

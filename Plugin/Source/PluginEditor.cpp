@@ -144,10 +144,10 @@ R3WRKAudioProcessorEditor::R3WRKAudioProcessorEditor(R3WRKAudioProcessor& p)
     // invisible (R3WRKLookAndFeel::drawCornerResizer draws nothing); hovering the bottom-right
     // corner shows the resize cursor.
     setResizable(true, ! standaloneWindow);
-    setResizeLimits(680, 473 + topInset, kMaxEditorWidth, kMaxEditorHeight + topInset);
+    setResizeLimits(680, kMinEditorHeight + topInset, kMaxEditorWidth, kMaxEditorHeight + topInset);
     // Plugin: reopen at the size the user last left it (drawer-closed height, see the dtor).
     const auto saved = standaloneWindow ? juce::Point<int>() : outputSettings->pluginEditorSize();
-    if (saved.x >= 680 && saved.y >= 473)
+    if (saved.x >= 680 && saved.y >= kMinEditorHeight)
         setSize(juce::jmin(saved.x, kMaxEditorWidth), juce::jmin(saved.y, kMaxEditorHeight));
     else
         setSize(1000, 639 + topInset);
@@ -225,7 +225,7 @@ void R3WRKAudioProcessorEditor::toggleFxDrawer()
     // that post-clamp height doubled it -- the window came back 87px taller after every
     // open/close cycle.
     const int targetHeight = getHeight() + (fxDrawerOpen ? delta : -delta);
-    setResizeLimits(680, (fxDrawerOpen ? 473 + delta : 473) + topInset,
+    setResizeLimits(680, (fxDrawerOpen ? kMinEditorHeight + delta : kMinEditorHeight) + topInset,
                      kMaxEditorWidth, (fxDrawerOpen ? kMaxEditorHeight + delta : kMaxEditorHeight) + topInset);
     setSize(getWidth(), targetHeight);
 }
