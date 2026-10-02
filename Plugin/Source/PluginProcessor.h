@@ -299,6 +299,7 @@ private:
     bool   dragScanActive = false;
     // The region moves from [startA, endA) to [startB, endB) across the block (the previous and
     // current slewed edges), so the loop-crossfade envelope never steps at a block boundary.
+    bool dragIsRemote = false;   // this drag is a host LFO / automation / CC move (dragscan::renderBlock's `remote`)
     void renderDragScan(juce::AudioBuffer<float>& out, int numCh, int numSamples,
                         const juce::AudioBuffer<float>& docBuf, double& pos,
                         double startA, double endA, double startB, double endB,

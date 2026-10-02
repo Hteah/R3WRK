@@ -84,10 +84,19 @@ namespace dragscan
     // case (an edge passing the playhead) both sides of the relocation sit at an edge, where the
     // loop fade is ~0, so it's as silent as the ordinary loop seam; the crossfade covers the rest
     // (a big jump from mid-loop).
+    //
+    // `remote` (a host LFO / automation / MIDI CC moving the loop, which can sweep the window at
+    // hundreds of x): measured against an edge racing past at that speed, the loop's edge fade
+    // collapses from 1 to 0 in a few samples -- a hard cut, not a fade (traced: most of the
+    // clicks of an LFO on Position over a long file). So in remote mode there's no edge fade;
+    // instead the loop seam is a 10 ms relocation crossfade too (the old side plays on past the
+    // end, like a tape-loop splice), and a relocation never starts while the previous one's
+    // crossfade is still running (that dropped the half-faded voice). Hand drags pass false and
+    // keep the tuned behaviour exactly.
     inline bool renderBlock(juce::AudioBuffer<float>& out, int numCh, int numSamples,
                             const juce::AudioBuffer<float>& docBuf, double& pos, Relocation& rel,
                             double startA, double endA, double startB, double endB,
-                            bool loop, double maxFadeLen, double sampleRate)
+                            bool loop, double maxFadeLen, double sampleRate, bool remote = false)
     {
         const int64_t docLen = docBuf.getNumSamples();
         const int srcChans = docBuf.getNumChannels();
@@ -111,9 +120,11 @@ namespace dragscan
             const double regionStart = startA + (startB - startA) * a;
             const double regionEnd   = juce::jmax(regionStart + 1.0, endA + (endB - endA) * a);
             const double regionLen   = regionEnd - regionStart;
-            const double fadeLen = loop ? juce::jmin(maxFadeLen, regionLen * 0.5) : 0.0;
+            const double fadeLen = (loop && ! remote) ? juce::jmin(maxFadeLen, regionLen * 0.5) : 0.0;
 
-            if (pos < regionStart || pos >= regionEnd)
+            if (remote && ! loop && pos >= regionEnd)
+                return false;
+            if ((pos < regionStart || pos >= regionEnd) && ! (remote && rel.remaining > 0))
             {
                 double target;
                 if (loop)                    target = wrapInto(pos, regionStart, regionLen);
@@ -147,7 +158,19 @@ namespace dragscan
             }
 
             pos += 1.0;
-            if (pos >= regionEnd)
+            if (remote)
+            {
+                // Seam: crossfade from the old side playing on past the end (unless a relocation
+                // is still fading -- then the check above relocates once it's done).
+                if (loop && pos >= regionEnd && pos - 1.0 < regionEnd && rel.remaining == 0)
+                {
+                    rel.oldPos = pos;
+                    rel.oldGain = 1.0f;
+                    rel.len = rel.remaining = relocLen;
+                    pos -= regionLen;
+                }
+            }
+            else if (pos >= regionEnd)
             {
                 if (! loop)
                     return false;

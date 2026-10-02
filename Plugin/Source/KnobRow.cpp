@@ -152,23 +152,10 @@ KnobRow::KnobRow(AudioDocument& doc)
         };
         k.apply = [this](double v)
         {
-            const int64_t n = juce::jmax((int64_t) 1, document.getNumSamples());
-            const int64_t length = document.getSelectionEnd() - document.getSelectionStart();
-            int64_t s = fracToSample(v, n);
-            int64_t e;
-            if (length > 0)
-            {
-                // Slide the whole window: End follows Start, keeping the selection length,
-                // until it can't slide any further. Only the End knob changes the length.
-                s = juce::jlimit((int64_t) 0, juce::jmax((int64_t) 0, n - length), s);
-                e = s + length;
-            }
-            else
-            {
-                e = fracToSample(endKnob->slider.getValue(), n);
-                if (e <= s) e = juce::jmin(n, s + 1);
-            }
-            document.setSelection(s, e);
+            // Start moves only the start edge; End stays put (sliding the whole selection is
+            // Position's job -- MIDI CC 28 / the host parameter). Same as AudioDocument::
+            // setSelectionStartEdge, which MIDI and the host use.
+            document.setSelectionStartEdge(v);
             if (onSelectionKnobMoved) onSelectionKnobMoved();
         };
         k.pull = [this]

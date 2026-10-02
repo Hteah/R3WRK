@@ -204,6 +204,7 @@ namespace
 
 int main(int argc, char** argv)
 {
+
     if (argc >= 3 && juce::String(argv[1]) == "--print-midi-chart")
         return printMidiChart(juce::File::getCurrentWorkingDirectory().getChildFile(argv[2]));
     if (argc >= 3 && juce::String(argv[1]) == "--render-shm")
@@ -3093,6 +3094,56 @@ int main(int argc, char** argv)
         }
     }
 
+
+
+    // --- Drag-scan, remote mode: an LFO / automation sweeping Position over a long file ----------
+    // (dragscan::renderBlock's `remote`.) The window races past the playhead at ~100x: the hand-
+    // drag path's edge fade collapses into a hard cut there (contrast: it must click), the remote
+    // path must not -- and it must keep following the LFO.
+    {
+        std::cout << "\n[DragScan] remote (LFO) sweep over a long file" << std::endl;
+        const double sr = 48000.0;
+        const int N = (int) (sr * 120.0);
+        juce::AudioBuffer<float> doc1(1, N);
+        for (int i = 0; i < N; ++i) doc1.setSample(0, i, 0.5f * (float) std::sin(juce::MathConstants<double>::twoPi * 110.0 * i / sr));
+        const double L = 0.08 * N;
+        auto run = [&](bool remote, double& lowestPos, double& highestPos)
+        {
+            auto targetStart = [&](double t) { return (0.5 + 0.5 * std::sin(juce::MathConstants<double>::twoPi * 0.5 * t)) * (N - L); };
+            double tgt = targetStart(0.0), ds = tgt, de = tgt + L, pos = ds, nextTick = 0.0;
+            dragscan::Relocation rel;
+            const int block = 512; const double dt = block / sr;
+            const double w = juce::MathConstants<double>::twoPi * 110.0 / sr, clean = 0.5 * w * w;
+            juce::AudioBuffer<float> out(1, block);
+            float y2 = 0, y1 = 0; int64_t n = 0; int clicks = 0;
+            lowestPos = 1e18; highestPos = -1e18;
+            for (int b = 0; b < (int) (4.0 * sr / block); ++b)
+            {
+                const double t = b * dt;
+                if (t >= nextTick) { tgt = targetStart(t); nextTick += 1.0 / 60.0; }   // the processor's 60 Hz timer
+                const double s0 = ds, e0 = de;
+                ds += (tgt - ds) * juce::jmin(1.0, 30.0 * dt);                        // processBlock's remote slew
+                de = ds + L;
+                out.clear();
+                dragscan::renderBlock(out, 1, block, doc1, pos, rel, s0, e0, ds, de, true, 0.010 * sr, sr, remote);
+                lowestPos = juce::jmin(lowestPos, pos); highestPos = juce::jmax(highestPos, pos);
+                for (int i = 0; i < block; ++i, ++n)
+                {
+                    const float y = out.getSample(0, i);
+                    if (n > 2 && std::abs(y - 2 * y1 + y2) > 20 * clean) ++clicks;
+                    y2 = y1; y1 = y;
+                }
+            }
+            return clicks;
+        };
+        double lo, hi, loOld, hiOld;
+        const int remoteClicks = run(true, lo, hi);
+        const int handClicks = run(false, loOld, hiOld);
+        std::cout << "  remote: " << remoteClicks << " clicks; hand-drag path (contrast): " << handClicks << std::endl;
+        check(handClicks > 0, "remote sweep: the hand-drag edge fade does click here (the test can see it)");
+        check(remoteClicks == 0, "remote sweep: no clicks while an LFO sweeps Position across the whole file");
+        check(lo < 0.2 * N && hi > 0.8 * N, "remote sweep: playback follows the LFO across the file");
+    }
 
     // --- MIDI CC map + dispatcher (MidiCcMap.h / MidiCcDispatcher.h) --------------------------
     {

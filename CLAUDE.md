@@ -113,9 +113,12 @@ last) → NaN safety net → capture-output**. Notes on the newer pieces:
   restart. Keep both calls when touching the chain.
 - **Drag-scan** (dragging a loop edge/knob while looping -- or a host LFO/automation or MIDI CC
   moving Start/End/Position: `AudioDocument::selectionRemoteMoving`, set by the processor's timer,
-  released 250 ms after the last move; a remote move FOLLOWS closely -- ~30 ms, up to 8x speed --
+  released 250 ms after the last move; a remote move FOLLOWS closely -- ~30 ms, no speed cap --
   instead of the hand drag's under-1x glide, else the playhead rode along and the file just
-  played through): `DragScanRender.h` -- constant 1x read,
+  played through; and renders with `renderBlock(..., remote = true)`: no edge fade against an edge
+  racing past at ~100x (that collapsed into a hard cut), the loop seam is a 10 ms relocation
+  crossfade, relocations never overlap -- SmokeTest "[DragScan] remote" has the contrast check):
+  `DragScanRender.h` -- constant 1x read,
   per-sample edges, relocation crossfades, release tail, window speed capped under the read speed
   (`maxWindowSpeed`). With Speed/Pitch/Stretch engaged it feeds the stretcher's input instead.
 - **Overdub** (`OverdubWriter.h`, popup `OverdubPanel.h`): writes input into the playing loop,
@@ -310,7 +313,7 @@ moves, ended 250 ms after it stops (an instant begin/end per change was invisibl
 `lastNotified` first so an LFO's own changes are never echoed back. Start/End park host writes
 in `pending` (the selection isn't audio-thread safe) and the timer applies them. For MIDI and host
 parameters Start / End move only their own edge and Position (CC 28) slides the whole selection;
-the on-screen Start knob keeps sliding (KnobRow). Start/End/Position are one selection, so
+the on-screen Start knob is edge-only too since 2026-10-02 (sliding is Position's job). Start/End/Position are one selection, so
 `keepOnlyTheMovedSelectionChange` reports only the one actually moved (an LFO on Position must
 not make Live think Start/End were touched). Tested 2026-10-02: Live's LFO **Map does not catch a
 knob turned inside any plugin's own window** (Valhalla neither) -- map from Live's device panel
