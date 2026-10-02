@@ -106,6 +106,16 @@ def main(json_path, pdf_path):
                   "Remembered across sessions.", note),
         Paragraph("<b>Window-only buttons:</b> Scrub, Slice, Clear, Record Desktop and Capture Output "
                   "only respond while R3WRK's window is open.", note),
+        Paragraph("Scanning and Live", head),
+        Paragraph("<b>Position (CC 28)</b> slides the looping selection through the sample and keeps "
+                  "its length: it's the one to scan with, from a controller or an LFO. It has no "
+                  "on-screen knob. To slide the loop by hand, turn the on-screen Start knob. "
+                  "<b>Start (CC 22)</b> and <b>End (CC 23)</b> only trim their own edge.", note),
+        Paragraph("<b>Ableton LFO / Macro / automation:</b> every knob above is also a Live parameter, "
+                  "with the same names (e.g. \"DLY Mix\", \"Position\"). To map one: click the LFO's Map, then "
+                  "click the parameter in R3WRK's device panel in Live. Turn on Configure and touch a "
+                  "knob in R3WRK's window once to add it to that panel. Live can't map a knob turned "
+                  "inside any plugin's own window.", note),
     ]
 
     doc = SimpleDocTemplate(pdf_path, pagesize=letter, title="R3WRK MIDI CC Chart",
