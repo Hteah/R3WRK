@@ -77,12 +77,13 @@ namespace r3wrk
         }
 
         // Message thread (the processor's timer).
-        bool applyPending()   // true if a host write was applied
+        bool applyPending()   // true if a host write was applied AND moved the knob
         {
             const float v = pending.exchange(-1.0f);
             if (v < 0.0f) return false;
+            const bool moved = std::abs(v - getValue()) > 1.0e-6f;
             midi::setKnob(doc, ctl, v);
-            return true;
+            return moved;
         }
 
         // Report a change that didn't come from the host, as a held "touch" like a real knob drag:

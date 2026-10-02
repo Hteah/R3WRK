@@ -646,6 +646,14 @@ public:
     // Set/cleared from KnobRow's Start/End sliders and WaveformDisplay's selection mouse handling.
     std::atomic<int> selectionEdgeDragging { 0 };
 
+    // Same as selectionEdgeDragging (1 = Start / Position slide, 2 = End), but set while a HOST
+    // parameter (an Ableton LFO, automation) or a MIDI CC is moving the selection -- so that
+    // movement gets the same smooth drag-scan playback as dragging a knob by hand, instead of
+    // the loop teleporting ~60 times a second (crackle). Set/cleared by the processor's timer
+    // (cleared ~250 ms after the last such move); kept separate from selectionEdgeDragging
+    // because WaveformDisplay self-heals that one whenever no mouse button is down.
+    std::atomic<int> selectionRemoteMoving { 0 };
+
     // Set (true) whenever code moves `playhead` to an arbitrary new spot within a region that
     // *isn't* itself changing -- clicking to seek the playhead while playing (WaveformDisplay's
     // click-not-drag cases), or picking a slice with no marker -- so PluginProcessor's own

@@ -601,6 +601,8 @@ private:
     std::vector<r3wrk::DocKnobParam*> hostParams;
     r3wrk::DocKnobParam* selectionParams[3] {};   // Start, End, Position -- see keepOnlyTheMovedSelectionChange
     bool selectionFromHost = false;               // a host write moved the selection since the last sync
+    std::optional<r3wrk::midi::Ctl> midiSelectionTouch;   // a CC moved Start/End/Position since the last sync
+    double lastRemoteSelectionMoveMs = 0.0;       // see AudioDocument::selectionRemoteMoving
     int hostSyncTick = 0;
 
     static constexpr int kMidiFifoSize = 512;

@@ -83,13 +83,31 @@ void R3WRKAudioProcessor::timerCallback()
 {
     // Host parameters: apply parked Start/End writes, then (30 Hz) report knob moves that didn't
     // come from the host -- the begin/end gesture is what Ableton's Map picks up.
-    for (auto* p : hostParams) selectionFromHost |= p->applyPending();   // (kept until the next sync)
+    std::optional<r3wrk::midi::Ctl> remoteSelection;   // what moved the selection this tick, if a host/CC did
+    for (auto* p : hostParams)
+        if (p->applyPending()) { selectionFromHost = true; remoteSelection = p->getCtl(); }   // (flag kept until the next sync)
+    if (auto t = midiDispatcher.takeSelectionTouch()) { midiSelectionTouch = t; remoteSelection = t; }
+
+    // A host LFO / automation / CC moving Start, End or Position gets the same drag-scan playback
+    // as dragging the knob by hand (processBlock reads selectionRemoteMoving like
+    // selectionEdgeDragging); it's released ~250 ms after the last move.
+    const double nowMs = juce::Time::getMillisecondCounterHiRes();
+    if (remoteSelection.has_value())
+    {
+        document.selectionRemoteMoving = (*remoteSelection == r3wrk::midi::Ctl::end) ? 2 : 1;
+        lastRemoteSelectionMoveMs = nowMs;
+    }
+    else if (document.selectionRemoteMoving.load() != 0 && nowMs - lastRemoteSelectionMoveMs > 250.0)
+    {
+        document.selectionRemoteMoving = 0;
+    }
+
     if ((++hostSyncTick & 1) == 0)
     {
         r3wrk::keepOnlyTheMovedSelectionChange(selectionParams[0], selectionParams[1], selectionParams[2],
-                                               selectionFromHost, midiDispatcher.takeSelectionTouch());
+                                               selectionFromHost, midiSelectionTouch);
         selectionFromHost = false;
-        const double nowMs = juce::Time::getMillisecondCounterHiRes();
+        midiSelectionTouch.reset();
         for (auto* p : hostParams) p->syncToHost(nowMs);
     }
 
@@ -852,7 +870,11 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             // whole time. `dragRegionSeeded` means "these are live", not "the file's default
             // 0..docLen" -- without it the very first dragging block would slew from the wrong
             // starting point.
-            const int dragEdge = document.selectionEdgeDragging.load(std::memory_order_relaxed);
+            // (A knob/bracket drag by hand, or a host LFO / automation / MIDI CC moving the
+            // selection -- see AudioDocument::selectionRemoteMoving.)
+            int dragEdge = document.selectionEdgeDragging.load(std::memory_order_relaxed);
+            if (dragEdge == 0)
+                dragEdge = document.selectionRemoteMoving.load(std::memory_order_relaxed);
             // (The window-speed limits below date from when the drag renderer caught up by reading
             // faster -- it now relocates at 1x instead, see DragScanRender.h -- but they still set
             // how the loop slides, which is what's been tuned by ear, so they stay.)

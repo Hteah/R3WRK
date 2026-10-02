@@ -111,7 +111,9 @@ last) → NaN safety net → capture-output**. Notes on the newer pieces:
 - **Safety net** (`AudioSafety.h::zeroNonFinite`): before Dirt and before the output. Dirt, the
   filter and the FX effects all have feedback state -- one NaN used to silence a channel until
   restart. Keep both calls when touching the chain.
-- **Drag-scan** (dragging a loop edge/knob while looping): `DragScanRender.h` -- constant 1x read,
+- **Drag-scan** (dragging a loop edge/knob while looping -- or a host LFO/automation or MIDI CC
+  moving Start/End/Position: `AudioDocument::selectionRemoteMoving`, set by the processor's timer,
+  released 250 ms after the last move): `DragScanRender.h` -- constant 1x read,
   per-sample edges, relocation crossfades, release tail, window speed capped under the read speed
   (`maxWindowSpeed`). With Speed/Pitch/Stretch engaged it feeds the stretcher's input instead.
 - **Overdub** (`OverdubWriter.h`, popup `OverdubPanel.h`): writes input into the playing loop,
