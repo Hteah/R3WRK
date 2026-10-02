@@ -82,15 +82,27 @@ namespace r3wrk
             if (v >= 0.0f) midi::setKnob(doc, ctl, v);
         }
 
-        void syncToHost()   // report a change that didn't come from the host
+        // Report a change that didn't come from the host, as a held "touch" like a real knob drag:
+        // the gesture begins at the first change, stays open while the value keeps moving, and
+        // ends kGestureIdleMs after it stops. (An instant begin/end per change was invisible to
+        // Ableton's Map -- it only catches a parameter that's being held.) nowMs: any monotonic ms.
+        void syncToHost(double nowMs)
         {
-            if (isSelectionKnob() && doc.isEmpty()) return;   // no selection to report
+            const bool skip = isSelectionKnob() && doc.isEmpty();   // no selection to report
             const float now = getValue();
-            if (std::abs(now - lastNotified.load()) < 1.0e-4f) return;
-            beginChangeGesture();
-            setValueNotifyingHost(now);   // -> setValue(now): rewrites the same value, updates lastNotified
-            endChangeGesture();
+            if (! skip && std::abs(now - lastNotified.load()) >= 1.0e-4f)
+            {
+                if (! inGesture) { beginChangeGesture(); inGesture = true; }
+                setValueNotifyingHost(now);   // -> setValue(now): same value, updates lastNotified
+                lastMoveMs = nowMs;
+            }
+            else if (inGesture && nowMs - lastMoveMs > kGestureIdleMs)
+            {
+                endChangeGesture();
+                inGesture = false;
+            }
         }
+        static constexpr double kGestureIdleMs = 250.0;
 
         void forgetChanges() { lastNotified.store(getValue()); }   // after a state load: nothing to report
 
@@ -103,12 +115,14 @@ namespace r3wrk
                 return name;
             return section + " " + name;
         }
-        bool isSelectionKnob() const { return ctl == midi::Ctl::start || ctl == midi::Ctl::end; }
+        bool isSelectionKnob() const { return ctl == midi::Ctl::start || ctl == midi::Ctl::end || ctl == midi::Ctl::position; }
 
         AudioDocument& doc;
         const midi::Ctl ctl;
         const float defaultValue;
         std::atomic<float> lastNotified { 0.0f };
         std::atomic<float> pending { -1.0f };
+        bool inGesture = false;     // message thread only (syncToHost)
+        double lastMoveMs = 0.0;
     };
 }

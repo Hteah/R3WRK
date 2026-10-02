@@ -82,7 +82,10 @@ void R3WRKAudioProcessor::timerCallback()
     // come from the host -- the begin/end gesture is what Ableton's Map picks up.
     for (auto* p : hostParams) p->applyPending();
     if ((++hostSyncTick & 1) == 0)
-        for (auto* p : hostParams) p->syncToHost();
+    {
+        const double nowMs = juce::Time::getMillisecondCounterHiRes();
+        for (auto* p : hostParams) p->syncToHost(nowMs);
+    }
 
     // Drain the CCs processBlock queued (message thread) -- see midiDispatcher.
     const auto scope = midiFifo.read(midiFifo.getNumReady());

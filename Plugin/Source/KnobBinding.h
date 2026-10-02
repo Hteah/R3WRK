@@ -10,7 +10,7 @@
     dispatcher and the host parameters (HostParams.h), so a CC, an Ableton LFO and the mouse all
     move the same thing the same way.
 
-    setKnob() for Start/End changes the selection (AudioDocument::setSelection -> a change
+    setKnob() for Start/End/Position changes the selection (AudioDocument::setSelection -> a change
     message), so it must run on the message thread; every other knob is a plain atomic store and
     is safe from any thread (host automation calls setValue on the audio thread).
 */
@@ -58,7 +58,7 @@ namespace r3wrk::midi
             case Ctl::overdubFeedback: return &d.overdubFeedback;
             case Ctl::loopCrossfade: return &d.loopCrossfadeMs;
             case Ctl::autoRecThreshold: return &d.autoRecordThresholdDb;
-            default: return nullptr;   // Start / End (the selection) and every button
+            default: return nullptr;   // Start / End / Position (the selection) and every button
         }
     }
 
@@ -83,8 +83,9 @@ namespace r3wrk::midi
     inline void setKnob(AudioDocument& d, Ctl c, double x)
     {
         x = juce::jlimit(0.0, 1.0, x);
-        if (c == Ctl::start) { d.setSelectionStartFraction(x); return; }
-        if (c == Ctl::end)   { d.setSelectionEndFraction(x);   return; }
+        if (c == Ctl::start)    { d.setSelectionStartEdge(x); return; }
+        if (c == Ctl::end)      { d.setSelectionEndEdge(x);   return; }
+        if (c == Ctl::position) { d.setSelectionPosition(x);  return; }
         if (auto* a = knobAtomic(d, c))
         {
             const auto* r = knobRange(c);
@@ -96,6 +97,8 @@ namespace r3wrk::midi
     inline double getKnob(const AudioDocument& dc, Ctl c)
     {
         auto& d = const_cast<AudioDocument&>(dc);
+        if (c == Ctl::position)
+            return d.getSelectionPosition();
         if (c == Ctl::start || c == Ctl::end)
         {
             const double n = (double) juce::jmax((int64_t) 1, d.getNumSamples());

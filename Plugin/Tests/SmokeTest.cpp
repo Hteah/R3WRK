@@ -3131,10 +3131,13 @@ int main(int argc, char** argv)
         // Start / End move the selection.
         doc.setSelection(0, 0);
         d.handle(23, 64);   // End to the middle: selection 0 .. n/2
-        d.handle(22, 127);  // Start all the way: slides the whole selection to the end
         const auto n = doc.getNumSamples();
-        check(doc.getSelectionEnd() == n && doc.getSelectionStart() == n - n / 2,
-              "MIDI: End sets the end, Start slides the whole selection (like the knobs)");
+        const auto half = doc.getSelectionEnd();
+        d.handle(28, 127);  // Position all the way: slides the whole selection to the end
+        check(half == n / 2 && doc.getSelectionEnd() == n && doc.getSelectionStart() == n - half,
+              "MIDI: End sets the end edge, Position slides the whole selection");
+        d.handle(22, 0);    // Start to 0: only the start edge moves
+        check(doc.getSelectionStart() == 0 && doc.getSelectionEnd() == n, "MIDI: Start moves only the start edge");
 
         // Buttons: one press = one flip; the release and a repeated 127 do nothing.
         const bool f0 = doc.filterOn.load();
@@ -3211,17 +3214,44 @@ int main(int argc, char** argv)
         // The host's own changes are never echoed back as user moves (an LFO would fight itself).
         Counter c;
         for (auto& p : params) p->addListener(&c);
-        for (auto& p : params) p->syncToHost();
+        for (auto& p : params) p->syncToHost(0.0);
         check(c.changes == 0 && c.gestures == 0, "Host params: host-set values aren't reported back");
 
-        // R3WRK's own knob moves (mouse / MIDI / reset) ARE reported, with a gesture (Ableton's Map).
-        doc.playbackSpeed = 2.0;
-        doc.reverbMix = 0.9;
-        for (auto& p : params) p->syncToHost();
-        check(c.changes == 2 && c.gestures == 2, "Host params: R3WRK knob moves are reported with a gesture ("
-              + juce::String(c.changes) + " changes, " + juce::String(c.gestures) + " gestures)");
-        for (auto& p : params) p->syncToHost();
-        check(c.changes == 2, "Host params: ...once, not every tick");
+        // R3WRK's own knob moves (mouse / MIDI / reset) ARE reported, as ONE held gesture per
+        // knob while it keeps moving (what Ableton's Map catches), ended after it goes idle.
+        struct Ends : juce::AudioProcessorParameter::Listener
+        {
+            int ends = 0;
+            void parameterValueChanged(int, float) override {}
+            void parameterGestureChanged(int, bool starting) override { if (! starting) ++ends; }
+        } e;
+        for (auto& p : params) p->addListener(&e);
+        double t = 1000.0;
+        for (int step = 0; step < 5; ++step, t += 33.0)   // a drag: Speed moves every tick
+        {
+            doc.playbackSpeed = 1.5 + 0.1 * step;
+            for (auto& p : params) p->syncToHost(t);
+        }
+        check(c.changes == 5 && c.gestures == 1 && e.ends == 0,
+              "Host params: a knob drag is one open gesture with every value ("
+              + juce::String(c.changes) + " changes, " + juce::String(c.gestures) + " begins, " + juce::String(e.ends) + " ends)");
+        for (auto& p : params) p->syncToHost(t + 100.0);
+        check(e.ends == 0, "Host params: ...still open 100 ms after the last move");
+        for (auto& p : params) p->syncToHost(t + 400.0);
+        check(e.ends == 1 && c.changes == 5, "Host params: ...ended once it's idle, no extra values");
+        for (auto& p : params) p->removeListener(&e);
+
+        // Position slides the selection (keeps its length); Start / End move only their own edge.
+        doc.setSelection(10000, 20000);
+        auto findP = [&](const char* id) -> DocKnobParam* { for (size_t i = 0; i < params.size(); ++i) if (ids[(int) i] == id) return params[i].get(); return nullptr; };
+        findP("start")->setValue(0.0f); findP("start")->applyPending();
+        check(doc.getSelectionStart() == 0 && doc.getSelectionEnd() == 20000, "Host params: Start moves only the start edge");
+        findP("end")->setValue(1.0f); findP("end")->applyPending();
+        check(doc.getSelectionStart() == 0 && doc.getSelectionEnd() == doc.getNumSamples(), "Host params: End moves only the end edge");
+        doc.setSelection(0, 11025);
+        findP("position")->setValue(1.0f); findP("position")->applyPending();
+        check(doc.getSelectionEnd() == doc.getNumSamples() && doc.getSelectionEnd() - doc.getSelectionStart() == 11025,
+              "Host params: Position slides the selection to the end, keeping its length");
         for (auto& p : params) p->removeListener(&c);
     }
 

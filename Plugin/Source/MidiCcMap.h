@@ -23,7 +23,7 @@ namespace r3wrk::midi
     enum class Ctl : uint8_t
     {
         gain,
-        pitch, speed, stretch, dirt, base, width, hpQ, lpQ, start, end,
+        pitch, speed, stretch, dirt, base, width, hpQ, lpQ, start, end, position,
         dirtRate, dirtBits,
         choDel, choDep, choSpd, choMix, choFb, choWid, choLp, choInp,
         rtrgTime, rtrgFade,
@@ -62,8 +62,9 @@ namespace r3wrk::midi
         { 19,  Ctl::width,       "width", Kind::knob,   "Knob row", "Width",           "filter low-pass above Base (127 = open)" },
         { 20,  Ctl::hpQ,         "hpQ", Kind::knob,   "Knob row", "HP Q",            "0 .. 100% resonance" },
         { 21,  Ctl::lpQ,         "lpQ", Kind::knob,   "Knob row", "LP Q",            "0 .. 100% resonance" },
-        { 22,  Ctl::start,       "start", Kind::knob,   "Knob row", "Start",           "selection start (slides the whole selection)" },
-        { 23,  Ctl::end,         "end", Kind::knob,   "Knob row", "End",             "selection end" },
+        { 22,  Ctl::start,       "start", Kind::knob,   "Knob row", "Start",           "selection start edge (End stays put)" },
+        { 23,  Ctl::end,         "end", Kind::knob,   "Knob row", "End",             "selection end edge (Start stays put)" },
+        { 28,  Ctl::position,    "position", Kind::knob, "Knob row", "Position",      "slides the whole selection, keeping its length" },
         { 24,  Ctl::dirtRate,    "dirtRate", Kind::knob,   "Knob row", "Dirt Rate",       "sample-rate reduction (127 = clean)" },
         { 25,  Ctl::dirtBits,    "dirtBits", Kind::knob,   "Knob row", "Dirt Bits",       "bit reduction (127 = clean)" },
 

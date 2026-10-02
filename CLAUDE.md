@@ -301,9 +301,12 @@ Every knob in `kMidiCcMap` is also a host parameter (`HostParams.h`, `DocKnobPar
 `Entry::id`, never rename after release). No APVTS and no second copy: `getValue`/`setValue` read
 and write the same `AudioDocument` atomics through `KnobBinding.h` (knob-travel 0..1, shared with
 the MIDI dispatcher). R3WRK's own knob moves are reported to the host by the processor's timer
-(`syncToHost`, 30 Hz, begin/end gesture -- what Live's Map listens for); host writes update
+(`syncToHost`, 30 Hz) as a HELD gesture -- begun at the first change, kept open while the value
+moves, ended 250 ms after it stops (an instant begin/end per change was invisible to Live's Map); host writes update
 `lastNotified` first so an LFO's own changes are never echoed back. Start/End park host writes
-in `pending` (the selection isn't audio-thread safe) and the timer applies them.
+in `pending` (the selection isn't audio-thread safe) and the timer applies them. For MIDI and host
+parameters Start / End move only their own edge and Position (CC 28) slides the whole selection;
+the on-screen Start knob keeps sliding (KnobRow).
 
 ### State persistence
 
