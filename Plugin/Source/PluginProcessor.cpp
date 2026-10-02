@@ -873,18 +873,28 @@ void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             // (A knob/bracket drag by hand, or a host LFO / automation / MIDI CC moving the
             // selection -- see AudioDocument::selectionRemoteMoving.)
             int dragEdge = document.selectionEdgeDragging.load(std::memory_order_relaxed);
-            if (dragEdge == 0)
+            const bool remoteMove = dragEdge == 0
+                && document.selectionRemoteMoving.load(std::memory_order_relaxed) != 0;
+            if (remoteMove)
                 dragEdge = document.selectionRemoteMoving.load(std::memory_order_relaxed);
             // (The window-speed limits below date from when the drag renderer caught up by reading
             // faster -- it now relocates at 1x instead, see DragScanRender.h -- but they still set
             // how the loop slides, which is what's been tuned by ear, so they stay.)
-            constexpr double slewGainPerSec = 8.0;   // window glide rate = distance * this
+            // A hand drag glides (8/s, capped under the playhead's speed -- tuned by ear). A host
+            // LFO / automation / CC instead FOLLOWS closely (~30 ms, up to 8x the playhead's
+            // speed): it's moving the loop on purpose, often faster than 1x, and under the hand-
+            // drag cap the window could never catch it -- the playhead rode along inside it and
+            // just played through the file. When the window passes the playhead, the renderer
+            // relocates it to the same point in the loop with a short crossfade (no click).
+            const double slewGainPerSec = remoteMove ? 30.0 : 8.0;   // window glide rate = distance * this
             // Window speed limit -- see dragscan::maxWindowSpeed: just under the playhead's own
             // 1x read speed (scaled for time-stretch), so the window never outruns it and the
             // drag renderer never has to read faster (the pitch rise) or relocate constantly.
             const double targetRegionLen = (double) juce::jmax((int64_t) 1, rawRegionEnd - rawRegionStart);
-            const double maxSlewSpeed = dragscan::maxWindowSpeed(currentSampleRate,
-                engaged ? stretch / juce::jmax(1.0e-4, speed) : 1.0, targetRegionLen);
+            const double maxSlewSpeed = remoteMove
+                ? 8.0 * currentSampleRate / juce::jmax(1.0e-4, engaged ? stretch / juce::jmax(1.0e-4, speed) : 1.0)
+                : dragscan::maxWindowSpeed(currentSampleRate,
+                      engaged ? stretch / juce::jmax(1.0e-4, speed) : 1.0, targetRegionLen);
             int64_t regionStart, regionEnd;
             double prevDragRegionStart = 0.0, prevDragRegionEnd = 0.0;   // edges at this block's start
             if (dragEdge != 0)
