@@ -94,6 +94,19 @@ Result, real VST3:
 
 Playback follows the sweep end to end.
 
+## Start knob (hand) + the echo bug (2026-10-02, later)
+
+- The on-screen **Start** knob slides the loop (End follows, length kept) by hand: that's the feel
+  the user wants. An edge-only Start and an extra POS knob were tried and rejected. Position
+  stays the parameter for LFO / MIDI scanning (an LFO or CC on Start trims the edge).
+- **Bug found after restoring it:** sliding Start widened the loop when moving right and shrank it
+  when moving left. Cause: reporting the knob move to the host (`syncToHost` ->
+  `setValueNotifyingHost`) also called our own `setValue`. For Start / End that parks the value,
+  and the next timer tick re-applied it as an edge-only Start, 16 ms stale. `setValue` now ignores
+  the call made from inside our own report. SmokeTest reproduces it (40000 -> 45000 samples
+  before the fix, 40000 after). User: works manually and with the LFO on Position, "sounds
+  great". Merged to `main` 2026-10-02.
+
 ## How it's tested
 
 - **SmokeTest** (`Plugin/Tests/SmokeTest.cpp`): the `[DragScan]` blocks drive the real renderer.
