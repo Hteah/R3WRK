@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include "KnobBinding.h"
 #include <optional>
+#include <thread>
 
 /**
     Every knob in kMidiCcMap as a host (DAW) parameter -- so Ableton's Map (LFO, Macro, Envelope
@@ -39,6 +40,12 @@ namespace r3wrk
         {
             v = juce::jlimit(0.0f, 1.0f, v);
             lastNotified.store(v);
+            // Our own report (syncToHost -> setValueNotifyingHost calls this): the value is
+            // already in the document -- applying it again, parked for Start/End until the next
+            // timer tick, re-set a hand-dragged Start edge to where it was 16 ms earlier while the
+            // knob had slid the loop on (it widened moving right, shrank moving left).
+            if (reporting.load() && std::this_thread::get_id() == reporterThread)
+                return;
             if (isSelectionKnob()) pending.store(v);
             else                   midi::setKnob(doc, ctl, v);
         }
@@ -97,7 +104,10 @@ namespace r3wrk
             if (! skip && std::abs(now - lastNotified.load()) >= 1.0e-4f)
             {
                 if (! inGesture) { beginChangeGesture(); inGesture = true; }
-                setValueNotifyingHost(now);   // -> setValue(now): same value, updates lastNotified
+                reporterThread = std::this_thread::get_id();
+                reporting.store(true);
+                setValueNotifyingHost(now);   // -> setValue(now): only updates lastNotified (see setValue)
+                reporting.store(false);
                 lastMoveMs = nowMs;
             }
             else if (inGesture && nowMs - lastMoveMs > kGestureIdleMs)
@@ -128,6 +138,8 @@ namespace r3wrk
         const float defaultValue;
         std::atomic<float> lastNotified { 0.0f };
         std::atomic<float> pending { -1.0f };
+        std::atomic<bool> reporting { false };    // inside syncToHost's setValueNotifyingHost
+        std::thread::id reporterThread;
         bool inGesture = false;     // message thread only (syncToHost)
         double lastMoveMs = 0.0;
     };

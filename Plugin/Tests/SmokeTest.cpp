@@ -3145,6 +3145,42 @@ int main(int argc, char** argv)
         check(lo < 0.2 * N && hi > 0.8 * N, "remote sweep: playback follows the LFO across the file");
     }
 
+
+    // --- Host params: R3WRK reporting its own Start move must not re-apply it later ----------
+    // syncToHost -> setValueNotifyingHost -> setValue parks the reported value in `pending`; the
+    // next timer tick used to apply it as an edge-only Start -- by then the hand-dragged Start
+    // knob had slid the loop on, so the start edge snapped back and the loop widened (moving
+    // right) or shrank (moving left).
+    {
+        std::cout << "\n-- Host params: a hand-dragged Start doesn't drift --" << std::endl;
+        using namespace r3wrk;
+        AudioDocument doc;
+        setDocumentContent(doc, makeSineBuffer(2, 441000, 44100.0, 220.0, 0.5f), 44100.0);
+        std::unique_ptr<DocKnobParam> pS, pE, pP;
+        for (const auto& e : midi::kMidiCcMap)
+        {
+            if (e.ctl == midi::Ctl::start)    pS = std::make_unique<DocKnobParam>(doc, e);
+            if (e.ctl == midi::Ctl::end)      pE = std::make_unique<DocKnobParam>(doc, e);
+            if (e.ctl == midi::Ctl::position) pP = std::make_unique<DocKnobParam>(doc, e);
+        }
+        doc.setSelection(100000, 140000);   // a 40000-sample loop
+        for (auto* p : { pS.get(), pE.get(), pP.get() }) p->forgetChanges();
+        double t = 0.0;
+        for (int step = 1; step <= 20; ++step, t += 16.7)   // the Start knob slides the loop right, one tick at a time
+        {
+            const int64_t s = 100000 + step * 5000;
+            doc.setSelection(s, s + 40000);                               // KnobRow's sliding Start
+            for (auto* p : { pS.get(), pE.get(), pP.get() }) p->applyPending();   // processor timer...
+            keepOnlyTheMovedSelectionChange(pS.get(), pE.get(), pP.get(), false, std::nullopt);
+            for (auto* p : { pS.get(), pE.get(), pP.get() }) p->syncToHost(t);    // ...reports to the host
+        }
+        for (auto* p : { pS.get(), pE.get(), pP.get() }) p->applyPending();       // one more tick
+        const auto len = doc.getSelectionEnd() - doc.getSelectionStart();
+        std::cout << "  loop length after the slide: " << len << " (was 40000)" << std::endl;
+        check(len == 40000 && doc.getSelectionStart() == 200000,
+              "Host params: reporting a hand-dragged Start doesn't re-apply it (loop keeps its length)");
+    }
+
     // --- MIDI CC map + dispatcher (MidiCcMap.h / MidiCcDispatcher.h) --------------------------
     {
         std::cout << "\n-- MIDI CC map --" << std::endl;
