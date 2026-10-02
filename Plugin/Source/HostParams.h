@@ -46,6 +46,13 @@ namespace r3wrk
             // knob had slid the loop on (it widened moving right, shrank moving left).
             if (reporting.load() && std::this_thread::get_id() == reporterThread)
                 return;
+            // ...and the HOST's echo of it: Live (and JUCE's VST3 hosting) sends a value we
+            // reported back into the plugin a moment later, from the audio thread. Same story --
+            // re-applying it parked a stale Start edge while the knob slid on, so in the VST the
+            // loop widened / shrank (the Standalone has no host). A host write equal to our last
+            // report is that echo; the document already has (or has moved on from) that value.
+            if (std::abs(v - lastReported.load()) < 1.0e-6f)
+                return;
             if (isSelectionKnob()) pending.store(v);
             else                   midi::setKnob(doc, ctl, v);
         }
@@ -105,6 +112,7 @@ namespace r3wrk
             {
                 if (! inGesture) { beginChangeGesture(); inGesture = true; }
                 reporterThread = std::this_thread::get_id();
+                lastReported.store(now);
                 reporting.store(true);
                 setValueNotifyingHost(now);   // -> setValue(now): only updates lastNotified (see setValue)
                 reporting.store(false);
@@ -139,6 +147,7 @@ namespace r3wrk
         std::atomic<float> lastNotified { 0.0f };
         std::atomic<float> pending { -1.0f };
         std::atomic<bool> reporting { false };    // inside syncToHost's setValueNotifyingHost
+        std::atomic<float> lastReported { -1.0f };  // the last value we reported (its host echo is ignored)
         std::thread::id reporterThread;
         bool inGesture = false;     // message thread only (syncToHost)
         double lastMoveMs = 0.0;

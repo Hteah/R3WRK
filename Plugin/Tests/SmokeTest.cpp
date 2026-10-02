@@ -5,6 +5,7 @@
 #include <cstring>
 #include <complex>
 #include <map>
+#include <thread>
 #include "../Source/AudioDocument.h"
 #include "../Source/EditActions.h"
 #include "../Source/TimeStretchEngine.h"
@@ -3179,6 +3180,54 @@ int main(int argc, char** argv)
         std::cout << "  loop length after the slide: " << len << " (was 40000)" << std::endl;
         check(len == 40000 && doc.getSelectionStart() == 200000,
               "Host params: reporting a hand-dragged Start doesn't re-apply it (loop keeps its length)");
+    }
+
+
+    // --- Host params: the HOST echoing our reported Start back (VST in Live) mustn't drift either ---
+    // Live (and JUCE's VST3 hosting) sends a value we reported back into the plugin a moment later,
+    // from the audio thread -- not from inside our own report, so the same-thread guard can't see
+    // it. Re-applying it parked a stale Start edge while the knob slid on: the loop widened /
+    // shrank in the VST only (the Standalone has no host to echo).
+    {
+        std::cout << "\n-- Host params: a host echo of a hand-dragged Start doesn't drift --" << std::endl;
+        using namespace r3wrk;
+        AudioDocument doc;
+        setDocumentContent(doc, makeSineBuffer(2, 441000, 44100.0, 220.0, 0.5f), 44100.0);
+        std::unique_ptr<DocKnobParam> pS, pE, pP;
+        for (const auto& e : midi::kMidiCcMap)
+        {
+            if (e.ctl == midi::Ctl::start)    pS = std::make_unique<DocKnobParam>(doc, e);
+            if (e.ctl == midi::Ctl::end)      pE = std::make_unique<DocKnobParam>(doc, e);
+            if (e.ctl == midi::Ctl::position) pP = std::make_unique<DocKnobParam>(doc, e);
+        }
+        doc.setSelection(200000, 240000);
+        for (auto* p : { pS.get(), pE.get(), pP.get() }) p->forgetChanges();
+        double t = 0.0;
+        float echo[3] = { -1, -1, -1 };   // what the host sends back next tick
+        int64_t worst = 0;
+        for (int step = 1; step <= 30; ++step, t += 16.7)
+        {
+            const int64_t s = step <= 15 ? 200000 + step * 5000 : 275000 - (step - 15) * 5000;   // right, then left
+            doc.setSelection(s, s + 40000);                                         // KnobRow's sliding Start
+            DocKnobParam* ps[] = { pS.get(), pE.get(), pP.get() };
+            for (int k = 0; k < 3; ++k)                                             // the host's echo of last tick's report,
+                if (echo[k] >= 0.0f) { const float v = echo[k];                     // delivered on another thread
+                    std::thread([p = ps[k], v] { p->setValue(v); }).join(); }
+            for (auto* p : ps) p->applyPending();                                    // processor timer
+            worst = juce::jmax(worst, std::abs(doc.getSelectionEnd() - doc.getSelectionStart() - 40000));
+            keepOnlyTheMovedSelectionChange(pS.get(), pE.get(), pP.get(), false, std::nullopt);
+            for (int k = 0; k < 3; ++k)
+            {
+                const bool reports = ps[k]->hasUnreportedChange();                 // only what we report
+                ps[k]->syncToHost(t);                                               // gets echoed, next tick
+                echo[k] = reports ? ps[k]->getValue() : -1.0f;
+            }
+        }
+        for (auto* p : { pS.get(), pE.get(), pP.get() }) p->applyPending();
+        const auto len = doc.getSelectionEnd() - doc.getSelectionStart();
+        std::cout << "  loop length after sliding right then left: " << len << " (was 40000), worst drift during the slide "
+                  << worst << " samples" << std::endl;
+        check(len == 40000 && worst == 0, "Host params: a host echo of a hand-dragged Start doesn't re-apply it (loop keeps its length)");
     }
 
     // --- MIDI CC map + dispatcher (MidiCcMap.h / MidiCcDispatcher.h) --------------------------

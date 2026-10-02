@@ -107,6 +107,11 @@ Playback follows the sweep end to end.
   before the fix, 40000 after). User: works manually and with the LFO on Position, "sounds
   great". Merged to `main` 2026-10-02.
 
+- **Same drift, VST only** (found the next day in Live): Live sends a reported value back into
+  the plugin a moment later, from the audio thread, so the same-thread guard missed it. `setValue`
+  now also ignores a host write equal to the last value we reported. SmokeTest simulates the echo
+  from another thread: 5001 samples of drift before the fix, 0 after.
+
 ## How it's tested
 
 - **SmokeTest** (`Plugin/Tests/SmokeTest.cpp`): the `[DragScan]` blocks drive the real renderer.

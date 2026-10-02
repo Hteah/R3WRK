@@ -333,7 +333,9 @@ the on-screen Start knob still SLIDES the selection by hand (End follows -- the 
 feel; a 2026-10-02 edge-only change and a POS knob were both tried and rejected). **Echo gotcha:**
 `syncToHost`'s `setValueNotifyingHost` calls our own `setValue`; it must NOT re-apply that value
 (for Start/End it was parked and re-applied 16 ms stale as an edge move -- a hand-slid loop widened
-/ shrank). `setValue` ignores the call made from inside our own report; SmokeTest covers it. Full
+/ shrank). `setValue` ignores the call made from inside our own report AND the host's echo of
+it (Live / JUCE's VST3 hosting send a reported value back from the audio thread a moment later --
+VST-only drift; a host write equal to `lastReported` is ignored). SmokeTest covers both. Full
 story: `WAVE_SCANNING_PLAN.md`. Start/End/Position are one selection, so
 `keepOnlyTheMovedSelectionChange` reports only the one actually moved (an LFO on Position must
 not make Live think Start/End were touched). Tested 2026-10-02: Live's LFO **Map does not catch a
