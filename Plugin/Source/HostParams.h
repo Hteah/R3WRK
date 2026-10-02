@@ -53,8 +53,19 @@ namespace r3wrk
             // report is that echo; the document already has (or has moved on from) that value.
             if (std::abs(v - lastReported.load()) < 1.0e-6f)
                 return;
-            if (isSelectionKnob()) pending.store(v);
-            else                   midi::setKnob(doc, ctl, v);
+            if (isSelectionKnob())
+            {
+                // While R3WRK itself is moving the selection (a hand drag, or within 250 ms of
+                // reporting one), a host write here can only be an echo -- late or out of order,
+                // so it needn't match the last report. Ignore it. An LFO takes over again once
+                // the hand lets go.
+                if (doc.selectionEdgeDragging.load() != 0
+                    || juce::Time::getMillisecondCounterHiRes() < doc.selectionLocalMoveUntilMs.load())
+                    return;
+                pending.store(v);
+            }
+            else
+                midi::setKnob(doc, ctl, v);
         }
 
         float getDefaultValue() const override { return defaultValue; }
@@ -110,6 +121,8 @@ namespace r3wrk
             const float now = getValue();
             if (! skip && std::abs(now - lastNotified.load()) >= 1.0e-4f)
             {
+                if (isSelectionKnob())   // R3WRK is moving the selection: hold off host echoes
+                    doc.selectionLocalMoveUntilMs.store(nowMs + kGestureIdleMs);
                 if (! inGesture) { beginChangeGesture(); inGesture = true; }
                 reporterThread = std::this_thread::get_id();
                 lastReported.store(now);
@@ -148,6 +161,7 @@ namespace r3wrk
         std::atomic<float> pending { -1.0f };
         std::atomic<bool> reporting { false };    // inside syncToHost's setValueNotifyingHost
         std::atomic<float> lastReported { -1.0f };  // the last value we reported (its host echo is ignored)
+
         std::thread::id reporterThread;
         bool inGesture = false;     // message thread only (syncToHost)
         double lastMoveMs = 0.0;

@@ -5,6 +5,7 @@
 #include <cstring>
 #include <complex>
 #include <map>
+#include <array>
 #include <thread>
 #include "../Source/AudioDocument.h"
 #include "../Source/EditActions.h"
@@ -3228,6 +3229,56 @@ int main(int argc, char** argv)
         std::cout << "  loop length after sliding right then left: " << len << " (was 40000), worst drift during the slide "
                   << worst << " samples" << std::endl;
         check(len == 40000 && worst == 0, "Host params: a host echo of a hand-dragged Start doesn't re-apply it (loop keeps its length)");
+    }
+
+
+    // Same, but the host's echo arrives LATE (two ticks) -- so it no longer matches our last
+    // report; only the "R3WRK is moving the selection itself" hold-off can catch it. Real clock.
+    {
+        std::cout << "\n-- Host params: a LATE host echo of a hand-dragged Start doesn't drift --" << std::endl;
+        using namespace r3wrk;
+        AudioDocument doc;
+        setDocumentContent(doc, makeSineBuffer(2, 441000, 44100.0, 220.0, 0.5f), 44100.0);
+        std::unique_ptr<DocKnobParam> pS, pE, pP;
+        for (const auto& e : midi::kMidiCcMap)
+        {
+            if (e.ctl == midi::Ctl::start)    pS = std::make_unique<DocKnobParam>(doc, e);
+            if (e.ctl == midi::Ctl::end)      pE = std::make_unique<DocKnobParam>(doc, e);
+            if (e.ctl == midi::Ctl::position) pP = std::make_unique<DocKnobParam>(doc, e);
+        }
+        doc.setSelection(200000, 240000);
+        for (auto* p : { pS.get(), pE.get(), pP.get() }) p->forgetChanges();
+        std::vector<std::array<float, 3>> echoes;   // per tick, what was reported (-1 = nothing)
+        int64_t worst = 0;
+        DocKnobParam* ps[] = { pS.get(), pE.get(), pP.get() };
+        for (int step = 1; step <= 30; ++step)
+        {
+            const int64_t s = step <= 15 ? 200000 + step * 5000 : 275000 - (step - 15) * 5000;
+            doc.setSelection(s, s + 40000);
+            if (echoes.size() >= 2)   // the echo of what we reported two ticks ago
+                for (int k = 0; k < 3; ++k)
+                    if (const float v = echoes[echoes.size() - 2][(size_t) k]; v >= 0.0f)
+                        std::thread([p = ps[k], v] { p->setValue(v); }).join();
+            for (auto* p : ps) p->applyPending();
+            worst = juce::jmax(worst, std::abs(doc.getSelectionEnd() - doc.getSelectionStart() - 40000));
+            keepOnlyTheMovedSelectionChange(pS.get(), pE.get(), pP.get(), false, std::nullopt);
+            std::array<float, 3> rep { -1.0f, -1.0f, -1.0f };
+            const double now = juce::Time::getMillisecondCounterHiRes();
+            for (int k = 0; k < 3; ++k)
+            {
+                const bool reports = ps[k]->hasUnreportedChange();
+                ps[k]->syncToHost(now);
+                if (reports) rep[(size_t) k] = ps[k]->getValue();
+            }
+            echoes.push_back(rep);
+        }
+        std::cout << "  worst drift during the slide: " << worst << " samples" << std::endl;
+        check(worst == 0, "Host params: a late host echo of a hand-dragged Start doesn't re-apply it");
+
+        // ...and once R3WRK has let go, the host (an LFO) drives Start again.
+        juce::Thread::sleep(300);
+        pS->setValue(0.1f); pS->applyPending();
+        check(std::abs(pS->getValue() - 0.1f) < 1.0e-3f, "Host params: after the hand lets go, host writes apply again");
     }
 
     // --- MIDI CC map + dispatcher (MidiCcMap.h / MidiCcDispatcher.h) --------------------------

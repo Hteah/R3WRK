@@ -334,8 +334,12 @@ feel; a 2026-10-02 edge-only change and a POS knob were both tried and rejected)
 `syncToHost`'s `setValueNotifyingHost` calls our own `setValue`; it must NOT re-apply that value
 (for Start/End it was parked and re-applied 16 ms stale as an edge move -- a hand-slid loop widened
 / shrank). `setValue` ignores the call made from inside our own report AND the host's echo of
-it (Live / JUCE's VST3 hosting send a reported value back from the audio thread a moment later --
-VST-only drift; a host write equal to `lastReported` is ignored). SmokeTest covers both. Full
+it (Live / JUCE's VST3 hosting send a reported value back from the audio thread a moment later,
+sometimes late / out of order -- VST-only drift). Two guards: a host write equal to `lastReported`
+is ignored, and host writes to Start/End/Position are ignored while R3WRK is moving the selection
+itself (`selectionEdgeDragging`, or until `AudioDocument::selectionLocalMoveUntilMs`, set +250 ms
+by `syncToHost` when it reports a selection knob). SmokeTest covers same-thread, one-tick and late
+echoes (the late one: 10001 samples of drift with the hold-off off, 0 with it on). Full
 story: `WAVE_SCANNING_PLAN.md`. Start/End/Position are one selection, so
 `keepOnlyTheMovedSelectionChange` reports only the one actually moved (an LFO on Position must
 not make Live think Start/End were touched). Tested 2026-10-02: Live's LFO **Map does not catch a

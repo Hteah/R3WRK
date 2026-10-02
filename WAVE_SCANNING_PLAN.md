@@ -110,7 +110,12 @@ Playback follows the sweep end to end.
 - **Same drift, VST only** (found the next day in Live): Live sends a reported value back into
   the plugin a moment later, from the audio thread, so the same-thread guard missed it. `setValue`
   now also ignores a host write equal to the last value we reported. SmokeTest simulates the echo
-  from another thread: 5001 samples of drift before the fix, 0 after.
+  from another thread: 5001 samples of drift before the fix, 0 after. That still drifted in Live:
+  its echoes can arrive late or out of order. The fix that held is a hold-off: while R3WRK is moving
+  the selection itself (a hand drag, or within 250 ms of reporting one), host writes to
+  Start/End/Position are ignored. A late-echo SmokeTest has a contrast check: 10001 samples with the
+  hold-off off, 0 with it on. The user confirmed it in Live. An LFO on Position is unaffected (its
+  writes apply; the Live log showed about 90 a second).
 
 ## How it's tested
 

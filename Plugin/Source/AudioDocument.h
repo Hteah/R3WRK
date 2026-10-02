@@ -654,6 +654,13 @@ public:
     // because WaveformDisplay self-heals that one whenever no mouse button is down.
     std::atomic<int> selectionRemoteMoving { 0 };
 
+    // Until this time (juce::Time::getMillisecondCounterHiRes), R3WRK itself is moving the selection
+    // (a hand drag / CC being reported to the host): host writes to Start / End / Position are
+    // ignored meanwhile -- they can only be the host echoing our own reports back (Live does, from
+    // the audio thread, sometimes late or several at once), and re-applying one pulled a hand-slid
+    // Start edge back (the loop widened / shrank in the VST). See HostParams.h.
+    std::atomic<double> selectionLocalMoveUntilMs { 0.0 };
+
     // Set (true) whenever code moves `playhead` to an arbitrary new spot within a region that
     // *isn't* itself changing -- clicking to seek the playhead while playing (WaveformDisplay's
     // click-not-drag cases), or picking a slice with no marker -- so PluginProcessor's own
