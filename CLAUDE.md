@@ -306,7 +306,12 @@ moves, ended 250 ms after it stops (an instant begin/end per change was invisibl
 `lastNotified` first so an LFO's own changes are never echoed back. Start/End park host writes
 in `pending` (the selection isn't audio-thread safe) and the timer applies them. For MIDI and host
 parameters Start / End move only their own edge and Position (CC 28) slides the whole selection;
-the on-screen Start knob keeps sliding (KnobRow).
+the on-screen Start knob keeps sliding (KnobRow). Start/End/Position are one selection, so
+`keepOnlyTheMovedSelectionChange` reports only the one actually moved (an LFO on Position must
+not make Live think Start/End were touched). Tested 2026-10-02: Live's LFO **Map does not catch a
+knob turned inside any plugin's own window** (Valhalla neither) -- map from Live's device panel
+(Configure adds knobs to it). Live reports ~2,139 R3WRK VST3 params: JUCE's hidden MIDI-CC
+emulation params (needed for CCs into a VST3), harmless.
 
 ### State persistence
 

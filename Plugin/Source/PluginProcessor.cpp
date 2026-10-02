@@ -64,6 +64,9 @@ R3WRKAudioProcessor::R3WRKAudioProcessor()
             auto* p = new r3wrk::DocKnobParam(document, e);
             addParameter(p);
             hostParams.push_back(p);
+            if (e.ctl == r3wrk::midi::Ctl::start)    selectionParams[0] = p;
+            if (e.ctl == r3wrk::midi::Ctl::end)      selectionParams[1] = p;
+            if (e.ctl == r3wrk::midi::Ctl::position) selectionParams[2] = p;
         }
 
     startTimerHz(60);
@@ -80,9 +83,12 @@ void R3WRKAudioProcessor::timerCallback()
 {
     // Host parameters: apply parked Start/End writes, then (30 Hz) report knob moves that didn't
     // come from the host -- the begin/end gesture is what Ableton's Map picks up.
-    for (auto* p : hostParams) p->applyPending();
+    for (auto* p : hostParams) selectionFromHost |= p->applyPending();   // (kept until the next sync)
     if ((++hostSyncTick & 1) == 0)
     {
+        r3wrk::keepOnlyTheMovedSelectionChange(selectionParams[0], selectionParams[1], selectionParams[2],
+                                               selectionFromHost, midiDispatcher.takeSelectionTouch());
+        selectionFromHost = false;
         const double nowMs = juce::Time::getMillisecondCounterHiRes();
         for (auto* p : hostParams) p->syncToHost(nowMs);
     }

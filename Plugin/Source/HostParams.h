@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "KnobBinding.h"
+#include <optional>
 
 /**
     Every knob in kMidiCcMap as a host (DAW) parameter -- so Ableton's Map (LFO, Macro, Envelope
@@ -76,10 +77,12 @@ namespace r3wrk
         }
 
         // Message thread (the processor's timer).
-        void applyPending()
+        bool applyPending()   // true if a host write was applied
         {
             const float v = pending.exchange(-1.0f);
-            if (v >= 0.0f) midi::setKnob(doc, ctl, v);
+            if (v < 0.0f) return false;
+            midi::setKnob(doc, ctl, v);
+            return true;
         }
 
         // Report a change that didn't come from the host, as a held "touch" like a real knob drag:
@@ -105,6 +108,8 @@ namespace r3wrk
         static constexpr double kGestureIdleMs = 250.0;
 
         void forgetChanges() { lastNotified.store(getValue()); }   // after a state load: nothing to report
+        bool hasUnreportedChange() const { return std::abs(getValue() - lastNotified.load()) >= 1.0e-4f; }
+        midi::Ctl getCtl() const noexcept { return ctl; }
 
     private:
         static juce::String displayName(const midi::Entry& e)
@@ -125,4 +130,30 @@ namespace r3wrk
         bool inGesture = false;     // message thread only (syncToHost)
         double lastMoveMs = 0.0;
     };
+
+    /** Start, End and Position are three views of ONE selection: moving one moves the others. Only
+        the one that was actually moved is reported to the host (otherwise Live would treat the
+        others as touched -- breaking their automation, or letting Map grab the wrong one).
+          - hostWrote: the host itself changed one of them this tick -> report none.
+          - touched: the MIDI dispatcher moved this one -> report only it.
+          - otherwise (the on-screen knobs / waveform brackets): Start, else End, else Position. */
+    inline void keepOnlyTheMovedSelectionChange(DocKnobParam* start, DocKnobParam* end, DocKnobParam* position,
+                                                bool hostWrote, std::optional<midi::Ctl> touched)
+    {
+        DocKnobParam* all[] = { start, end, position };
+        DocKnobParam* keep = nullptr;
+        if (! hostWrote)
+        {
+            if (touched.has_value())
+            {
+                for (auto* p : all) if (p != nullptr && p->getCtl() == *touched) keep = p;
+            }
+            else
+            {
+                for (auto* p : all) if (p != nullptr && p->hasUnreportedChange()) { keep = p; break; }
+            }
+        }
+        for (auto* p : all)
+            if (p != nullptr && p != keep) p->forgetChanges();
+    }
 }

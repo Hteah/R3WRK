@@ -2,6 +2,7 @@
 #include <JuceHeader.h>
 #include <array>
 #include <functional>
+#include <optional>
 #include "AudioDocument.h"
 #include "ControlRanges.h"
 #include "MidiCcMap.h"
@@ -33,6 +34,10 @@ namespace r3wrk::midi
 
         std::function<bool(Ctl)> uiAction;         // editor's toolbar; true = handled
         std::function<void(Ctl)> fallbackAction;   // processor, when no editor handled it
+
+        // Which selection knob (Start / End / Position) a CC last moved -- the host-parameter sync
+        // reports only that one (keepOnlyTheMovedSelectionChange). Message thread; read-and-clear.
+        std::optional<Ctl> takeSelectionTouch() { auto t = selectionTouch; selectionTouch.reset(); return t; }
 
         // One CC message (cc 0..127, value 0..127), already filtered to our channel.
         void handle(int cc, int value)
@@ -70,10 +75,16 @@ namespace r3wrk::midi
         AudioDocument& doc;
         std::array<int, 128> lastValue {};
         std::array<const Entry*, 128> byCc {};
+        std::optional<Ctl> selectionTouch;
 
         static void flip(std::atomic<bool>& a) { a.store(! a.load()); }
 
-        void setKnob(Ctl c, double x) { r3wrk::midi::setKnob(doc, c, x); }   // KnobBinding.h
+        void setKnob(Ctl c, double x)   // KnobBinding.h
+        {
+            r3wrk::midi::setKnob(doc, c, x);
+            if (c == Ctl::start || c == Ctl::end || c == Ctl::position)
+                selectionTouch = c;   // see takeSelectionTouch()
+        }
 
         void press(Ctl c)
         {

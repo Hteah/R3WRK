@@ -599,6 +599,8 @@ private:
     // Every knob as a host parameter (HostParams.h) -- for Ableton's Map / automation. Owned by
     // AudioProcessor (addParameter); these are just typed pointers to them.
     std::vector<r3wrk::DocKnobParam*> hostParams;
+    r3wrk::DocKnobParam* selectionParams[3] {};   // Start, End, Position -- see keepOnlyTheMovedSelectionChange
+    bool selectionFromHost = false;               // a host write moved the selection since the last sync
     int hostSyncTick = 0;
 
     static constexpr int kMidiFifoSize = 512;

@@ -3252,6 +3252,24 @@ int main(int argc, char** argv)
         findP("position")->setValue(1.0f); findP("position")->applyPending();
         check(doc.getSelectionEnd() == doc.getNumSamples() && doc.getSelectionEnd() - doc.getSelectionStart() == 11025,
               "Host params: Position slides the selection to the end, keeping its length");
+        // Start / End / Position are one selection: only the one actually moved gets reported.
+        {
+            auto* pS = findP("start"); auto* pE = findP("end"); auto* pP = findP("position");
+            for (auto* p : { pS, pE, pP }) p->forgetChanges();
+            doc.setSelection(1000, 5000);   // like dragging the on-screen Start bracket
+            keepOnlyTheMovedSelectionChange(pS, pE, pP, false, std::nullopt);
+            check(pS->hasUnreportedChange() && ! pE->hasUnreportedChange() && ! pP->hasUnreportedChange(),
+                  "Host params: a selection move from the UI reports only Start");
+            for (auto* p : { pS, pE, pP }) p->forgetChanges();
+            doc.setSelection(20000, 24000);   // like MIDI CC 28 (Position)
+            keepOnlyTheMovedSelectionChange(pS, pE, pP, false, midi::Ctl::position);
+            check(pP->hasUnreportedChange() && ! pS->hasUnreportedChange() && ! pE->hasUnreportedChange(),
+                  "Host params: a MIDI Position move reports only Position");
+            pP->setValue(0.2f); pP->applyPending();   // an LFO on Position
+            keepOnlyTheMovedSelectionChange(pS, pE, pP, true, std::nullopt);
+            check(! pS->hasUnreportedChange() && ! pE->hasUnreportedChange() && ! pP->hasUnreportedChange(),
+                  "Host params: an LFO on Position doesn't report Start / End as touched");
+        }
         for (auto& p : params) p->removeListener(&c);
     }
 
