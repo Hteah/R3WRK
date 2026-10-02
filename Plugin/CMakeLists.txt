@@ -154,6 +154,7 @@ target_link_libraries(R3WRKSmokeTest
         juce::juce_events
         juce::juce_audio_basics
         juce::juce_audio_formats
+        juce::juce_audio_processors   # HostParams.h (DocKnobParam)
         juce::juce_gui_basics          # Theme.cpp (Colour, SystemClipboard)
     PUBLIC
         juce::juce_recommended_config_flags)

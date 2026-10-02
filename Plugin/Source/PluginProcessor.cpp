@@ -55,6 +55,17 @@ R3WRKAudioProcessor::R3WRKAudioProcessor()
 
     midiChannel.store(juce::SharedResourcePointer<OutputSettings>()->midiChannel());
     midiDispatcher.fallbackAction = [this](r3wrk::midi::Ctl c) { handleMidiFallback(c); };
+
+    // Every knob as a host parameter (Ableton Map / automation) -- see HostParams.h. Order and
+    // IDs come from kMidiCcMap; the IDs are stable (never rename one after release).
+    for (const auto& e : r3wrk::midi::kMidiCcMap)
+        if (e.kind == r3wrk::midi::Kind::knob)
+        {
+            auto* p = new r3wrk::DocKnobParam(document, e);
+            addParameter(p);
+            hostParams.push_back(p);
+        }
+
     startTimerHz(60);
 }
 
@@ -67,6 +78,12 @@ void R3WRKAudioProcessor::setMidiChannel(int channel)
 
 void R3WRKAudioProcessor::timerCallback()
 {
+    // Host parameters: apply parked Start/End writes, then (30 Hz) report knob moves that didn't
+    // come from the host -- the begin/end gesture is what Ableton's Map picks up.
+    for (auto* p : hostParams) p->applyPending();
+    if ((++hostSyncTick & 1) == 0)
+        for (auto* p : hostParams) p->syncToHost();
+
     // Drain the CCs processBlock queued (message thread) -- see midiDispatcher.
     const auto scope = midiFifo.read(midiFifo.getNumReady());
     for (int i = 0; i < scope.blockSize1; ++i)
@@ -3371,6 +3388,7 @@ void R3WRKAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
     document.clearSliceMarkers();   // session-only; a restored document starts with no markers
 
     document.markAsOriginal();   // the restored session is the new "Revert to Original" baseline
+    for (auto* p : hostParams) p->forgetChanges();   // loaded values aren't knob moves to report
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

@@ -5,6 +5,7 @@
 #include "AudioDocument.h"
 #include "ControlRanges.h"
 #include "MidiCcMap.h"
+#include "KnobBinding.h"
 
 /**
     Applies incoming MIDI CCs (kMidiCcMap) on the MESSAGE thread. Owned by the processor and fed
@@ -70,79 +71,9 @@ namespace r3wrk::midi
         std::array<int, 128> lastValue {};
         std::array<const Entry*, 128> byCc {};
 
-        static void put(std::atomic<double>& a, double v) { a.store(v); }
         static void flip(std::atomic<bool>& a) { a.store(! a.load()); }
 
-        void setKnob(Ctl c, double x)
-        {
-            switch (c)
-            {
-                case Ctl::gain:     put(doc.playbackGainDb,  ranges::gainDb().convertFrom0to1(x)); break;
-                case Ctl::pitch:    put(doc.playbackPitch,   ranges::pitch().convertFrom0to1(x)); break;
-                case Ctl::speed:    put(doc.playbackSpeed,   ranges::speed().convertFrom0to1(x)); break;
-                case Ctl::stretch:  put(doc.playbackStretch, ranges::stretch().convertFrom0to1(x)); break;
-                case Ctl::dirt:     put(doc.dirtDrive, x); break;
-                case Ctl::base:     put(doc.filterBase, ranges::filterBase().convertFrom0to1(x)); break;
-                case Ctl::width:    put(doc.filterWidth, x); break;
-                case Ctl::hpQ:      put(doc.filterHpQ, x); break;
-                case Ctl::lpQ:      put(doc.filterLpQ, x); break;
-                case Ctl::start:    doc.setSelectionStartFraction(x); break;
-                case Ctl::end:      doc.setSelectionEndFraction(x); break;
-                case Ctl::dirtRate: put(doc.dirtRate, x); break;
-                case Ctl::dirtBits: put(doc.dirtBits, x); break;
-
-                case Ctl::choDel: put(doc.chorusDel, x); break;
-                case Ctl::choDep: put(doc.chorusDep, x); break;
-                case Ctl::choSpd: put(doc.chorusSpd, x); break;
-                case Ctl::choMix: put(doc.chorusMix, x); break;
-                case Ctl::choFb:  put(doc.chorusFb,  x); break;
-                case Ctl::choWid: put(doc.chorusWid, x); break;
-                case Ctl::choLp:  put(doc.chorusLp,  x); break;
-                case Ctl::choInp: put(doc.chorusInp, x); break;
-                case Ctl::rtrgTime: put(doc.rtrgTime, x); break;
-                case Ctl::rtrgFade: put(doc.rtrgFade, x); break;
-
-                case Ctl::dlyZone:    put(doc.mimeoZone, x); break;
-                case Ctl::dlyRate:    put(doc.mimeoRate, x); break;
-                case Ctl::dlyRepeats: put(doc.mimeoRepeats, x); break;
-                case Ctl::dlyColor:   put(doc.mimeoColor, x); break;
-                case Ctl::dlyHalo:    put(doc.mimeoHalo, x); break;
-                case Ctl::dlyMix:     put(doc.mimeoMix, x); break;
-                case Ctl::dlySkew:    put(doc.mimeoSkew, x); break;
-
-                case Ctl::plxLevel:   put(doc.plexLevel, x); break;
-                case Ctl::plxPlexus:  put(doc.plexPlexus, x); break;
-                case Ctl::plxSize:    put(doc.plexSize, x); break;
-                case Ctl::plxDiffuse: put(doc.plexDiffuse, x); break;
-                case Ctl::plxDecay:   put(doc.plexDecay, x); break;
-                case Ctl::plxColor:   put(doc.plexColor, x); break;
-                case Ctl::plxMix:     put(doc.plexMix, x); break;
-                case Ctl::plxCouple:  put(doc.plexCouple, x); break;
-                case Ctl::plxSkew:    put(doc.plexSkew, x); break;
-
-                case Ctl::rvbSize:     put(doc.reverbSize, x); break;
-                case Ctl::rvbAbsorb:   put(doc.reverbAbsorb, x); break;
-                case Ctl::rvbDecay:    put(doc.reverbDecay, x); break;
-                case Ctl::rvbTilt:     put(doc.reverbTilt, x); break;
-                case Ctl::rvbMix:      put(doc.reverbMix, x); break;
-                case Ctl::rvbPredelay: put(doc.reverbPredelay, x); break;
-                case Ctl::rvbWidth:    put(doc.reverbWidth, x); break;
-
-                case Ctl::shmSize:     put(doc.shimmerSize, x); break;
-                case Ctl::shmDecay:    put(doc.shimmerDecay, x); break;
-                case Ctl::shmTone:     put(doc.shimmerTone, x); break;
-                case Ctl::shmAmount:   put(doc.shimmerAmount, x); break;
-                case Ctl::shmMovement: put(doc.shimmerMovement, x); break;
-                case Ctl::shmWidth:    put(doc.shimmerWidth, x); break;
-                case Ctl::shmMix:      put(doc.shimmerMix, x); break;
-
-                case Ctl::overdubLevel:     put(doc.overdubLevel, ranges::overdubLevel().convertFrom0to1(x)); break;
-                case Ctl::overdubFeedback:  put(doc.overdubFeedback, x); break;
-                case Ctl::loopCrossfade:    put(doc.loopCrossfadeMs, ranges::loopCrossfadeMs().convertFrom0to1(x)); break;
-                case Ctl::autoRecThreshold: put(doc.autoRecordThresholdDb, ranges::autoRecordThresholdDb().convertFrom0to1(x)); break;
-                default: break;
-            }
-        }
+        void setKnob(Ctl c, double x) { r3wrk::midi::setKnob(doc, c, x); }   // KnobBinding.h
 
         void press(Ctl c)
         {

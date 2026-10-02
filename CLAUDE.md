@@ -295,6 +295,16 @@ to `Ctl` + `kMidiCcMap` (avoid reserved CCs -- the smoke test checks), handle it
 dispatcher, then regenerate the chart:** `R3WRKSmokeTest --print-midi-chart chart.json &&
 python3 tools/make_midi_chart.py chart.json "docs/R3WRK MIDI Chart.pdf"`.
 
+### Host parameters (Ableton Map / LFO / automation)
+
+Every knob in `kMidiCcMap` is also a host parameter (`HostParams.h`, `DocKnobParam`, ID = the
+`Entry::id`, never rename after release). No APVTS and no second copy: `getValue`/`setValue` read
+and write the same `AudioDocument` atomics through `KnobBinding.h` (knob-travel 0..1, shared with
+the MIDI dispatcher). R3WRK's own knob moves are reported to the host by the processor's timer
+(`syncToHost`, 30 Hz, begin/end gesture -- what Live's Map listens for); host writes update
+`lastNotified` first so an LFO's own changes are never echoed back. Start/End park host writes
+in `pending` (the selection isn't audio-thread safe) and the timer applies them.
+
 ### State persistence
 
 `PluginProcessor::getStateInformation()`/`setStateInformation()` use an incrementing 4-byte magic

@@ -15,6 +15,7 @@
 #include "RetrigEngine.h"
 #include "MnmChorusEngine.h"
 #include "MidiCcDispatcher.h"
+#include "HostParams.h"
 
 
 class R3WRKAudioProcessor : public juce::AudioProcessor,
@@ -595,6 +596,11 @@ private:
                      const juce::AudioBuffer<float>& docBuf);
 
     // MIDI CC queue (see midiDispatcher): audio thread writes, the timer reads.
+    // Every knob as a host parameter (HostParams.h) -- for Ableton's Map / automation. Owned by
+    // AudioProcessor (addParameter); these are just typed pointers to them.
+    std::vector<r3wrk::DocKnobParam*> hostParams;
+    int hostSyncTick = 0;
+
     static constexpr int kMidiFifoSize = 512;
     juce::AbstractFifo midiFifo { kMidiFifoSize };
     std::array<std::pair<uint8_t, uint8_t>, kMidiFifoSize> midiFifoData {};

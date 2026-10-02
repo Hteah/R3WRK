@@ -1,0 +1,114 @@
+#pragma once
+#include <JuceHeader.h>
+#include "KnobBinding.h"
+
+/**
+    Every knob in kMidiCcMap as a host (DAW) parameter -- so Ableton's Map (LFO, Macro, Envelope
+    Follower, automation lanes, ...) can grab "the knob you just turned" and drive it.
+
+    No APVTS and no second copy of the values: getValue()/setValue() read and write the very
+    AudioDocument atomics the UI and DSP already use (KnobBinding.h, knob-travel units), so the
+    on-screen knob follows host modulation through its existing resync timers.
+
+    The other direction -- telling the host when R3WRK's own knob moves (mouse, MIDI CC, the
+    reset bolt) -- is a poll on the processor's message-thread timer (syncToHost): a value that
+    differs from the last one the host set or was told about is reported with a begin/end change
+    gesture, which is what Live's Map listens for. The host's own changes (an LFO writing
+    setValue) update lastNotified first, so they are never echoed back as if the user had
+    touched the knob (which would override the host's modulation/automation).
+
+    Start/End move the selection, which isn't audio-thread safe, so a host write to them is
+    parked in `pending` and applied by the same timer (applyPending).
+*/
+namespace r3wrk
+{
+    class DocKnobParam : public juce::AudioProcessorParameterWithID
+    {
+    public:
+        DocKnobParam(AudioDocument& d, const midi::Entry& e)
+            : juce::AudioProcessorParameterWithID(juce::ParameterID { e.id, 1 }, displayName(e)),
+              doc(d), ctl(e.ctl), defaultValue((float) midi::getKnob(d, e.ctl))
+        {
+            lastNotified.store(defaultValue);
+        }
+
+        float getValue() const override { return (float) midi::getKnob(doc, ctl); }
+
+        void setValue(float v) override   // host -> R3WRK (any thread, often the audio thread)
+        {
+            v = juce::jlimit(0.0f, 1.0f, v);
+            lastNotified.store(v);
+            if (isSelectionKnob()) pending.store(v);
+            else                   midi::setKnob(doc, ctl, v);
+        }
+
+        float getDefaultValue() const override { return defaultValue; }
+
+        juce::String getText(float v, int) const override
+        {
+            using C = midi::Ctl;
+            const auto real = [this, v]
+            {
+                const auto* r = midi::knobRange(ctl);
+                return r != nullptr ? r->convertFrom0to1(juce::jlimit(0.0f, 1.0f, v)) : (double) v;
+            }();
+            switch (ctl)
+            {
+                case C::pitch:   return (real > 0.0 ? "+" : "") + juce::String(real, 2) + " st";
+                case C::speed:
+                case C::stretch: return juce::String(real, 2) + "x";
+                case C::gain:    return real <= AudioDocument::kMinGainDb + 0.05 ? juce::String("-inf dB")
+                                                                               : juce::String(real, 1) + " dB";
+                case C::overdubLevel:
+                    return real < 0.001 ? juce::String("-inf dB") : juce::String(juce::Decibels::gainToDecibels(real), 1) + " dB";
+                case C::loopCrossfade:    return juce::String(real, 1) + " ms";
+                case C::autoRecThreshold: return juce::String(real, 1) + " dB";
+                case C::choDel: case C::choDep: case C::choSpd: case C::choMix:
+                case C::choFb:  case C::choWid: case C::choLp:  case C::choInp:
+                    return juce::String(juce::roundToInt(v * 127.0f));   // the MnM's raw value
+                default:         return juce::String(juce::roundToInt(v * 100.0f)) + "%";
+            }
+        }
+
+        float getValueForText(const juce::String& text) const override
+        {
+            return juce::jlimit(0.0f, 1.0f, text.getFloatValue() / 100.0f);
+        }
+
+        // Message thread (the processor's timer).
+        void applyPending()
+        {
+            const float v = pending.exchange(-1.0f);
+            if (v >= 0.0f) midi::setKnob(doc, ctl, v);
+        }
+
+        void syncToHost()   // report a change that didn't come from the host
+        {
+            if (isSelectionKnob() && doc.isEmpty()) return;   // no selection to report
+            const float now = getValue();
+            if (std::abs(now - lastNotified.load()) < 1.0e-4f) return;
+            beginChangeGesture();
+            setValueNotifyingHost(now);   // -> setValue(now): rewrites the same value, updates lastNotified
+            endChangeGesture();
+        }
+
+        void forgetChanges() { lastNotified.store(getValue()); }   // after a state load: nothing to report
+
+    private:
+        static juce::String displayName(const midi::Entry& e)
+        {
+            const juce::String section(e.section);
+            const juce::String name = juce::String(e.name).upToFirstOccurrenceOf(" (", false, false);
+            if (section == "Knob row" || section == "Output" || section == "Transport")
+                return name;
+            return section + " " + name;
+        }
+        bool isSelectionKnob() const { return ctl == midi::Ctl::start || ctl == midi::Ctl::end; }
+
+        AudioDocument& doc;
+        const midi::Ctl ctl;
+        const float defaultValue;
+        std::atomic<float> lastNotified { 0.0f };
+        std::atomic<float> pending { -1.0f };
+    };
+}

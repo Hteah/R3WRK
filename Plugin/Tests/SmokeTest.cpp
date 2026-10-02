@@ -14,6 +14,7 @@
 #include "../Source/MimeophonEngine.h"
 #include "../Source/ShimmerEngine.h"
 #include "../Source/MidiCcDispatcher.h"
+#include "../Source/HostParams.h"
 #include "../Source/Theme.h"
 #include "../Source/DragScanRender.h"
 #include "../Source/LofiStretch.h"
@@ -3170,6 +3171,58 @@ int main(int argc, char** argv)
         // Shared ranges match the knob skews.
         checkNear(r3wrk::ranges::stretch().convertFrom0to1(0.5), 1.0, 1e-9, "MIDI: Stretch centre = 1x");
         checkNear(r3wrk::ranges::filterBase().convertFrom0to1(0.5), 0.35, 1e-9, "MIDI: Base centre = 0.35");
+    }
+
+
+    // --- Host parameters (HostParams.h): Ableton Map / LFO / automation -------------------------
+    {
+        std::cout << "\n-- Host parameters --" << std::endl;
+        using namespace r3wrk;
+        AudioDocument doc;
+        setDocumentContent(doc, makeSineBuffer(2, 44100, 44100.0, 220.0, 0.5f), 44100.0);
+
+        struct Counter : juce::AudioProcessorParameter::Listener
+        {
+            int changes = 0, gestures = 0;
+            void parameterValueChanged(int, float) override { ++changes; }
+            void parameterGestureChanged(int, bool starting) override { if (starting) ++gestures; }
+        };
+
+        std::vector<std::unique_ptr<DocKnobParam>> params;
+        juce::StringArray ids;
+        for (const auto& e : midi::kMidiCcMap)
+            if (e.kind == midi::Kind::knob)
+            {
+                params.push_back(std::make_unique<DocKnobParam>(doc, e));
+                ids.add(e.id);
+            }
+        juce::StringArray uniqueIds(ids); uniqueIds.removeDuplicates(false);
+        check(uniqueIds.size() == ids.size(), "Host params: one per knob, unique IDs (" + juce::String(ids.size()) + ")");
+
+        // Host -> R3WRK: setValue lands in the document and reads back the same.
+        int badRoundTrip = 0;
+        for (auto& p : params)
+        {
+            p->setValue(0.3f); p->applyPending();
+            if (std::abs(p->getValue() - 0.3f) > 2.0e-3f) ++badRoundTrip;
+        }
+        check(badRoundTrip == 0, "Host params: setValue / getValue round-trip through the document (" + juce::String(badRoundTrip) + " off)");
+
+        // The host's own changes are never echoed back as user moves (an LFO would fight itself).
+        Counter c;
+        for (auto& p : params) p->addListener(&c);
+        for (auto& p : params) p->syncToHost();
+        check(c.changes == 0 && c.gestures == 0, "Host params: host-set values aren't reported back");
+
+        // R3WRK's own knob moves (mouse / MIDI / reset) ARE reported, with a gesture (Ableton's Map).
+        doc.playbackSpeed = 2.0;
+        doc.reverbMix = 0.9;
+        for (auto& p : params) p->syncToHost();
+        check(c.changes == 2 && c.gestures == 2, "Host params: R3WRK knob moves are reported with a gesture ("
+              + juce::String(c.changes) + " changes, " + juce::String(c.gestures) + " gestures)");
+        for (auto& p : params) p->syncToHost();
+        check(c.changes == 2, "Host params: ...once, not every tick");
+        for (auto& p : params) p->removeListener(&c);
     }
 
     std::cout << "===========================================" << std::endl;
