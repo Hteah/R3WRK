@@ -49,6 +49,10 @@ public:
     juce::Point<int> pluginEditorSize();
     void setPluginEditorSize(juce::Point<int> size);
 
+    // MIDI channel the fixed CC map listens on (MidiCcMap.h): 0 = Omni, 1..16; default 1.
+    int midiChannel();
+    void setMidiChannel(int channel);
+
 private:
     juce::PropertiesFile& props();
     std::unique_ptr<juce::PropertiesFile> propsFile;

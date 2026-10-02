@@ -52,6 +52,72 @@ R3WRKAudioProcessor::R3WRKAudioProcessor()
     // Seed this instance's Black Box duration from the persisted preference -- see
     // setBlackBoxDurationSecs()'s header comment on why that's not kept live across instances.
     blackBoxDurationSecs = juce::SharedResourcePointer<OutputSettings>()->blackBoxDurationSecs();
+
+    midiChannel.store(juce::SharedResourcePointer<OutputSettings>()->midiChannel());
+    midiDispatcher.fallbackAction = [this](r3wrk::midi::Ctl c) { handleMidiFallback(c); };
+    startTimerHz(60);
+}
+
+void R3WRKAudioProcessor::setMidiChannel(int channel)
+{
+    channel = juce::jlimit(0, 16, channel);
+    midiChannel.store(channel);
+    juce::SharedResourcePointer<OutputSettings>()->setMidiChannel(channel);
+}
+
+void R3WRKAudioProcessor::timerCallback()
+{
+    // Drain the CCs processBlock queued (message thread) -- see midiDispatcher.
+    const auto scope = midiFifo.read(midiFifo.getNumReady());
+    for (int i = 0; i < scope.blockSize1; ++i)
+        midiDispatcher.handle(midiFifoData[(size_t) (scope.startIndex1 + i)].first, midiFifoData[(size_t) (scope.startIndex1 + i)].second);
+    for (int i = 0; i < scope.blockSize2; ++i)
+        midiDispatcher.handle(midiFifoData[(size_t) (scope.startIndex2 + i)].first, midiFifoData[(size_t) (scope.startIndex2 + i)].second);
+}
+
+void R3WRKAudioProcessor::handleMidiFallback(r3wrk::midi::Ctl c)
+{
+    // MIDI toolbar actions with no editor open: the ones that make sense blind. Scrub / Slice /
+    // Clear / Record Desktop / Capture Output need the window (and Clear shouldn't fire unseen).
+    using C = r3wrk::midi::Ctl;
+    switch (c)
+    {
+        case C::playStop:
+            if (document.isRecording.load())     stopRecording();
+            else if (document.isPlaying.load())  stopPlayback();
+            else if (! document.isEmpty())       startPlayback();
+            break;
+        case C::playFromStart:
+            if (document.isRecording.load()) { stopRecording(); break; }
+            if (document.isPlaying.load()) stopPlayback();
+            if (! document.isEmpty()) { document.playhead = 0; startPlayback(); }
+            break;
+        case C::record:   // same as the Record button: stop a take, stop playback, or record
+            if (document.isRecording.load())     stopRecording();
+            else if (document.isPlaying.load())  stopPlayback();
+            else                                 startRecording();
+            break;
+        case C::loopMode:
+        {
+            const bool on = document.loopEnabled.load(), pp = document.loopPingPong.load(), rev = document.loopReverse.load();
+            if      (! on)          { document.loopEnabled = true;  document.loopPingPong = false; document.loopReverse = false; }
+            else if (! pp && ! rev) { document.loopPingPong = true; }
+            else if (pp)            { document.loopPingPong = false; document.loopReverse = true; }
+            else                    { document.loopEnabled = false; document.loopPingPong = false; document.loopReverse = false; }
+            document.notifyChanged();
+            break;
+        }
+        case C::overdub:
+            if (document.overdubbing.load()) stopOverdub();
+            else if (canOverdub())           startOverdub();
+            break;
+        case C::reset:    // same as the drawer's bolt (PluginEditor's fxRow.onReset)
+            if (document.overdubbing.load()) stopOverdub();
+            if (document.isPlaying.load())   stopPlayback();
+            document.resetSoundToDefaults();
+            break;
+        default: break;
+    }
 }
 
 R3WRKAudioProcessor::~R3WRKAudioProcessor() = default;
@@ -505,11 +571,28 @@ void R3WRKAudioProcessor::renderDragScan(juce::AudioBuffer<float>& out, int numC
         document.isPlaying.store(false, std::memory_order_relaxed);   // rest of the block stays silent
 }
 
-void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
+void R3WRKAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
     juce::ScopedNoDenormals noDenormals;
     const int numSamples = buffer.getNumSamples();
     const int numCh = buffer.getNumChannels();
+
+    // MIDI CCs on our channel -> the FIFO the message-thread timer drains (MidiCcMap.h). Nothing
+    // passes through. A full FIFO drops the CC (the next knob move resends it anyway).
+    if (! midiMessages.isEmpty())
+    {
+        const int channel = midiChannel.load(std::memory_order_relaxed);
+        for (const auto meta : midiMessages)
+        {
+            const auto msg = meta.getMessage();
+            if (! msg.isController() || (channel != 0 && msg.getChannel() != channel))
+                continue;
+            const auto scope = midiFifo.write(1);
+            if (scope.blockSize1 > 0)
+                midiFifoData[(size_t) scope.startIndex1] = { (uint8_t) msg.getControllerNumber(), (uint8_t) msg.getControllerValue() };
+        }
+        midiMessages.clear();
+    }
 
     // RTRG's tempo: the host's when it has one (VST/AU), else the popup's BPM (Standalone).
     {

@@ -11,6 +11,7 @@ namespace
     const juce::String kBlackBoxDurationKey = "blackBoxDurationSecs";
     const juce::String kPluginEditorWKey = "pluginEditorWidth";
     const juce::String kPluginEditorHKey = "pluginEditorHeight";
+    const juce::String kMidiChannelKey = "midiChannel";
 
     juce::File defaultFolder()
     {
@@ -124,5 +125,16 @@ void OutputSettings::setPluginEditorSize(juce::Point<int> size)
 {
     props().setValue(kPluginEditorWKey, size.x);
     props().setValue(kPluginEditorHKey, size.y);
+    props().saveIfNeeded();
+}
+
+int OutputSettings::midiChannel()
+{
+    return juce::jlimit(0, 16, props().getIntValue(kMidiChannelKey, 1));
+}
+
+void OutputSettings::setMidiChannel(int channel)
+{
+    props().setValue(kMidiChannelKey, juce::jlimit(0, 16, channel));
     props().saveIfNeeded();
 }

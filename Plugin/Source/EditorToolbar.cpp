@@ -989,10 +989,40 @@ EditorToolbar::EditorToolbar(R3WRKAudioProcessor& proc, AudioDocument& doc)
     theme->addChangeListener(this);
     updateTransportButtonText();
     startTimerHz(15);
+
+    // MIDI CC toolbar actions (MidiCcMap.h) run the real buttons while this toolbar exists, so a
+    // controller press does exactly what a click does (auto-save, tool exclusivity, ...). A
+    // disabled button swallows the press, same as a click on it. Reset falls through to the
+    // processor (it does what the drawer's bolt does).
+    processor.midiDispatcher.uiAction = [this](r3wrk::midi::Ctl c)
+    {
+        using C = r3wrk::midi::Ctl;
+        auto toggleTool = [](juce::TextButton& b)
+        {
+            if (! b.isEnabled()) return;
+            b.setToggleState(! b.getToggleState(), juce::dontSendNotification);
+            if (b.onClick) b.onClick();
+        };
+        switch (c)
+        {
+            case C::playStop:      togglePlay(); return true;
+            case C::playFromStart: playFromStart(); return true;
+            case C::record:        if (recordButton.isEnabled()) toggleTransport(); return true;
+            case C::loopMode:      if (loopButton.onClick) loopButton.onClick(); return true;
+            case C::overdub:       if (overdubButton.isEnabled() && overdubButton.onClick) overdubButton.onClick(); return true;
+            case C::scrubMode:     toggleTool(scrubButton); return true;
+            case C::sliceMode:     toggleTool(sliceButton); return true;
+            case C::recordDesktop: if (standaloneApp && desktopRecButton.isEnabled()) toggleDesktopRecording(); return true;
+            case C::captureOutput: if (standaloneApp && captureOutButton.isEnabled()) toggleOutputCapture(); return true;
+            case C::clear:         if (clearButton.isEnabled() && clearButton.onClick) clearButton.onClick(); return true;
+            default:               return false;
+        }
+    };
 }
 
 EditorToolbar::~EditorToolbar()
 {
+    processor.midiDispatcher.uiAction = nullptr;   // MIDI toolbar actions fall back to the processor
     for (auto* b : { &playFromStartButton, &playButton,
                      static_cast<juce::TextButton*>(&loopButton), &scrubButton, &sliceButton,
                      &recordButton, &toolsButton, &clearButton,
@@ -1396,6 +1426,7 @@ void EditorToolbar::showToolsMenu()
         m.addItem(tmiAutoRecordThreshold, juce::String::fromUTF8("Auto-Record Threshold\xE2\x80\xA6"));
         if (processor.isBlackBoxAvailable())
             m.addItem(tmiBlackBoxDuration, juce::String::fromUTF8("Black Box Length\xE2\x80\xA6"));
+        m.addSubMenu("MIDI Channel", midiChannelMenu());
         m.addSeparator();
     }
     m.addItem(keyed("Undo", tmiUndo, canUndo, cmd + "Z"));
@@ -1504,6 +1535,9 @@ void EditorToolbar::buildMenuBarMenu(juce::PopupMenu& m, ToolsMenuGroup group)
             // like every other menu-bar item.
             m.addItem(tmiAudioSettings, juce::String::fromUTF8("Audio Settings\xE2\x80\xA6"));
             m.addItem(tmiAutoRecordThreshold, juce::String::fromUTF8("Auto-Record Threshold\xE2\x80\xA6"));
+            if (processor.isBlackBoxAvailable())
+                m.addItem(tmiBlackBoxDuration, juce::String::fromUTF8("Black Box Length\xE2\x80\xA6"));
+            m.addSubMenu("MIDI Channel", midiChannelMenu());
             m.addItem(tmiOutputFolder,  juce::String::fromUTF8("Output Folder\xE2\x80\xA6"));
             m.addItem(tmiTheme,         juce::String::fromUTF8("Theme\xE2\x80\xA6"));
             m.addItem(tmiEditLayout,    "Edit Layout", true, layoutTweaks->isEditing());
@@ -1513,9 +1547,27 @@ void EditorToolbar::buildMenuBarMenu(juce::PopupMenu& m, ToolsMenuGroup group)
 }
 
 //==============================================================================
+juce::PopupMenu EditorToolbar::midiChannelMenu()
+{
+    // The fixed MIDI CC map's channel (MidiCcMap.h); ids kMidiChannelItemBase + 0 (Omni) .. + 16.
+    juce::PopupMenu sub;
+    const int current = processor.getMidiChannel();
+    sub.addItem(kMidiChannelItemBase, "Omni (any channel)", true, current == 0);
+    sub.addSeparator();
+    for (int ch = 1; ch <= 16; ++ch)
+        sub.addItem(kMidiChannelItemBase + ch, "Channel " + juce::String(ch), true, current == ch);
+    return sub;
+}
+
 void EditorToolbar::performToolsItem(int r)
 {
     using CF = AudioDocument::ChannelFocus;
+
+    if (r >= kMidiChannelItemBase && r <= kMidiChannelItemBase + 16)
+    {
+        processor.setMidiChannel(r - kMidiChannelItemBase);
+        return;
+    }
 
     switch (r)
     {

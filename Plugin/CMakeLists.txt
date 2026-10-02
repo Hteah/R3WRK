@@ -22,7 +22,7 @@ juce_add_plugin(R3WRK
     COMPANY_NAME "Heath Audio"
     BUNDLE_ID "com.heathaudio.r3wrk"
     IS_SYNTH FALSE
-    NEEDS_MIDI_INPUT FALSE
+    NEEDS_MIDI_INPUT TRUE    # the fixed MIDI CC map (Source/MidiCcMap.h)
     NEEDS_MIDI_OUTPUT FALSE
     IS_MIDI_EFFECT FALSE
     EDITOR_WANTS_KEYBOARD_FOCUS TRUE

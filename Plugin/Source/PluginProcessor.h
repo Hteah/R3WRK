@@ -14,9 +14,11 @@
 #include "ShimmerEngine.h"
 #include "RetrigEngine.h"
 #include "MnmChorusEngine.h"
+#include "MidiCcDispatcher.h"
 
 
-class R3WRKAudioProcessor : public juce::AudioProcessor
+class R3WRKAudioProcessor : public juce::AudioProcessor,
+                            private juce::Timer   // drains the MIDI CC FIFO (see midiDispatcher)
 {
 public:
     R3WRKAudioProcessor();
@@ -31,7 +33,7 @@ public:
     bool hasEditor() const override { return true; }
 
     const juce::String getName() const override { return JucePlugin_Name; }
-    bool acceptsMidi() const override { return false; }
+    bool acceptsMidi() const override { return true; }   // the fixed MIDI CC map (MidiCcMap.h)
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
     double getTailLengthSeconds() const override { return 0.0; }
@@ -47,6 +49,14 @@ public:
 
     //==============================================================================
     AudioDocument document;
+
+    // MIDI CCs (MidiCcMap.h): processBlock queues CCs on the selected channel into midiFifo
+    // (lock-free, no allocation); a 60 Hz message-thread timer drains it into midiDispatcher, so
+    // CC control works with the plugin window closed. The toolbar sets
+    // midiDispatcher.uiAction while it exists. Channel: 0 = Omni, 1..16 (OutputSettings).
+    r3wrk::midi::MidiCcDispatcher midiDispatcher { document };
+    int getMidiChannel() const { return midiChannel.load(std::memory_order_relaxed); }
+    void setMidiChannel(int channel);   // also saves it as the preference
 
     void startRecording();
     void stopRecording();
@@ -583,6 +593,15 @@ private:
     int scrubStopFadeRemaining = 0;
     void renderScrub(juce::AudioBuffer<float>& out, int numCh, int numSamples,
                      const juce::AudioBuffer<float>& docBuf);
+
+    // MIDI CC queue (see midiDispatcher): audio thread writes, the timer reads.
+    static constexpr int kMidiFifoSize = 512;
+    juce::AbstractFifo midiFifo { kMidiFifoSize };
+    std::array<std::pair<uint8_t, uint8_t>, kMidiFifoSize> midiFifoData {};
+    std::atomic<int> midiChannel { 1 };
+    void timerCallback() override;
+    void handleMidiFallback(r3wrk::midi::Ctl);   // toolbar actions with no editor open
+
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(R3WRKAudioProcessor)
 };

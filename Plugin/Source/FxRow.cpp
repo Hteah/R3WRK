@@ -1,4 +1,5 @@
 #include "FxRow.h"
+#include "ControlRanges.h"
 #include <algorithm>
 
 FxRow::FxRow(AudioDocument& doc, bool standalone)
@@ -35,7 +36,7 @@ FxRow::FxRow(AudioDocument& doc, bool standalone)
         gainKnob.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
         gainKnob.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 68, 20);
         gainKnob.setLookAndFeel(&gainLnF);
-        gainKnob.setRange(AudioDocument::kMinGainDb, AudioDocument::kMaxGainDb, 0.0);
+        gainKnob.setNormalisableRange(r3wrk::ranges::gainDb());   // shared with the MIDI CC map (CC 7)
         gainKnob.setDoubleClickReturnValue(true, 0.0);   // 0 dB = default volume
         gainKnob.textFromValueFunction = [](double db)
         {

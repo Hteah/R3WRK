@@ -13,6 +13,7 @@
 #include "../Source/PlexiphonEngine.h"
 #include "../Source/MimeophonEngine.h"
 #include "../Source/ShimmerEngine.h"
+#include "../Source/MidiCcDispatcher.h"
 #include "../Source/Theme.h"
 #include "../Source/DragScanRender.h"
 #include "../Source/LofiStretch.h"
@@ -177,8 +178,33 @@ namespace
     }
 }
 
+// `R3WRKSmokeTest --print-midi-chart <out.json>`: dumps kMidiCcMap (MidiCcMap.h) for
+// tools/make_midi_chart.py, which lays out the printable MIDI chart.
+namespace
+{
+    int printMidiChart(const juce::File& out)
+    {
+        juce::Array<juce::var> rows;
+        for (const auto& e : r3wrk::midi::kMidiCcMap)
+        {
+            auto* o = new juce::DynamicObject();
+            o->setProperty("cc", e.cc);
+            o->setProperty("section", juce::String(e.section));
+            o->setProperty("name", juce::String(e.name));
+            o->setProperty("kind", juce::String(e.kind == r3wrk::midi::Kind::knob ? "knob"
+                                              : e.kind == r3wrk::midi::Kind::toggle ? "toggle"
+                                              : e.kind == r3wrk::midi::Kind::cycle ? "cycle" : "trigger"));
+            o->setProperty("detail", juce::String(e.detail));
+            rows.add(juce::var(o));
+        }
+        return out.replaceWithText(juce::JSON::toString(juce::var(rows))) ? 0 : 1;
+    }
+}
+
 int main(int argc, char** argv)
 {
+    if (argc >= 3 && juce::String(argv[1]) == "--print-midi-chart")
+        return printMidiChart(juce::File::getCurrentWorkingDirectory().getChildFile(argv[2]));
     if (argc >= 3 && juce::String(argv[1]) == "--render-shm")
         return renderShimmerGrid(juce::File::getCurrentWorkingDirectory().getChildFile(argv[2]),
                                  argc >= 4 ? juce::File::getCurrentWorkingDirectory().getChildFile(argv[3]) : juce::File());
@@ -3064,6 +3090,86 @@ int main(int argc, char** argv)
             std::cout << "  CPU: 10 s @96 kHz in " << ms << " ms (" << (ms / 100.0) << "% of one core)" << std::endl;
             check(ms < 2500.0, "SHM runs well under realtime at 96 kHz (< 25% of a core)");
         }
+    }
+
+
+    // --- MIDI CC map + dispatcher (MidiCcMap.h / MidiCcDispatcher.h) --------------------------
+    {
+        std::cout << "\n-- MIDI CC map --" << std::endl;
+        using namespace r3wrk::midi;
+        bool seen[128] = {}; bool dup = false, reserved = false, outOfRange = false;
+        for (const auto& e : kMidiCcMap)
+        {
+            if (e.cc < 0 || e.cc > 127) { outOfRange = true; continue; }
+            if (seen[e.cc]) dup = true;
+            seen[e.cc] = true;
+            if (isReservedCc(e.cc)) reserved = true;
+        }
+        check(! outOfRange && ! dup, "MIDI: every CC is 0..127 and used once");
+        check(! reserved, "MIDI: no reserved CC (bank, mod wheel, data entry, pedals, NRPN, channel mode)");
+        check(kNumEntries == (int) Ctl::reset + 1, "MIDI: every control in Ctl has exactly one CC (" + juce::String(kNumEntries) + ")");
+
+        AudioDocument doc;
+        setDocumentContent(doc, makeSineBuffer(2, 44100, 44100.0, 220.0, 0.5f), 44100.0);
+        MidiCcDispatcher d(doc);
+        juce::Array<int> uiCalls, fallbackCalls;
+        d.fallbackAction = [&](Ctl c) { fallbackCalls.add((int) c); };
+
+        // Knobs: full travel, skewed ranges centred like the UI.
+        d.handle(15, 0);   const double sMin = doc.playbackSpeed.load();
+        d.handle(15, 127); const double sMax = doc.playbackSpeed.load();
+        d.handle(15, 64);  const double sMid = doc.playbackSpeed.load();
+        checkNear(sMin, AudioDocument::kMinSpeed, 1e-9, "MIDI: Speed CC 0 = minimum");
+        checkNear(sMax, AudioDocument::kMaxSpeed, 1e-9, "MIDI: Speed CC 127 = maximum");
+        checkNear(sMid, 1.0, 1e-9, "MIDI: Speed CC 64 = exactly 1x (skewed like the knob)");
+        d.handle(14, 64);  checkNear(doc.playbackPitch.load(), 0.0, 1e-9, "MIDI: Pitch CC 64 = exactly 0 st");
+        d.handle(7, 127);  checkNear(doc.playbackGainDb.load(), AudioDocument::kMaxGainDb, 1e-9, "MIDI: CC 7 = Gain");
+        d.handle(76, 127); checkNear(doc.reverbMix.load(), 1.0, 1e-9, "MIDI: RVB Mix CC 76 = 100%");
+        d.handle(43, 64);  checkNear(doc.chorusMix.load(), 64.0 / 127.0, 1e-9, "MIDI: CHO values are the MnM's raw 0..127");
+
+        // Start / End move the selection.
+        doc.setSelection(0, 0);
+        d.handle(23, 64);   // End to the middle: selection 0 .. n/2
+        d.handle(22, 127);  // Start all the way: slides the whole selection to the end
+        const auto n = doc.getNumSamples();
+        check(doc.getSelectionEnd() == n && doc.getSelectionStart() == n - n / 2,
+              "MIDI: End sets the end, Start slides the whole selection (like the knobs)");
+
+        // Buttons: one press = one flip; the release and a repeated 127 do nothing.
+        const bool f0 = doc.filterOn.load();
+        d.handle(109, 127); const bool f1 = doc.filterOn.load();
+        d.handle(109, 127); const bool f2 = doc.filterOn.load();   // no release in between
+        d.handle(109, 0);   const bool f3 = doc.filterOn.load();   // release
+        d.handle(109, 127); const bool f4 = doc.filterOn.load();
+        check(f1 != f0 && f2 == f1 && f3 == f1 && f4 == f0, "MIDI: buttons act once per press, ignore the release");
+
+        // Slot 1: switching to CHO releases the RTRG latch, like the panel's tab.
+        doc.fxSlotChorus = false; doc.rtrgLatched = true;
+        d.handle(111, 127); d.handle(111, 0);
+        check(doc.fxSlotChorus.load() && ! doc.rtrgLatched.load(), "MIDI: RTRG > CHO switch releases the latch");
+        d.handle(112, 127); d.handle(112, 0);
+        check(doc.chorusEnabled.load(), "MIDI: Slot 1 on toggles CHO when CHO is shown");
+        // Slot 2 / 3 switches keep exactly one model selected.
+        d.handle(113, 127); d.handle(113, 0);
+        d.handle(115, 127); d.handle(115, 0);
+        check(doc.plexEnabled.load() != doc.mimeoEnabled.load() && doc.shimmerEnabled.load() != doc.reverbEnabled.load(),
+              "MIDI: slot switches keep one model selected");
+
+        // Toolbar actions: the editor's hook first, else the fallback.
+        d.handle(102, 127); d.handle(102, 0);
+        check(fallbackCalls.contains((int) Ctl::playStop), "MIDI: Play goes to the fallback with no editor");
+        d.uiAction = [&](Ctl c) { uiCalls.add((int) c); return true; };
+        fallbackCalls.clear();
+        d.handle(104, 127); d.handle(104, 0);
+        check(uiCalls.contains((int) Ctl::record) && fallbackCalls.isEmpty(), "MIDI: Record goes to the editor when it's open");
+
+        // Unmapped CCs are ignored.
+        d.handle(1, 127); d.handle(64, 127); d.handle(121, 127);
+        check(true, "MIDI: unmapped / reserved CCs are ignored");
+
+        // Shared ranges match the knob skews.
+        checkNear(r3wrk::ranges::stretch().convertFrom0to1(0.5), 1.0, 1e-9, "MIDI: Stretch centre = 1x");
+        checkNear(r3wrk::ranges::filterBase().convertFrom0to1(0.5), 0.35, 1e-9, "MIDI: Base centre = 0.35");
     }
 
     std::cout << "===========================================" << std::endl;

@@ -1,4 +1,5 @@
 #include "KnobRow.h"
+#include "ControlRanges.h"
 #include "BiquadFilter.h"   // r3wrk::mnm::{hpCutoffHz,lpCutoffHz} for the Base/Width knob readouts
 #include "DirtPanel.h"
 #include <cmath>
@@ -25,7 +26,7 @@ KnobRow::KnobRow(AudioDocument& doc)
     //== Pitch =================================================================
     {
         auto& k = addKnob("Pitch");
-        k.slider.setRange(AudioDocument::kMinPitch, AudioDocument::kMaxPitch, 0.0);
+        k.slider.setNormalisableRange(r3wrk::ranges::pitch());   // shared with the MIDI CC map
         k.slider.setDoubleClickReturnValue(true, 0.0);
         k.slider.textFromValueFunction = [](double v)
         {
@@ -40,8 +41,7 @@ KnobRow::KnobRow(AudioDocument& doc)
     //== Speed (tape) =========================================================
     {
         auto& k = addKnob("Speed");
-        k.slider.setRange(AudioDocument::kMinSpeed, AudioDocument::kMaxSpeed, 0.0);
-        k.slider.setSkewFactorFromMidPoint(1.0);
+        k.slider.setNormalisableRange(r3wrk::ranges::speed());   // skewed around 1x; shared with MIDI
         k.slider.setDoubleClickReturnValue(true, 1.0);
         k.slider.textFromValueFunction = [](double v) { return juce::String(v, 2) + juce::String::fromUTF8(" \xc3\x97"); }; // "×"
         k.slider.setValue(document.playbackSpeed.load(), juce::dontSendNotification);
@@ -53,8 +53,7 @@ KnobRow::KnobRow(AudioDocument& doc)
     //== Stretch (pure time-stretch, pitch kept) ==============================
     {
         auto& k = addKnob("Stretch");
-        k.slider.setRange(AudioDocument::kMinStretch, AudioDocument::kMaxStretch, 0.0);
-        k.slider.setSkewFactorFromMidPoint(1.0);   // fine control near 1x, room to crank to 50x
+        k.slider.setNormalisableRange(r3wrk::ranges::stretch());   // fine control near 1x, room to crank to 50x
         k.slider.setDoubleClickReturnValue(true, 1.0);
         k.slider.textFromValueFunction = [](double v)
         {
@@ -85,8 +84,7 @@ KnobRow::KnobRow(AudioDocument& doc)
     //== Base (Monomachine multimode filter: high-pass corner) =============
     {
         auto& k = addKnob("Base");
-        k.slider.setRange(0.0, 1.0, 0.0);
-        k.slider.setSkewFactorFromMidPoint(0.35);   // ~log Hz feel: fine control down low
+        k.slider.setNormalisableRange(r3wrk::ranges::filterBase());   // ~log Hz feel: fine control down low
         k.slider.setDoubleClickReturnValue(true, 0.0);   // 0 = no high-pass
         k.slider.textFromValueFunction = [this](double v) {
             return filterHzText(r3wrk::modelHpCutoffHz(

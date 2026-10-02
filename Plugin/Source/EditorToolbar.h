@@ -100,6 +100,8 @@ public:
         tmiUndo, tmiRedo,
         tmiEditLayout, tmiResetLayout
     };
+    static constexpr int kMidiChannelItemBase = 5000;   // + 0 (Omni) .. + 16 -- see midiChannelMenu()
+    juce::PopupMenu midiChannelMenu();
 
     // `appMenu` is the macOS application ("R3WRK") menu -- Standalone only, wired up by
     // StandaloneMenuBar as setMacMainMenu()'s extraAppleMenuItems. Holds the config actions

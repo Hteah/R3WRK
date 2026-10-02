@@ -281,6 +281,20 @@ var, and remove the line before committing. The same trick with `getComponentAt(
 rather than `pkill` -- a JUCE CoreAudio device-combiner crash was seen once when a Bluetooth device
 changed during a kill/relaunch.
 
+### MIDI CC map
+
+Fixed CCs for every knob and button, "like any synth" -- no MIDI Learn, no host parameters.
+`Source/MidiCcMap.h` (`kMidiCcMap`) is the single source of truth: the dispatcher, the smoke test
+and the printed chart all read it. `processBlock` queues CCs on the selected channel
+(`OutputSettings::midiChannel`, Tools > MIDI Channel; 0 = Omni) into a lock-free FIFO; a 60 Hz
+message-thread timer on the processor drains it into `MidiCcDispatcher` (works with the editor
+closed). Knobs write `AudioDocument` atomics through `ControlRanges.h` (shared with the UI knobs'
+skews; CC 64 = exact centre); toolbar actions go to `EditorToolbar`'s real buttons via
+`midiDispatcher.uiAction`, else the processor's `handleMidiFallback`. **Adding a control: add it
+to `Ctl` + `kMidiCcMap` (avoid reserved CCs -- the smoke test checks), handle it in the
+dispatcher, then regenerate the chart:** `R3WRKSmokeTest --print-midi-chart chart.json &&
+python3 tools/make_midi_chart.py chart.json "docs/R3WRK MIDI Chart.pdf"`.
+
 ### State persistence
 
 `PluginProcessor::getStateInformation()`/`setStateInformation()` use an incrementing 4-byte magic

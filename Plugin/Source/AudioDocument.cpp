@@ -410,6 +410,34 @@ void AudioDocument::setSelection(int64_t start, int64_t end)
     notifyChanged();
 }
 
+void AudioDocument::setSelectionStartFraction(double frac)
+{
+    const int64_t n = juce::jmax((int64_t) 1, getNumSamples());
+    const int64_t length = getSelectionEnd() - getSelectionStart();
+    int64_t s = (int64_t) (juce::jlimit(0.0, 1.0, frac) * (double) n);
+    int64_t e;
+    if (length > 0)
+    {
+        s = juce::jlimit((int64_t) 0, juce::jmax((int64_t) 0, n - length), s);
+        e = s + length;
+    }
+    else
+    {
+        e = getSelectionEnd();
+        if (e <= s) e = juce::jmin(n, s + 1);
+    }
+    setSelection(s, e);
+}
+
+void AudioDocument::setSelectionEndFraction(double frac)
+{
+    const int64_t n = juce::jmax((int64_t) 1, getNumSamples());
+    const int64_t e = (int64_t) (juce::jlimit(0.0, 1.0, frac) * (double) n);
+    int64_t s = getSelectionStart();
+    if (s >= e) s = juce::jmax((int64_t) 0, e - 1);
+    setSelection(s, e);
+}
+
 juce::Range<int64_t> AudioDocument::getSelection() const
 {
     const uint64_t p = selPacked.load(std::memory_order_relaxed);

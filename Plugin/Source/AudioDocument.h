@@ -156,6 +156,12 @@ public:
     // paired with a stale end mid-update -- e.g. while dragging the start of a looping
     // selection, a torn read could momentarily see a tiny/garbage region and buzz).
     void setSelection(int64_t start, int64_t end);
+    // The Start / End knobs' behaviour for the MIDI CC dispatcher (a copy of KnobRow's Start/End
+    // `apply` lambdas, which are left untouched): `frac` is 0..1 of the clip. Start slides the
+    // whole selection (keeping its length) until it can't slide any further; End moves just the
+    // end (only End changes the length).
+    void setSelectionStartFraction(double frac);
+    void setSelectionEndFraction(double frac);
     juce::Range<int64_t> getSelection() const;
     int64_t getSelectionStart() const { return getSelection().getStart(); }
     int64_t getSelectionEnd() const { return getSelection().getEnd(); }
