@@ -107,7 +107,14 @@ last) → NaN safety net → capture-output**. Notes on the newer pieces:
   small `SlotSwitchTab` above each pill); only the shown one runs. Resets only on its enable edge;
   has an idle tail after Stop (FB near 127 rings almost forever, like the hardware).
 - **Gain** is the last stage (effect tails included, also on the idle tail path); its knob lives at
-  the end of the FX drawer (Standalone only).
+  the end of the FX drawer, in every build (VST/AU too since 2026-09-30).
+- **Live FX on the input**: with the waveform EMPTY and idle, the input runs through the chain
+  (`applyLiveFxChain`: Dirt -> filter -> CHO/RTRG -> DLY/PLX -> RVB/SHM, then Gain). **Recording**
+  goes through the same chain (pre-Gain, so Gain isn't baked in); on stop, `stopRecording()`
+  switches the recorded-in effects off (knobs kept; Dirt reset to clean) so playback doesn't apply
+  them twice, and their tails ring out (`justLeftLiveFx` seeds them from what was running).
+- **Effect tails** are seeded (ring out) on Stop, on leaving live FX / a recording, and on releasing a
+  scrub (`justStoppedScrubbing` -- releasing used to cut delay/reverb dead).
 - **Safety net** (`AudioSafety.h::zeroNonFinite`): before Dirt and before the output. Dirt, the
   filter and the FX effects all have feedback state -- one NaN used to silence a channel until
   restart. Keep both calls when touching the chain.
@@ -265,9 +272,16 @@ between neighbours, [DONE]/[RESET]) covers both rows while editing. Offsets sit 
 automatic layout, so drawer offsets break the exact 12px packing.
 
 **Toolbar order** (`EditorToolbar::resized()`): Play-from-start, Play, Loop, Record, Auto-Record ⋮
-Overdub, Overdub menu dot, Monitor ⋮ Record Desktop, Capture Output (Standalone) / Black Box (plugin)
-⋮ Scrub, Slice ⋮ Tools, Clear. Divider dots are placed by `paint()`'s `dotsBetween()` pairs -- update
-them with the order.
+Overdub, Overdub menu dot, Monitor ⋮ Record Desktop, Capture Output (Standalone only), Black Box
+(every build) ⋮ Scrub, Slice ⋮ Tools, Clear. Divider dots are placed by `paint()`'s `dotsBetween()`
+pairs -- update them with the order. On narrow windows the gaps scale down (the time readout keeps
+a 64 px minimum). While recording, Record / Overdub / Record Desktop / Capture Output all show the
+pulsing `iconRecDot` (the toolbar timer sets each button's "pulse" property).
+
+**Plugin window**: the VST/AU gets JUCE's corner resize grip (Ableton only resizes plugins through
+it), drawn invisible (`R3WRKLookAndFeel::drawCornerResizer` is empty -- the user rejected the grip
+lines), and reopens at the size it was last closed at (`OutputSettings::pluginEditorSize`). The
+DAW's own title bar can't be removed from a plugin.
 
 **Title**: `TitleMark.h`, the vector "R3WRK" wordmark, centred on the window in the header row
 (13px cap, `Palette::text`, ignores clicks). `PluginEditor::resized()` stops `HeaderBar` 16px short of it.
@@ -314,7 +328,11 @@ moves, ended 250 ms after it stops (an instant begin/end per change was invisibl
 in `pending` (the selection isn't audio-thread safe) and the timer applies them. For MIDI and host
 parameters Start / End move only their own edge and Position (CC 28) slides the whole selection;
 the on-screen Start knob still SLIDES the selection by hand (End follows -- the user's preferred
-feel; a 2026-10-02 edge-only change and a POS knob were both tried and rejected). Start/End/Position are one selection, so
+feel; a 2026-10-02 edge-only change and a POS knob were both tried and rejected). **Echo gotcha:**
+`syncToHost`'s `setValueNotifyingHost` calls our own `setValue`; it must NOT re-apply that value
+(for Start/End it was parked and re-applied 16 ms stale as an edge move -- a hand-slid loop widened
+/ shrank). `setValue` ignores the call made from inside our own report; SmokeTest covers it. Full
+story: `WAVE_SCANNING_PLAN.md`. Start/End/Position are one selection, so
 `keepOnlyTheMovedSelectionChange` reports only the one actually moved (an LFO on Position must
 not make Live think Start/End were touched). Tested 2026-10-02: Live's LFO **Map does not catch a
 knob turned inside any plugin's own window** (Valhalla neither) -- map from Live's device panel
