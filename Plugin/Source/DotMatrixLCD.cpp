@@ -277,8 +277,14 @@ namespace lcd
         const auto ink = on ? pal.popupBg : pal.popupInk;   // inverted when the ink fill is behind it
 
         auto area = button.getLocalBounds().toFloat().reduced(2.0f);
-        const float dotSize = juce::jlimit(1.2f, 2.6f, area.getHeight() / 9.0f);
-        drawText(g, button.getButtonText(), area, dotSize, ink, juce::Justification::centred);
+        float dotSize = juce::jlimit(1.2f, 2.6f, area.getHeight() / 9.0f);
+        // Fit the WIDTH too: sized from the height alone, a word in a tall narrow box (RETRIG's
+        // SYNC / FREE) ran past both edges and got clipped. textWidth() is linear in dotSize.
+        const auto text = button.getButtonText();
+        const float w1 = textWidth(text, 1.0f);
+        if (w1 > 0.0f)
+            dotSize = juce::jmax(0.8f, juce::jmin(dotSize, (area.getWidth() - 4.0f) / w1));
+        drawText(g, text, area, dotSize, ink, juce::Justification::centred);
     }
 
     namespace
